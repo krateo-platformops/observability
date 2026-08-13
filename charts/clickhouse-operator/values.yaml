@@ -1,0 +1,13 @@
+# clickhouse-operator wrapper — values forwarded to the upstream clickhouse-operator-helm
+# subchart, which is aliased to `operator` (a key named `clickhouse-operator` would collide
+# with this chart's Kind in crdgen).
+#
+# Disable the admission webhook + cert-manager Certificates: the umbrella renders no
+# cert-manager CRs for the operator, and the operator still reconciles ClickHouseCluster /
+# KeeperCluster without the webhook. CRDs stay enabled (templated in the upstream chart, so
+# core-provider applies them and teardown is clean).
+operator:
+  webhook:
+    enable: false
+  certManager:
+    enable: false

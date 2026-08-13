@@ -4,22 +4,30 @@
 # krateo-platformops/otel-collector and krateo-platformops/sse-proxy, versioned at the
 # IMAGE tags the charts pin. Read this repo's docs at the tag matching the deployed
 # chart version (cluster-observable from CompositionDefinition.spec.chart.version).
-# Current chart pins: krateo-observability 0.1.11, otel-collector-deployment 0.3.3,
+# Current chart pins: clickhouse-operator 0.1.0, mongodb-operator 0.1.0,
+# krateo-observability 0.1.11, otel-collector-deployment 0.3.3,
 # otel-collector-daemonset 0.1.5, krateo-sse-proxy 0.1.6.
 docs/index.md: the map — what this chart repo is + links to everything below
-docs/overview.md: what the four charts deploy and how they become Krateo compositions
+docs/overview.md: what the six charts deploy (2 operators + wrapper + 2 collectors + sse-proxy) and how they become Krateo compositions
 docs/usage.md: installer path, standalone CompositionDefinition, direct helm install, local validation
-docs/configuration.md: the whole per-chart values surface — ClickStack passthrough, /events handler, retention TTLs, pipelines, gotchas
-docs/api.md: generated composition types, HTTP surfaces (/events, SSE, HyperDX API, OTLP), upstream CRs not owned here
+docs/configuration.md: the whole per-chart values surface — operator: passthrough, ClickStack passthrough, /events handler, retention TTLs, pipelines, gotchas
+docs/api.md: generated composition types, operator CRDs the wrappers install, HTTP surfaces (/events, SSE, HyperDX API, OTLP), upstream CRs not owned here
 docs/examples.md: index of the runnable examples
-docs/release.md: how a release ships — one plain-semver tag publishes all four charts at their pinned versions
+docs/release.md: how a release ships — one plain-semver tag publishes all six charts at their pinned versions
 docs/log.md: curated history — incidents, renames, load-bearing version bumps
 examples/observability-composition/README.md: deploy the ClickStack wrapper as a Krateo composition
 examples/observability-composition/composition.yaml: the KrateoObservability CR — kubectl apply -f
+examples/composition-registration/README.md: register the operator wrappers with core-provider + a ClickhouseOperator CR
+examples/composition-registration/manifest.yaml: the CompositionDefinitions + ClickhouseOperator CR — kubectl apply -f
+examples/standalone-operators/README.md: direct helm install of both operators with override values
+examples/standalone-operators/clickhouse-values.yaml: ClickHouse operator overrides — helm install -f
+examples/standalone-operators/mongodb-values.yaml: MongoDB operator overrides — helm install -f
 # Reference corpus (code-adjacent; the LIVE artifacts are the charts under charts/):
 ops/README.md: index of the deployment-adjacent reference config folded in from the former code repo
 compositiondefinition.yaml: registers the wrapper standalone (outside the installer)
 # Charts (ground truth for every doc claim; read values.yaml comment blocks):
+charts/clickhouse-operator/values.yaml: operator wrapper — webhook + cert-manager off; operator: passthrough over clickhouse-operator-helm 0.0.5
+charts/mongodb-operator/values.yaml: operator wrapper — empty passthrough over community-operator 0.13.0 (operator: {})
 charts/krateo-observability/values.yaml: the ClickStack wrapper surface + the /events handler + retention TTLs
 charts/otel-collector-deployment/values.yaml: cluster-level collector (events + cluster metrics, compositionresolver)
 charts/otel-collector-daemonset/values.yaml: node-level collector (logs, host/kubelet metrics, OTLP ingest)

@@ -14,6 +14,61 @@ the charts; where a stale comment disagrees with the rendered chart, the chart w
 chart ships a `values.schema.json` typing its full surface (that schema is also what
 `core-provider` turns into the composition CRD — [api](./api.md)).
 
+## The operator wrappers — the `operator:` passthrough
+
+Both `charts/clickhouse-operator` and `charts/mongodb-operator` share one contract, enforced
+by `values.schema.json` (`additionalProperties: false` at the root): exactly **two**
+top-level keys.
+
+| Key | Purpose |
+|---|---|
+| `global` | Helm global values propagated to the upstream subchart. |
+| `operator` | The whole upstream chart's values, passed through verbatim (the Helm **alias** of the upstream dependency — see [overview](./overview.md)). |
+
+The schema types only the keys the wrappers set; everything else the upstream chart documents
+passes through unchanged (`additionalProperties: true` under `operator`).
+
+### `charts/clickhouse-operator`
+
+Wrapper defaults (`values.yaml`) — webhook and cert-manager off:
+
+```yaml
+operator:
+  webhook:
+    enable: false
+  certManager:
+    enable: false
+```
+
+Everything else is the upstream `clickhouse-operator-helm 0.0.5` default. The upstream keys
+that matter (all under `operator.`):
+
+| Key | Upstream default | Effect |
+|---|---|---|
+| `controller.watchNamespaces` | `[]` (all) | Namespaces watched for `ClickHouseCluster`/`KeeperCluster`. |
+| `crd.enable` | `true` | Ship the two CRDs with the release (templated). |
+| `crd.keep` | `true` | `helm.sh/resource-policy: keep` on the CRDs — uninstall leaves them. |
+| `manager.image.repository` / `tag` | `ghcr.io/clickhouse/clickhouse-operator` / appVersion (`0.0.5`) | The operator image. |
+| `manager.resources` | 10m/64Mi req, 500m/128Mi lim | Operator pod resources. |
+| `metrics.enable` / `port` / `secure` | `true` / `8080` / `true` | The controller `/metrics` Service. |
+| `rbac.namespaced` | `false` | `false` = ClusterRole (all namespaces); `true` = Role (release namespace). |
+
+### `charts/mongodb-operator`
+
+Wrapper defaults: **none** — `values.yaml` is an empty passthrough (`operator: {}`). Upstream
+`community-operator 0.13.0` defaults are correct for the platform: the operator and the
+`community-operator-crds` subchart install, and no sample `MongoDBCommunity` CR is created.
+The upstream keys that matter (all under `operator.`):
+
+| Key | Upstream default | Effect |
+|---|---|---|
+| `operator.watchNamespace` | unset (own namespace) | `"*"` = watch all namespaces (also widens RBAC). |
+| `operator.operatorImageName` / `operator.version` | `mongodb-kubernetes-operator` / `0.13.0` | The operator image (from `registry.operator`, `quay.io/mongodb`). |
+| `operator.resources` | 500m/200Mi req, 1100m/1Gi lim | Operator pod resources. |
+| `community-operator-crds.enabled` | `true` | Ship the `MongoDBCommunity` CRD with the release. |
+| `createResource` | `false` | `true` would create a sample `MongoDBCommunity` CR — keep `false`. |
+| `agent` / `versionUpgradeHook` / `readinessProbe` | pinned versions | Sidecar images the operator injects into database pods. |
+
 ## `charts/krateo-observability` — the wrapper surface
 
 The heavy upstream values live under `clickstack:` and are passed through verbatim; Helm's
@@ -170,10 +225,12 @@ Wraps the same upstream chart in `daemonset` mode, stock
 
 ## Dependencies (what must exist around the stack)
 
-- **The ClickHouse operator** (the `ClickHouseCluster` CRD) and the **MongoDB community
-  operator** (`MongoDBCommunity`) — the wrapper renders both CRs but ships neither CRD
-  ([api](./api.md)). Under the installer they are the `clickhouse-operator` /
-  `mongodb-operator` compositions the wrapper depends on.
+- **The ClickHouse operator** (the `ClickHouseCluster`/`KeeperCluster` CRDs) and the
+  **MongoDB community operator** (`MongoDBCommunity`) — the wrapper renders these CRs but
+  ships none of their CRDs ([api](./api.md)). Those CRDs and controllers come from the
+  `clickhouse-operator` / `mongodb-operator` wrapper charts **in this repo** (their `operator:`
+  surface is above); under the installer they are the compositions the wrapper declares as
+  dependencies, installed first.
 - **Upstream chart deps** (`Chart.lock`): `clickstack 3.0.2`, `opentelemetry-collector
   0.158.1`.
 - **The `otel-clickhouse-credentials` Secret** (rendered by the wrapper) — both collectors'
