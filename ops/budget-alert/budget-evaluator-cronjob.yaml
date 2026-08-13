@@ -1,0 +1,143 @@
+---
+# Budget Evaluator
+#
+# A CronJob that queries the `budget_status` view every 15 minutes and writes
+# one structured JSON log line to stdout for every budget in `warning` or
+# `breached` state. The OTel DaemonSet collects the line into `otel_logs`
+# exactly like any other pod log — no new pipeline component.
+#
+# Log-line shape (D19a): the line follows the OTel Logs Data Model —
+# `timestamp`, `severity_text`/`severity_number` (warning→WARN/13,
+# breached→ERROR/17), `body`, `trace_id`/`span_id` and semconv-style
+# `attributes` (`event.name`, `service.name`, `krateo.budget.*`) — so a
+# collector json parser can map it 1:1 onto an OTLP LogRecord, and HyperDX
+# can still query it as JSON in Body. The evaluator is a scheduled origin:
+# there is no inbound trace context or baggage to propagate, so each run
+# mints a fresh `trace_id` (shared by every alert line of that run, making a
+# run's alerts correlatable) and a `span_id` per line.
+#
+# HyperDX then alerts on these lines (see bootstrap-budget-alerts.sh):
+#   ResourceAttributes['k8s.pod.labels.app'] = 'krateo-budget-evaluator'
+#     AND JSONExtractString(Body, 'attributes', 'krateo.budget.status') = 'breached'
+#   (or 'warning')
+#
+# This mirrors the heartbeat-canary self-monitoring pattern.
+#
+# Prerequisites:
+#   - budgets + budget_status DDL applied (see ddl/). CLICKHOUSE_DATABASE
+#     below MUST match the database the DDL's `{{database}}` token was
+#     rendered with — i.e. the database hosting the showback tables
+#     (the showback engine default is `showback`).
+#   - `otel-clickhouse-credentials` Secret (same one used by the OTel
+#     collectors) — adjust names below if your deployment differs.
+#
+# Apply: kubectl apply -f budget-evaluator-cronjob.yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: krateo-budget-evaluator
+  namespace: krateo-system
+  labels:
+    app.kubernetes.io/name: krateo-budget-evaluator
+    app.kubernetes.io/part-of: krateo-observability-stack
+    app.kubernetes.io/component: budget-alerts
+spec:
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 120
+      template:
+        metadata:
+          labels:
+            app: krateo-budget-evaluator
+            app.kubernetes.io/name: krateo-budget-evaluator
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: evaluator
+              image: clickhouse/clickhouse-server:24.8-alpine
+              # ClickHouse builds the complete OTel-shaped JSON line per row
+              # (concat + toJSONString: all user-supplied values are
+              # JSON-escaped server-side; no shell parsing of row data).
+              # The scalar subquery is evaluated once, so every line of a
+              # run shares one trace_id; rand64() gives a per-line span_id.
+              # FORMAT TSVRaw = one unescaped line per row (toJSONString
+              # never emits raw control characters, lines stay atomic).
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  clickhouse-client \
+                    --host "${CLICKHOUSE_HOST}" \
+                    --port "${CLICKHOUSE_PORT}" \
+                    --user "${CLICKHOUSE_USER}" \
+                    --password "${CLICKHOUSE_PASSWORD}" <<SQL
+                  WITH (SELECT lower(hex(randomString(16)))) AS run_trace_id
+                  SELECT concat(
+                      '{"timestamp":"', formatDateTime(now(), '%Y-%m-%dT%H:%i:%SZ', 'UTC'), '",',
+                      '"trace_id":"', run_trace_id, '",',
+                      '"span_id":"', lower(hex(rand64())), '",',
+                      '"severity_text":"', if(status = 'breached', 'ERROR', 'WARN'), '",',
+                      '"severity_number":', if(status = 'breached', '17', '13'), ',',
+                      '"body":"budget threshold crossed",',
+                      '"attributes":', toJSONString(map(
+                          'event.name',                'krateo.budget.threshold',
+                          'service.name',              'krateo-budget-evaluator',
+                          'krateo.budget.id',          budget_id,
+                          'krateo.budget.org',         org,
+                          'krateo.budget.tenant',      tenant,
+                          'krateo.budget.service',     service,
+                          'krateo.budget.tag_key',     tag_key,
+                          'krateo.budget.tag_value',   tag_value,
+                          'krateo.budget.period',      period,
+                          'krateo.budget.amount',      toString(amount),
+                          'krateo.budget.currency',    currency,
+                          'krateo.budget.spend',       toString(spend),
+                          'krateo.budget.spend_ratio', toString(round(spend_ratio, 4)),
+                          'krateo.budget.status',      status)),
+                      '}')
+                  FROM ${CLICKHOUSE_DATABASE}.budget_status
+                  WHERE status != 'ok'
+                  FORMAT TSVRaw
+                  SQL
+              env:
+                - name: CLICKHOUSE_HOST
+                  value: clickhouse.clickhouse-system.svc.cluster.local
+                - name: CLICKHOUSE_PORT
+                  value: "9000"
+                # Must match the {{database}} the ddl/ files were rendered
+                # with (= the showback engine database; its default is
+                # `showback`), otherwise the budget_status view is not found.
+                - name: CLICKHOUSE_DATABASE
+                  value: showback
+                - name: CLICKHOUSE_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: otel-clickhouse-credentials
+                      key: username
+                - name: CLICKHOUSE_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: otel-clickhouse-credentials
+                      key: password
+              resources:
+                limits:
+                  cpu: 100m
+                  memory: 128Mi
+                requests:
+                  cpu: 20m
+                  memory: 64Mi
+              securityContext:
+                readOnlyRootFilesystem: true
+                runAsNonRoot: true
+                runAsUser: 65534
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: [ALL]
+          securityContext:
+            runAsNonRoot: true
