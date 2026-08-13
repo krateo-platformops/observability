@@ -1,0 +1,33 @@
+apiVersion: v2
+name: mongodb-operator
+description: >-
+  MongoDB Community Kubernetes operator packaged as a Krateo composition for the ClickStack data layer.
+type: application
+# version = this Krateo wrapper's own release stream. appVersion = the upstream
+# community-operator version actually deployed.
+version: 0.1.0
+appVersion: "0.13.0"
+home: https://krateo.io
+icon: https://raw.githubusercontent.com/krateoplatformops/krateo/main/docs/media/logo.svg
+keywords:
+  - mongodb
+  - database
+  - operator
+  - krateo
+  - clickstack
+annotations:
+  krateo.io/category: database
+  krateo.io/maturity: beta
+  krateo.io/display-name: MongoDB Operator
+  krateoSupportedVersion: ">= 2.5.1"
+sources:
+  - https://github.com/mongodb/mongodb-kubernetes-operator
+  - https://github.com/krateo-platformops/clickstack-operators-chart
+dependencies:
+  # Aliased to `operator`: a values key named `mongodb-operator` would pascalize to this
+  # chart's own Kind (MongodbOperator) and collide in core-provider's crdgen struct-naming.
+  # The alias makes Helm read the subchart's values from `operator:`.
+  - name: community-operator
+    alias: operator
+    version: "0.13.0"
+    repository: https://mongodb.github.io/helm-charts

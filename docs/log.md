@@ -12,6 +12,16 @@ timestamp: 2026-08-07T00:00:00Z
 Curated, newest first. Release notes live in GitHub Releases; the `Chart.yaml` comment
 blocks carry the per-bump rationale.
 
+- **2026-08-13 — operator charts folded in (six charts now).** The retired
+  `clickstack-operators-chart` repo's two composition wrappers — `clickhouse-operator`
+  (wraps `clickhouse-operator-helm 0.0.5`, webhook + cert-manager off) and `mongodb-operator`
+  (wraps `community-operator 0.13.0`, empty passthrough), both `0.1.0` — were consolidated
+  into this repo, which now publishes **six** charts. These are the data-layer operators the
+  ClickStack wrapper's `ClickHouseCluster`/`KeeperCluster`/`MongoDBCommunity` CRs depend on;
+  the wrapper declares `deps: [clickhouse-operator, mongodb-operator]` so they install first.
+  Each aliases its upstream dependency to `operator` (crdgen Kind-collision avoidance) and
+  ships the upstream CRDs as `helm.sh/resource-policy: keep` templates. New examples:
+  `examples/composition-registration`, `examples/standalone-operators`.
 - **2026-08-07 — Documentation Standard adoption.** The bundle converted to the invariant
   OKF file set; `docs/wiring.md` and `docs/crds.md` folded into
   [configuration](./configuration.md) and [api](./api.md); the stale repo-root

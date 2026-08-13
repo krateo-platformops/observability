@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "title": "mongodb-operator values",
+  "description": "Dependency-wrapper for the upstream MongoDB community-operator chart (aliased to `operator`). Values pass through under `operator`.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "global": {
+      "type": "object",
+      "title": "Global values",
+      "description": "Helm global values propagated to the upstream subchart."
+    },
+    "operator": {
+      "type": "object",
+      "additionalProperties": true,
+      "title": "Upstream community-operator passthrough",
+      "description": "Values forwarded to the upstream MongoDB community-operator subchart (operator deployment, RBAC, community-operator-crds, createResource, etc.)."
+    }
+  }
+}

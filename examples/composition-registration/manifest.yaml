@@ -1,0 +1,40 @@
+# Register both operator wrapper charts with core-provider, then instantiate the
+# ClickHouse operator as a composition CR. Apply order is handled by core-provider:
+# each CompositionDefinition generates its composition CRD (Kind = PascalCase of the
+# chart name, apiVersion encodes the chart version); the ClickhouseOperator CR below
+# becomes appliable once its CRD is served (a fresh registration takes ~a minute —
+# re-apply if the first attempt reports the CRD is not yet available).
+apiVersion: core.krateo.io/v1alpha1
+kind: CompositionDefinition
+metadata:
+  name: clickhouse-operator
+  namespace: krateo-system
+spec:
+  chart:
+    url: oci://ghcr.io/krateo-platformops/charts/clickhouse-operator
+    version: "0.1.0"
+---
+apiVersion: core.krateo.io/v1alpha1
+kind: CompositionDefinition
+metadata:
+  name: mongodb-operator
+  namespace: krateo-system
+spec:
+  chart:
+    url: oci://ghcr.io/krateo-platformops/charts/mongodb-operator
+    version: "0.1.0"
+---
+# The composition CR: creating it helm-installs the wrapper chart (operator
+# Deployment + RBAC + the two clickhouse.com CRDs). spec mirrors the chart values —
+# the two-key contract (global/operator); wrapper defaults restated here.
+apiVersion: composition.krateo.io/v0-1-0
+kind: ClickhouseOperator
+metadata:
+  name: clickhouse-operator
+  namespace: krateo-system
+spec:
+  operator:
+    webhook:
+      enable: false
+    certManager:
+      enable: false

@@ -1,7 +1,7 @@
 ---
 type: Architecture
 title: clickstack-chart — overview
-description: What the four charts deploy — the ClickStack wrapper, the two OTel collectors, the SSE proxy — how they version independently, and how they become Krateo compositions.
+description: What the six charts deploy — the ClickHouse and MongoDB operator wrappers, the ClickStack wrapper, the two OTel collectors, the SSE proxy — how they version independently, and how they become Krateo compositions.
 resource: oci://ghcr.io/krateo-platformops/charts/krateo-observability
 tags: [observability, clickstack, architecture]
 timestamp: 2026-08-07T00:00:00Z
@@ -29,19 +29,25 @@ This repo is the packaging as Krateo blueprints: it wraps the upstream ClickStac
 and the upstream OpenTelemetry collector chart, folds in the Krateo-specific glue, and ships
 a `values.schema.json` per chart so `core-provider` can generate typed composition CRDs.
 
-## Repo layout — four deployable charts
+## Repo layout — six deployable charts
 
 | Path | Chart name | OCI artifact | Version (`Chart.yaml`) |
 |------|------------|--------------|------------------------|
+| `charts/clickhouse-operator` | `clickhouse-operator` | `oci://ghcr.io/krateo-platformops/charts/clickhouse-operator` | `0.1.0`, wraps `clickhouse-operator-helm 0.0.5` |
+| `charts/mongodb-operator` | `mongodb-operator` | `oci://ghcr.io/krateo-platformops/charts/mongodb-operator` | `0.1.0`, wraps `community-operator 0.13.0` |
 | `charts/krateo-observability` | `krateo-observability` | `oci://ghcr.io/krateo-platformops/charts/krateo-observability` | `0.1.11`, `appVersion 3.0.2` |
 | `charts/otel-collector-deployment` | `otel-collector-deployment` | `oci://ghcr.io/krateo-platformops/charts/otel-collector-deployment` | `0.3.3`, image `otel-collector:1.0.2` |
 | `charts/otel-collector-daemonset` | `otel-collector-daemonset` | `oci://ghcr.io/krateo-platformops/charts/otel-collector-daemonset` | `0.1.5` |
 | `charts/krateo-sse-proxy` | `krateo-sse-proxy` | `oci://ghcr.io/krateo-platformops/charts/krateo-sse-proxy` | `0.1.6`, image `sse-proxy:1.1.2` |
 
-All four versions are **literally pinned** in each `Chart.yaml` (no `CHART_VERSION`
+All six versions are **literally pinned** in each `Chart.yaml` (no `CHART_VERSION`
 placeholder), so a release tag publishes each chart at its own declared version — the OCI
 artifact name is the chart name (see [release](./release.md)).
 
+- **The two operator wrappers** (`charts/clickhouse-operator`, `charts/mongodb-operator`,
+  both `0.1.0`) are thin dependency wrappers over the unforked upstream operator charts —
+  they install the data-layer CRDs and controllers the ClickStack wrapper's CRs need. They
+  were folded in from the retired `clickstack-operators-chart` repo (see [log](./log.md)).
 - **The ClickStack wrapper** (`charts/krateo-observability`) is the heaviest piece. It
   vendors the upstream `clickstack` `3.0.2` chart as a dependency and passes values through
   under the `clickstack:` key. The `KrateoObservability` composition the installer creates is
@@ -62,6 +68,40 @@ artifact name is the chart name (see [release](./release.md)).
 > **extracted** during the org migration (2026-08-03) and is no longer part of this repo.
 
 ## What each chart deploys
+
+### `charts/clickhouse-operator` (data-layer operator)
+
+A dependency wrapper (wrapper `0.1.0`) over the unforked `clickhouse-operator-helm 0.0.5`
+(`oci://ghcr.io/clickhouse`). At defaults it renders the operator Deployment
+`<release>-operator-controller-manager` (image
+`ghcr.io/clickhouse/clickhouse-operator:v0.0.5`) watching all namespaces, the two CRDs
+`clickhouseclusters.clickhouse.com` and `keeperclusters.clickhouse.com`, operator RBAC + a
+ServiceAccount, and a secure metrics Service on port 8080. The wrapper's own defaults turn
+**off** the upstream admission webhook and the cert-manager integration
+(`operator.webhook.enable: false`, `operator.certManager.enable: false`) — the operator
+reconciles `ClickHouseCluster`/`KeeperCluster` without the webhook, so no
+`Certificate`/`Issuer`/`WebhookConfiguration` objects are rendered. This is the operator the
+ClickStack wrapper's `ClickHouseCluster`/`KeeperCluster` CRs depend on.
+
+### `charts/mongodb-operator` (data-layer operator)
+
+A dependency wrapper (wrapper `0.1.0`) over MongoDB `community-operator 0.13.0` plus its
+bundled `community-operator-crds` subchart. At defaults it renders the operator Deployment
+`mongodb-kubernetes-operator` (image `quay.io/mongodb/mongodb-kubernetes-operator:0.13.0`)
+watching its **own namespace** (`WATCH_NAMESPACE` from the downward API), the single CRD
+`mongodbcommunity.mongodbcommunity.mongodb.com`, and RBAC + ServiceAccounts for both the
+operator and the database pods it manages. The wrapper's values are empty (`operator: {}`);
+upstream defaults are already correct and no sample `MongoDBCommunity` CR is created
+(`createResource: false`). This is the operator the ClickStack wrapper's `MongoDBCommunity`
+CR depends on.
+
+> Both operators alias their upstream dependency to `operator` in `Chart.yaml` — a values key
+> that pascalizes to the chart's own composition Kind (`ClickhouseOperator`/`MongodbOperator`)
+> would collide in crdgen's struct naming, so Helm reads the subchart values from `operator:`.
+> The upstream CRDs ship as **templates** (not the helm-special `crds/` dir), so
+> core-provider's helm engine applies and upgrades them with the release; all carry
+> `helm.sh/resource-policy: keep`, so a release uninstall leaves the CRDs — and any surviving
+> data-layer CRs — in place.
 
 ### `charts/krateo-observability` (the wrapper)
 
@@ -123,15 +163,19 @@ Secret** — the fixed-name Endpoint that snowplow RESTActions use to fetch the 
 
 ## How it becomes compositions
 
-The [installer](https://github.com/krateo-platformops/installer) umbrella pins **all four
+The [installer](https://github.com/krateo-platformops/installer) umbrella pins **all six
 charts** as `tier: observability` components gated on the portal feature, ordered by
-dependencies: the ClickHouse + MongoDB operators install first, then `krateo-observability`,
-then `otel-collector-deployment` → `otel-collector-daemonset`, and `krateo-sse-proxy`
-(exposed on port 8080 for the portal bell). For each, `core-provider` reads the chart's
-`values.schema.json` and generates a typed composition CRD — `KrateoObservability`,
-`OtelCollectorDeployment`, `OtelCollectorDaemonset`, `KrateoSseProxy`. The repo-root
-[`compositiondefinition.yaml`](../compositiondefinition.yaml) registers the wrapper
-standalone (outside the installer). Details: [api](./api.md), [usage](./usage.md).
+dependencies: the `clickhouse-operator` + `mongodb-operator` wrappers install first (their
+CRDs must be served before any data-layer CR exists), then `krateo-observability` (which
+declares `deps: [clickhouse-operator, mongodb-operator]`), then `otel-collector-deployment` →
+`otel-collector-daemonset`, and `krateo-sse-proxy` (exposed on port 8080 for the portal
+bell). On uninstall, the installer's reverse-dependency drain removes `krateo-observability`
+and its data-layer CRs **before** the operators, so the operators stay alive to clear those
+CRs' finalizers. For each, `core-provider` reads the chart's `values.schema.json` and
+generates a typed composition CRD — `ClickhouseOperator`, `MongodbOperator`,
+`KrateoObservability`, `OtelCollectorDeployment`, `OtelCollectorDaemonset`, `KrateoSseProxy`.
+The repo-root [`compositiondefinition.yaml`](../compositiondefinition.yaml) registers the
+wrapper standalone (outside the installer). Details: [api](./api.md), [usage](./usage.md).
 
 ## Cross-references
 

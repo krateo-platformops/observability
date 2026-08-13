@@ -1,0 +1,8 @@
+# Overrides for the mongodb-operator wrapper chart.
+# Everything under `operator:` is passed verbatim to the upstream
+# community-operator subchart (aliased to `operator`).
+operator:
+  operator:
+    # Watch all namespaces (upstream default: only the release namespace).
+    # Also widens the operator RBAC accordingly.
+    watchNamespace: "*"

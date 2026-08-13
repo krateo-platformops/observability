@@ -1,0 +1,33 @@
+apiVersion: v2
+name: clickhouse-operator
+description: >-
+  ClickHouse Kubernetes operator packaged as a Krateo composition for the ClickStack data layer.
+type: application
+# version = this Krateo wrapper's own release stream. appVersion = the upstream
+# clickhouse-operator-helm version actually deployed.
+version: 0.1.0
+appVersion: "0.0.5"
+home: https://krateo.io
+icon: https://raw.githubusercontent.com/krateoplatformops/krateo/main/docs/media/logo.svg
+keywords:
+  - clickhouse
+  - database
+  - operator
+  - krateo
+  - clickstack
+annotations:
+  krateo.io/category: database
+  krateo.io/maturity: beta
+  krateo.io/display-name: ClickHouse Operator
+  krateoSupportedVersion: ">= 2.5.1"
+sources:
+  - https://github.com/ClickHouse/clickhouse-kubernetes-operator
+  - https://github.com/krateo-platformops/clickstack-operators-chart
+dependencies:
+  # Aliased to `operator`: a values key named `clickhouse-operator` would pascalize to this
+  # chart's own Kind (ClickhouseOperator) and collide in core-provider's crdgen struct-naming.
+  # The alias makes Helm read the subchart's values from `operator:`.
+  - name: clickhouse-operator-helm
+    alias: operator
+    version: "0.0.5"
+    repository: oci://ghcr.io/clickhouse
