@@ -1,3 +1,12 @@
+---
+type: Runbook
+title: observability — platform SLIs / SLOs
+description: The service-level indicators the observability stack exposes (availability, latency, error-rate), the objectives tracked against them, and where the ClickHouse/HyperDX queries, dashboards and breach alerts live (ops/slo-alert/).
+resource: oci://ghcr.io/krateo-platformops/charts/krateo-observability
+tags: [slo, sli, observability, alerting, hyperdx, clickhouse]
+timestamp: 2026-08-13T00:00:00Z
+---
+
 # Platform SLIs / SLOs
 
 Reference for the service-level indicators exposed by the observability stack
