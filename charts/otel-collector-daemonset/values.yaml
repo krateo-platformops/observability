@@ -115,6 +115,17 @@ opentelemetry-collector:
         # pipeline below — the gateway has create_schema:true but no traces pipeline, so
         # without this nothing ever creates otel_traces. KOS-1 #112 bug #1.
         create_schema: true
+        # RETENTION — DO NOT REMOVE. Incident 2026-07: with no TTL the otel_* tables grew
+        # unbounded and filled the 10Gi ClickHouse volume in 8 days → every insert failed
+        # with code 243 (NOT_ENOUGH_SPACE) → this collector buffered and OOM-crash-looped →
+        # telemetry dead. ttl: 168h stamps a native 7-day TTL into the CREATE TABLE the
+        # exporter issues, so FRESH installs are bounded from day one. NOTE: create_schema
+        # is CREATE ... IF NOT EXISTS — this ttl only applies at table CREATION; tables that
+        # already exist (e.g. the live bench) were fixed with a live
+        # `ALTER TABLE ... MODIFY TTL` (7 days) and are untouched by this setting.
+        # Disk-size sibling fixes: krateo-observability 0.1.9 (15Gi volume + 3-day
+        # system-log ttl via cluster.spec.settings.extraConfig).
+        ttl: 168h
         timeout: 10s
         retry_on_failure:
           enabled: true
@@ -165,3 +176,18 @@ opentelemetry-collector:
     requests:
       cpu: 100m
       memory: 256Mi
+
+  # Probe tolerances, passed through to the upstream opentelemetry-collector chart's
+  # templates/_pod.tpl (org standard). The Kubernetes defaults (timeoutSeconds: 1,
+  # failureThreshold: 3) kill HEALTHY pods under CPU contention — a slow-but-alive
+  # health reply counts as a failure and the resulting restart storm worsens the
+  # contention. Liveness is lenient so only a truly dead process dies: implicit
+  # periodSeconds default 10 x 6 failures = 60s of continuous failure before restart.
+  livenessProbe:
+    timeoutSeconds: 5
+    failureThreshold: 6
+  # Readiness keeps prompt endpoint removal (failureThreshold: 3, implicit 10s period)
+  # but timeoutSeconds: 5 keeps load alone from flapping the endpoint in and out.
+  readinessProbe:
+    timeoutSeconds: 5
+    failureThreshold: 3

@@ -28,7 +28,7 @@ spec:
         runAsNonRoot: true
       containers:
         - name: sse-proxy
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: {{ include "krateo.image" (dict "img" .Values.image "global" .Values.global "defaultTag" .Chart.AppVersion) | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
@@ -47,18 +47,31 @@ spec:
                   optional: {{ .Values.clickhouse.passwordSecret.optional }}
             - name: LISTEN_ADDR
               value: {{ .Values.listenAddr | quote }}
+          # Lenient liveness tolerance (org standard): the Kubernetes defaults
+          # (timeoutSeconds: 1, failureThreshold: 3) kill HEALTHY pods under CPU
+          # contention — a slow-but-alive /health reply counts as a failure and the
+          # resulting restart storm worsens the contention. Only a truly dead process
+          # should die: 10s period x 6 failures = 60s of continuous failure before
+          # a restart.
           livenessProbe:
             httpGet:
               path: /health
               port: 8080
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          # Readiness stays prompt (5s period, 3 failures) so a genuinely unhealthy
+          # endpoint is removed from the Service quickly, but timeoutSeconds: 5 keeps
+          # load alone from flapping the endpoint in and out.
           readinessProbe:
             httpGet:
               path: /health
               port: 8080
             initialDelaySeconds: 3
             periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           securityContext:

@@ -67,6 +67,21 @@ clickstack:
             requests:
               cpu: "1"
               memory: 2Gi
+        # RETENTION INCIDENT (2026-07): the upstream default 10Gi data volume filled in
+        # 8 DAYS on a live bench — no TTL anywhere (otel_* tables unbounded + the
+        # system.* log tables unbounded at ~3.6GiB) → every insert failed with code 243
+        # (NOT_ENOUGH_SPACE) → the OTel collectors buffered, OOM-crash-looped and
+        # telemetry went fully dead. 15Gi matches the live relief (PVC expanded
+        # 10Gi->15Gi); the paired fixes are the 3-day system-log ttl under
+        # settings.extraConfig below and the 7-day otel_* TTL in the collector charts'
+        # clickhouse exporter (ttl: 168h). Only the overridden key is set here — Helm
+        # deep-merges cluster.spec over the upstream default (same pattern as
+        # containerTemplate.resources above, which inherits upstream's image), so
+        # accessModes etc. still come from upstream clickstack.
+        dataVolumeClaimSpec:
+          resources:
+            requests:
+              storage: 15Gi
         # ClickHouse server config merged into /etc/clickhouse-server/config.d/ by the
         # clickhouse.com operator. The GET /events?composition_id=<uid> handler MUST be
         # registered here, NOT via clickhouse.extraVolumes (see below): a predefined HTTP
@@ -91,6 +106,29 @@ clickstack:
         # serving its default routes, so the operator probes + native query API must be re-declared.
         settings:
           extraConfig:
+            # SYSTEM-LOG RETENTION — DO NOT REMOVE (see the dataVolumeClaimSpec comment
+            # above: with no <ttl> the system.* log tables grow unbounded and were
+            # ~3.6GiB of the 10Gi disk when the bench filled up and inserts died with
+            # code 243). Each key below merges into the server's default <query_log>/…
+            # section via the same operator-native extraConfig->config.d merge that
+            # http_handlers uses (YAML maps render as nested config elements). `ttl` is
+            # the documented per-system-log-table engine TTL and is applied when
+            # ClickHouse (re)creates the table. NOTE for EXISTING installs: on the next
+            # server start ClickHouse detects the changed table definition, renames the
+            # old table (e.g. query_log_0) and creates a fresh one with the TTL — the
+            # renamed leftovers keep their disk until manually DROPped.
+            query_log:
+              ttl: "event_date + INTERVAL 3 DAY DELETE"
+            text_log:
+              ttl: "event_date + INTERVAL 3 DAY DELETE"
+            metric_log:
+              ttl: "event_date + INTERVAL 3 DAY DELETE"
+            part_log:
+              ttl: "event_date + INTERVAL 3 DAY DELETE"
+            asynchronous_metric_log:
+              ttl: "event_date + INTERVAL 3 DAY DELETE"
+            trace_log:
+              ttl: "event_date + INTERVAL 3 DAY DELETE"
             http_handlers:
               rule:
                 # GET /events?composition_id=<uid>
@@ -139,11 +177,12 @@ clickstack:
                   handler:
                     type: dynamic_query_handler
                     query_param_name: query
-    # STILL INERT (same wrong-path bug): upstream ignores these top-level keys. NOT moved to
-    # cluster.spec on purpose — applying them live = ClickHouse version upgrade (25.7->26.3)
-    # + PVC resize (10Gi->50Gi), a deliberate change that must not ride along with the memory
-    # fix. To realize later: image -> cluster.spec.containerTemplate.image; size ->
-    # cluster.spec.dataVolumeClaimSpec.resources.requests.storage.
+    # STILL INERT (same wrong-path bug): upstream ignores these top-level keys. The image
+    # stays inert on purpose — realizing it live = ClickHouse version upgrade (25.7->26.3),
+    # a deliberate change that must not ride along. To realize later: image ->
+    # cluster.spec.containerTemplate.image. Storage is now REAL at 15Gi via
+    # cluster.spec.dataVolumeClaimSpec above (retention incident); the 50Gi below remains
+    # an inert aspiration — raising the real value later is a plain PVC expansion.
     image: "clickhouse/clickhouse-server:26.3-alpine"
     persistence:
       enabled: true

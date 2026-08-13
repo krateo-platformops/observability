@@ -1,0 +1,18 @@
+# A KrateoObservability composition instance. The apiVersion is DERIVED from the
+# chart version the CompositionDefinition pins (0.1.11 -> v0-1-11): bumping the pin
+# changes this apiVersion. The spec is the chart's values, typed by
+# charts/krateo-observability/values.schema.json — block YAML, only overrides needed.
+apiVersion: composition.krateo.io/v0-1-11
+kind: KrateoObservability
+metadata:
+  name: observability
+  namespace: krateo-system
+spec:
+  global:
+    # Match your cluster's StorageClass (chart default standard-rwo is the GKE default;
+    # on kind use standard).
+    storageClassName: standard
+  hyperdxLoadBalancer:
+    # No LoadBalancer on local clusters — reach HyperDX via the krateo-clickstack
+    # ClusterIP Service (:3000) instead.
+    enabled: false

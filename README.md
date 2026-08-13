@@ -1,41 +1,70 @@
-# krateo-clickstack-chart
+# clickstack-chart
 
-Krateo PlatformOps **observability** blueprint repo. Groups the ClickStack wrapper with the
-collectors and event proxy that feed and surface it. All charts publish to the consolidated
-registry `oci://ghcr.io/braghettos/krateo`.
+The deployment unit for Krateo's observability stack: four Helm charts — the ClickStack
+wrapper, two OpenTelemetry collectors, the SSE proxy — published to
+`oci://ghcr.io/krateo-platformops/charts` and turned into Krateo compositions by the
+[installer](https://github.com/krateo-platformops/installer).
 
-Part of the [krateo-installer](https://github.com/braghettos/krateo-installer) ecosystem.
+## What is this
 
-## Charts
+A chart repo, not a code repo: it wraps the upstream ClickStack chart (ClickHouse + OTel
+gateway + HyperDX + MongoDB) and the upstream `opentelemetry-collector` chart, folds in the
+Krateo glue (the `/events` handler, the composition-id enrichment wiring, the portal-bell
+SSE proxy), and ships a `values.schema.json` per chart so `core-provider` can generate typed
+composition CRDs. The collector and sse-proxy **code** lives in
+`krateo-platformops/otel-collector` and `krateo-platformops/sse-proxy`.
+Full picture: [docs/index.md](docs/index.md).
 
-| Path | Chart | OCI artifact | Purpose |
-|------|-------|--------------|---------|
-| `charts/krateo-observability` | `krateo-observability` | `oci://ghcr.io/braghettos/krateo/krateo-observability` | ClickStack (ClickHouse + OTel gateway + HyperDX + MongoDB) wrapper: `values.schema.json`, the ClickHouse http-handlers ConfigMap, the otel-clickhouse credentials Secret and a HyperDX LoadBalancer Service. The composition the installer uses (Kind `KrateoObservability`) |
-| `charts/otel-collector-deployment` | `otel-collector-deployment` | `oci://ghcr.io/braghettos/krateo/otel-collector-deployment` | Cluster-level OTel collector that enriches K8s events with `krateo.io/composition-id` and exports to ClickHouse |
-| `charts/otel-collector-daemonset` | `otel-collector-daemonset` | `oci://ghcr.io/braghettos/krateo/otel-collector-daemonset` | Node-level OTel collector for pod logs, host and kubelet metrics |
-| `charts/krateo-sse-proxy` | `krateo-sse-proxy` | `oci://ghcr.io/braghettos/krateo/krateo-sse-proxy` | Polls ClickHouse and pushes new K8s events to the portal via Server-Sent Events |
+## Install
 
-## How the installer consumes it
-
-The installer umbrella emits a `CompositionDefinition` per chart, pointing `core-provider` at the
-OCI artifacts above; `core-provider` generates the typed CRDs and reconciles one Composition per
-instance. The collectors depend on the `krateo-observability` composition (for the ClickHouse
-credentials Secret), and `krateo-sse-proxy` is exposed so the portal's events bell can reach it.
-
-## Local validation
+Normally installed by the **Krateo installer** (portal feature, `tier: observability`).
+Standalone, in dependency order (wrapper first — it creates the credentials Secret the
+collectors mount; ClickHouse + MongoDB operators must already be installed):
 
 ```sh
-helm lint charts/krateo-observability
-helm template smoke charts/krateo-observability
+helm install krateo-observability oci://ghcr.io/krateo-platformops/charts/krateo-observability \
+  --version 0.1.11 --namespace krateo-system --create-namespace
+helm install otel-collector-deployment oci://ghcr.io/krateo-platformops/charts/otel-collector-deployment \
+  --version 0.3.3 --namespace krateo-system
+helm install otel-collector-daemonset oci://ghcr.io/krateo-platformops/charts/otel-collector-daemonset \
+  --version 0.1.5 --namespace krateo-system
+helm install krateo-sse-proxy oci://ghcr.io/krateo-platformops/charts/krateo-sse-proxy \
+  --version 0.1.6 --namespace krateo-system
 ```
 
-## Release
+Details and the composition path: [docs/usage.md](docs/usage.md).
 
-Push a semver tag (`X.Y.Z`) — CI packages every chart under `charts/*` at its declared version
-and publishes to `oci://ghcr.io/braghettos/krateo`. Charts that still carry the `CHART_VERSION`
-placeholder (e.g. `clickstack`) track the tag; independently-pinned charts keep their own version.
+## Configure
 
-## Links
+See [docs/configuration.md](docs/configuration.md). Most used:
 
-- Installer umbrella: https://github.com/braghettos/krateo-installer
-- ClickStack: https://github.com/ClickHouse/ClickStack-helm-charts
+| Setting | Default | Effect |
+|---|---|---|
+| `global.storageClassName` (wrapper) | `standard-rwo` | StorageClass for ClickHouse/Keeper/Mongo volumes (GKE default; override off-GKE). |
+| `hyperdxLoadBalancer.enabled` (wrapper) | `true` | The extra LoadBalancer Service exposing the HyperDX UI on `:3000`. |
+| `clickstack.clickhouse.cluster.spec.*` (wrapper) | 8Gi limit / 15Gi volume | The ONLY path upstream honours for ClickHouse resources/storage — top-level `clickhouse.*` keys are inert. |
+
+## Examples
+
+- [examples/observability-composition](examples/observability-composition) — deploy the
+  ClickStack wrapper as a Krateo composition (CompositionDefinition + a `KrateoObservability` CR).
+
+## Docs
+
+- [docs/index.md](docs/index.md) — the map (bundle + the `ops/` reference corpus)
+- [docs/overview.md](docs/overview.md) — what the four charts deploy and how
+- [docs/usage.md](docs/usage.md) — installer path, standalone install, local validation
+- [docs/configuration.md](docs/configuration.md) — the whole per-chart values surface
+- [docs/api.md](docs/api.md) — generated composition types, HTTP surfaces, upstream CRs
+- [docs/examples.md](docs/examples.md) — examples index
+- [docs/release.md](docs/release.md) — how a release ships
+- [docs/log.md](docs/log.md) — curated history
+
+## Develop & release
+
+```sh
+for d in charts/*/; do helm dependency build "$d"; helm lint "$d"; helm template smoke "$d" >/dev/null; done
+```
+
+Push a plain-semver tag (`X.Y.Z`, no `v`) — CI publishes every chart at its own
+literally-pinned `Chart.yaml` version. Runbook: [docs/release.md](docs/release.md).

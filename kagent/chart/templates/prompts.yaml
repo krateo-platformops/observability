@@ -1,1 +1,0 @@
-{{ .Files.Get (printf "files/prompts-%s.yaml" .Values.prompts.language) | replace "__DOC_TAG__" .Chart.AppVersion }}

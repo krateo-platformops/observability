@@ -1,71 +1,34 @@
-# krateo-clickstack-chart (chart repo) — LLM doc index
-
-> krateo-clickstack-chart is the **deployment unit** for Krateo's observability stack: the
-> ClickStack wrapper (ClickHouse + OTel gateway + HyperDX + MongoDB), the two custom OTel
-> collectors that feed ClickHouse, the SSE proxy that surfaces events to the portal bell, and the
-> federated observability agent chart. This index is the agent entry point to the **deployment,
-> CRD and wiring** view. The **internals & runtime** view (the OTel collector code, the
-> `compositionresolver` processor, the sse-proxy binary) lives in the code repo
-> `braghettos/krateo-otel-collector` `docs/`.
-
-## How to use this index (agents)
-
-You are reading the docs for a SPECIFIC deployed version. This is the **chart-repo half** of the
-component docs — deployment, CRDs, and wiring. Fetch every file below **at the CHART tag that matches
-the running build**, not `main`:
-
-- chart version = `CompositionDefinition.spec.chart.version` for clickstack (Kind `KrateoClickstack`)
-  → THIS repo's tag. Read this repo's `docs/` at that tag.
-- The **internals view** (the custom OTel collector image + the `compositionresolver` processor —
-  the telemetry path into ClickHouse) is the OTHER half: read `braghettos/krateo-otel-collector`
-  `docs/llms.txt` at the **image-version** tag (the collector deployment's container image tag). The
-  portal events-bell path is a sibling component, the SSE proxy (code in `braghettos/krateo-sse-proxy`).
-
-If something isn't in the docs, read the chart/source at that same tag — don't guess, and don't trust
-`main` for a deployed older version. The agent chart (`kagent/chart`, `0.1.x`) versions independently
-of the clickstack component it speaks for — do not read its version as the component's.
-
-## Start here
-
-- [overview.md](overview.md): what the ClickStack blueprint is and **how it deploys** as a Krateo
-  composition — the four-chart layout (`krateo-clickstack` wrapper, the two `otel-collector-*`
-  charts, `krateo-sse-proxy`), the `kagent/chart` agent, the `KrateoClickstack` CompositionDefinition
-  (owned by the installer umbrella), and what each chart renders. Read first.
-
-## Deployment / CRD / wiring
-
-- [crds.md](crds.md): the CRDs this component owns. **It ships NO hand-authored CRD** — it is a
-  wrapper. The only CR is the generated `KrateoClickstack` composition type (`core-provider` derives
-  it from the wrapper chart's `values.schema.json`); the heavy CRs it deploys (e.g. the upstream
-  `ClickHouseCluster` from the vendored `clickstack` subchart) belong to upstream operators, not this
-  repo. See the page for what that means and where the real schemas live.
-- [wiring.md](wiring.md): the per-chart `values.yaml` surface — the ClickStack passthrough
-  (`fullnameOverride`, ClickHouse resources under `cluster.spec`, disabled bundled otel-collector),
-  the Krateo additions (http-handlers ConfigMap, otel-clickhouse Secret, HyperDX LoadBalancer), the
-  collectors' pipelines/RBAC, the single-replica sse-proxy, installer pinning/wiring, dependencies,
-  and the real gotchas (the inert-top-level-key trap, GOMEMLIMIT-style ClickHouse OOM via wrong
-  resource path, single-replica SSE hub, version-bump-forces-re-pull).
-
-## Cross-repo (the internals & runtime half)
-
-- [code-repo docs/llms.txt](https://github.com/braghettos/krateo-otel-collector/blob/main/docs/llms.txt):
-  the code repo's index → the custom OTel collector build, the `compositionresolver` processor
-  (how K8s events get the `krateo.io/composition-id` label), and the sse-proxy poller/hub runtime.
-  Versioned at the **image** tag.
-
-## Reference
-
-- [README.md](../README.md): blueprint overview, what each chart ships, how the installer consumes it.
-- `charts/krateo-clickstack/` — the ClickStack wrapper chart (`values.yaml` + `values.schema.json` +
-  the http-handlers ConfigMap, otel-credentials Secret, HyperDX LoadBalancer templates).
-- `charts/otel-collector-deployment/` — the cluster-level OTel collector (events + cluster metrics).
-- `charts/otel-collector-daemonset/` — the node-level OTel collector (pod logs, host/kubelet metrics).
-- `charts/krateo-sse-proxy/` — the SSE proxy that pushes ClickHouse events to the portal bell.
-- `kagent/chart/` — the `krateo-clickstack-agent` chart (the federated observability agent; versions
-  independently on its own `0.1.x` line).
-
-## Notes
-
-Each doc set is versioned in its own repo: THIS repo's `docs/` at the **chart** tag, the code repo's
-`docs/` at the **image** tag. Where a comment in `values.yaml` or the `README.md` table disagrees with
-what the chart actually renders, the rendered chart wins.
+# clickstack-chart — LLM doc index (chart repo; charts version independently)
+# One line per file. This repo is the DEPLOYMENT half of Krateo observability; the
+# INTERNALS half (collector code, compositionresolver, sse-proxy binary) lives in
+# krateo-platformops/otel-collector and krateo-platformops/sse-proxy, versioned at the
+# IMAGE tags the charts pin. Read this repo's docs at the tag matching the deployed
+# chart version (cluster-observable from CompositionDefinition.spec.chart.version).
+# Current chart pins: clickhouse-operator 0.1.0, mongodb-operator 0.1.0,
+# krateo-observability 0.1.11, otel-collector-deployment 0.3.3,
+# otel-collector-daemonset 0.1.5, krateo-sse-proxy 0.1.6.
+docs/index.md: the map — what this chart repo is + links to everything below
+docs/overview.md: what the six charts deploy (2 operators + wrapper + 2 collectors + sse-proxy) and how they become Krateo compositions
+docs/usage.md: installer path, standalone CompositionDefinition, direct helm install, local validation
+docs/configuration.md: the whole per-chart values surface — operator: passthrough, ClickStack passthrough, /events handler, retention TTLs, pipelines, gotchas
+docs/api.md: generated composition types, operator CRDs the wrappers install, HTTP surfaces (/events, SSE, HyperDX API, OTLP), upstream CRs not owned here
+docs/examples.md: index of the runnable examples
+docs/release.md: how a release ships — one plain-semver tag publishes all six charts at their pinned versions
+docs/log.md: curated history — incidents, renames, load-bearing version bumps
+examples/observability-composition/README.md: deploy the ClickStack wrapper as a Krateo composition
+examples/observability-composition/composition.yaml: the KrateoObservability CR — kubectl apply -f
+examples/composition-registration/README.md: register the operator wrappers with core-provider + a ClickhouseOperator CR
+examples/composition-registration/manifest.yaml: the CompositionDefinitions + ClickhouseOperator CR — kubectl apply -f
+examples/standalone-operators/README.md: direct helm install of both operators with override values
+examples/standalone-operators/clickhouse-values.yaml: ClickHouse operator overrides — helm install -f
+examples/standalone-operators/mongodb-values.yaml: MongoDB operator overrides — helm install -f
+# Reference corpus (code-adjacent; the LIVE artifacts are the charts under charts/):
+ops/README.md: index of the deployment-adjacent reference config folded in from the former code repo
+compositiondefinition.yaml: registers the wrapper standalone (outside the installer)
+# Charts (ground truth for every doc claim; read values.yaml comment blocks):
+charts/clickhouse-operator/values.yaml: operator wrapper — webhook + cert-manager off; operator: passthrough over clickhouse-operator-helm 0.0.5
+charts/mongodb-operator/values.yaml: operator wrapper — empty passthrough over community-operator 0.13.0 (operator: {})
+charts/krateo-observability/values.yaml: the ClickStack wrapper surface + the /events handler + retention TTLs
+charts/otel-collector-deployment/values.yaml: cluster-level collector (events + cluster metrics, compositionresolver)
+charts/otel-collector-daemonset/values.yaml: node-level collector (logs, host/kubelet metrics, OTLP ingest)
+charts/krateo-sse-proxy/values.yaml: the portal-bell SSE proxy (single replica by design)

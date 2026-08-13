@@ -1,0 +1,35 @@
+{{- /*
+  Exposes the HyperDX backend API process (port 8000) as a separate ClusterIP port.
+
+  The upstream clickstack chart creates a krateo-clickstack ClusterIP Service with only ports
+  3000 (Next.js frontend/proxy) and 4320 (OpenAMP). Port 3000 acts as a reverse proxy for the
+  internal API: it strips the /api prefix and forwards to the backend Express process at port 8000.
+
+  This causes a routing mismatch for the v2 external API routes. The backend registers them at
+  /api/v2/* — so through the proxy they'd arrive as /v2/* (404). Hitting port 8000 directly works.
+
+  HyperDX ≥2.28 external API (Bearer-authenticated via user.accessKey):
+    GET/POST/DELETE http://krateo-clickstack.<ns>.svc:8000/api/v2/{alerts,webhooks,sources,...}
+
+  This Service adds a named port "api" to reach that backend directly, enabling Composition
+  RESTDefinitions and other in-cluster clients to use the stateless Bearer auth instead of the
+  session-cookie flow.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: krateo-clickstack-api
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: krateo-observability-stack
+    app.kubernetes.io/component: hyperdx-api
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: clickstack
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: api
+      port: 8000
+      targetPort: 8000
+      protocol: TCP

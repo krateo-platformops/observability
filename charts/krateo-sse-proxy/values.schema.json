@@ -7,7 +7,13 @@
     "global": {
       "type": "object",
       "additionalProperties": true,
-      "description": "Global values shared across charts."
+      "description": "Global values shared across charts.",
+      "properties": {
+        "imageRegistry": {
+          "type": "string",
+          "description": "Optional registry host override applied to every image (repository paths preserved)."
+        }
+      }
     },
     "replicaCount": {
       "type": "integer",
@@ -17,6 +23,9 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "registry": {
+          "type": "string"
+        },
         "repository": {
           "type": "string"
         },
@@ -70,6 +79,12 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 65535
+        },
+        "nodePort": {
+          "type": "integer",
+          "minimum": 30000,
+          "maximum": 32767,
+          "description": "Explicit NodePort (only honored when service.type=NodePort). Set by the installer to pin a deterministic, host-mappable port."
         }
       }
     },

@@ -378,6 +378,10 @@
                     "create_schema": {
                       "type": "boolean"
                     },
+                    "ttl": {
+                      "type": "string",
+                      "description": "Retention TTL stamped into the otel_* tables at creation (e.g. 168h = 7d). Guards the ClickHouse data volume from filling (insert code 243 -> collector OOM loop). Only applies to freshly created tables."
+                    },
                     "timeout": {
                       "type": "string"
                     },
@@ -522,6 +526,48 @@
                   "type": "string"
                 }
               }
+            }
+          }
+        },
+        "livenessProbe": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "initialDelaySeconds": {
+              "type": "integer"
+            },
+            "periodSeconds": {
+              "type": "integer"
+            },
+            "timeoutSeconds": {
+              "type": "integer"
+            },
+            "failureThreshold": {
+              "type": "integer"
+            },
+            "terminationGracePeriodSeconds": {
+              "type": "integer"
+            }
+          }
+        },
+        "readinessProbe": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "initialDelaySeconds": {
+              "type": "integer"
+            },
+            "periodSeconds": {
+              "type": "integer"
+            },
+            "timeoutSeconds": {
+              "type": "integer"
+            },
+            "successThreshold": {
+              "type": "integer"
+            },
+            "failureThreshold": {
+              "type": "integer"
             }
           }
         }

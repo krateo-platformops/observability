@@ -5,7 +5,11 @@ description: >-
   upstream opentelemetry-collector chart with a custom otelcol-krateo image that
   enriches K8s events with krateo.io/composition-id and exports to ClickHouse.
 type: application
-version: 0.3.2
+# 0.3.4: explicit lenient probe tolerances + Quantity (integer|string) resources typing in
+# values.schema.json.
+# 0.3.3: clickhouse exporter ttl: 168h — 7-day retention stamped into freshly created otel_*
+# tables (retention incident: 10Gi filled in 8 days → insert code 243 → collector OOM loop).
+version: 0.3.4
 appVersion: "1.0.2"
 dependencies:
   - name: opentelemetry-collector
@@ -19,5 +23,5 @@ keywords:
   - opentelemetry
   - observability
 sources:
-  - https://github.com/braghettos/krateo-clickstack-chart
-  - https://github.com/braghettos/krateo-otel-collector
+  - https://github.com/krateo-platformops/clickstack-chart
+  - https://github.com/krateo-platformops/otel-collector

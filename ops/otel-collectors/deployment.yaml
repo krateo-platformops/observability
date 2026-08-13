@@ -14,7 +14,7 @@ mode: deployment
 replicaCount: 1
 
 image:
-  repository: ghcr.io/braghettos/otelcol-krateo
+  repository: ghcr.io/krateo-platformops/otelcol-krateo
   tag: "0.1.0"
   pullPolicy: IfNotPresent
 

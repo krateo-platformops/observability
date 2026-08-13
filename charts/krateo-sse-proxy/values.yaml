@@ -1,4 +1,8 @@
-global: {}
+global:
+  # Optional mirror/air-gap override. When set, it replaces ONLY the registry host of every
+  # image (repository paths preserved), e.g. imageRegistry: harbor.internal ->
+  # harbor.internal/krateo-platformops/sse-proxy:<tag>. Empty = images pull from their own registry.
+  imageRegistry: ""
 
 # Single replica: sse-proxy is a STATEFUL in-memory SSE hub (each pod runs its own
 # ClickHouse poller + client hub). Behind an L4 LoadBalancer with sessionAffinity:None,
@@ -11,7 +15,10 @@ global: {}
 replicaCount: 1
 
 image:
-  repository: ghcr.io/braghettos/krateo-sse-proxy
+  # registry is the image host; global.imageRegistry (if set) overrides it. Split out of
+  # repository so a mirror/air-gap relocation only swaps the host and preserves the repo path.
+  registry: ghcr.io
+  repository: krateo-platformops/sse-proxy
   tag: "1.1.2"
   pullPolicy: IfNotPresent
 

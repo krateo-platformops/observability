@@ -1,0 +1,8 @@
+# mongodb-operator wrapper — values forwarded to the upstream community-operator subchart,
+# which is aliased to `operator` (a key named `mongodb-operator` would collide with this
+# chart's Kind in crdgen).
+#
+# Upstream defaults are correct for our use: the operator + the community-operator-crds
+# subchart (templated CRD) install, and no sample MongoDBCommunity CR is created
+# (createResource defaults false). Left empty so the upstream defaults apply.
+operator: {}

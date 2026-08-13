@@ -1,0 +1,14 @@
+# Overrides for the clickhouse-operator wrapper chart.
+# Everything under `operator:` is passed verbatim to the upstream
+# clickhouse-operator-helm subchart (aliased to `operator`).
+operator:
+  # Wrapper defaults, restated explicitly: no admission webhook, no cert-manager.
+  webhook:
+    enable: false
+  certManager:
+    enable: false
+  # Serve controller metrics over plain HTTP (upstream default is HTTPS + authn/z,
+  # which needs extra RBAC on the scraper).
+  metrics:
+    enable: true
+    secure: false

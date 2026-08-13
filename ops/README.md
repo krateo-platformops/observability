@@ -2,8 +2,8 @@
 
 Deployment-adjacent configuration and operational scripts for the Krateo ClickStack, folded
 in from the former `krateo-clickstack` code repo when its two images were split into
-[`krateo-sse-proxy`](https://github.com/braghettos/krateo-sse-proxy) and
-[`krateo-otel-collector`](https://github.com/braghettos/krateo-otel-collector).
+[`krateo-sse-proxy`](https://github.com/krateo-platformops/sse-proxy) and
+[`krateo-otel-collector`](https://github.com/krateo-platformops/otel-collector).
 
 - `clickhouse-config/` — ClickHouse configmaps/secrets/HTTP handlers
 - `otel-collectors/` — reference OTel collector manifests (the live charts are under `charts/`)

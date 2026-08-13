@@ -17,11 +17,24 @@ type: application
 # The mount was never applied (upstream renders only cluster.spec; the clickhouse.com CRD has no
 # extraVolumes field; subPath into config.d/ also crashloops on kind) so /events 404'd and the only
 # path that worked was the forbidden raw native-SQL/dynamic-query API. New version forces the re-pull.
-version: 0.1.8
-appVersion: "3.0.0"
+# 0.1.9: durable retention fix. The 10Gi data volume filled in 8 days (no TTL anywhere: otel_*
+# tables unbounded + ClickHouse system log tables unbounded ~3.6GiB) → inserts failed with
+# code 243 → the OTel collectors OOM-crash-looped → telemetry dead. Now: dataVolumeClaimSpec
+# 15Gi (matches the live relief) + 3-day system-log ttl (query_log/text_log/metric_log/part_log/
+# asynchronous_metric_log/trace_log) via settings.extraConfig. Pairs with otel-collector-daemonset
+# 0.1.5 + otel-collector-deployment 0.3.3 (clickhouse exporter ttl: 168h on the otel_* tables).
+# 0.1.10: bump clickstack dep 3.0.0 → 3.0.2 (HyperDX 2.27.0 → 2.30.1). HyperDX 2.28+ exposes
+# /api/v2/external/{alerts,webhooks,dashboards,sources} authenticated via Bearer user.accessKey
+# (validateUserAccessKey middleware) — this unlocks replacing the session-cookie reconciler in
+# krateo-alert-troubleshooter with native Composition + RESTDefinitions.
+# 0.1.11: add krateo-clickstack-api ClusterIP Service (port 8000) so in-cluster clients can reach
+# the HyperDX Express backend directly (bypass the Next.js /api-stripping proxy at port 3000).
+# Required for Composition RESTDefinitions using Bearer auth against /api/v2/*.
+version: 0.1.11
+appVersion: "3.0.2"
 dependencies:
   - name: clickstack
-    version: "3.0.0"
+    version: "3.0.2"
     repository: https://clickhouse.github.io/ClickStack-helm-charts
 home: https://krateo.io
 icon: https://raw.githubusercontent.com/krateoplatformops/krateo/main/docs/media/logo.svg
@@ -37,4 +50,4 @@ annotations:
   krateo.io/maturity: beta
   krateoSupportedVersion: ">= 2.5.1"
 sources:
-  - https://github.com/braghettos/krateo-clickstack-chart
+  - https://github.com/krateo-platformops/clickstack-chart
