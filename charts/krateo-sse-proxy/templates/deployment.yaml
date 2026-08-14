@@ -50,8 +50,9 @@ spec:
             # authn base URL for RS256/JWKS token verification on /events and
             # /notifications. The JWKS document is derived as
             # <URL_AUTHN>/.well-known/jwks.json. Defaults to authn in this release's
-            # namespace, so auth is ENFORCED out of the box; override auth.urlAuthn
-            # for a non-co-located authn, or set it empty to run the proxy open.
+            # namespace. Verification is MANDATORY (no open mode — the proxy refuses
+            # to start without a JWKS source); override auth.urlAuthn only to point at
+            # a non-co-located authn.
             - name: URL_AUTHN
               value: {{ .Values.auth.urlAuthn | default (printf "http://authn.%s.svc.cluster.local:8082" .Release.Namespace) | quote }}
           # Lenient liveness tolerance (org standard): the Kubernetes defaults
