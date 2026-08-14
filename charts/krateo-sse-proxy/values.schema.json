@@ -88,6 +88,16 @@
         }
       }
     },
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "urlAuthn": {
+          "type": "string",
+          "description": "authn base URL for RS256/JWKS verification of end-user JWTs on /events and /notifications; the JWKS document is fetched from <urlAuthn>/.well-known/jwks.json. Empty defaults to authn in this release's namespace (auth enforced out of the box)."
+        }
+      }
+    },
     "clickhouse": {
       "type": "object",
       "additionalProperties": false,

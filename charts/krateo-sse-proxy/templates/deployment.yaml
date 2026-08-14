@@ -47,6 +47,13 @@ spec:
                   optional: {{ .Values.clickhouse.passwordSecret.optional }}
             - name: LISTEN_ADDR
               value: {{ .Values.listenAddr | quote }}
+            # authn base URL for RS256/JWKS token verification on /events and
+            # /notifications. The JWKS document is derived as
+            # <URL_AUTHN>/.well-known/jwks.json. Defaults to authn in this release's
+            # namespace, so auth is ENFORCED out of the box; override auth.urlAuthn
+            # for a non-co-located authn, or set it empty to run the proxy open.
+            - name: URL_AUTHN
+              value: {{ .Values.auth.urlAuthn | default (printf "http://authn.%s.svc.cluster.local:8082" .Release.Namespace) | quote }}
           # Lenient liveness tolerance (org standard): the Kubernetes defaults
           # (timeoutSeconds: 1, failureThreshold: 3) kill HEALTHY pods under CPU
           # contention — a slow-but-alive /health reply counts as a failure and the

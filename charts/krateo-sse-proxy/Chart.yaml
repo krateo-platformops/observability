@@ -4,8 +4,8 @@ description: >-
   Krateo SSE proxy. Polls ClickHouse and pushes new K8s events to connected
   browsers via Server-Sent Events.
 type: application
-version: 0.1.8
-appVersion: "1.1.2"
+version: 0.1.9
+appVersion: "1.1.3"
 home: https://krateo.io
 icon: https://github.com/krateoplatformops/krateo/blob/main/docs/media/logo.svg
 keywords:
