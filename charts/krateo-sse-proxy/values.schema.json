@@ -94,7 +94,7 @@
       "properties": {
         "urlAuthn": {
           "type": "string",
-          "description": "authn base URL for RS256/JWKS verification of end-user JWTs on /events and /notifications; the JWKS document is fetched from <urlAuthn>/.well-known/jwks.json. Empty defaults to authn in this release's namespace (auth enforced out of the box)."
+          "description": "authn base URL for RS256/JWKS verification of end-user JWTs on /events and /notifications; the JWKS document is fetched from <urlAuthn>/.well-known/jwks.json. Empty defaults to authn in this release's namespace. Verification is mandatory by design (no open mode); set this only to point at a non-co-located authn."
         }
       }
     },
