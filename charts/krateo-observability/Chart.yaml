@@ -37,7 +37,7 @@ dependencies:
     version: "3.0.2"
     repository: https://clickhouse.github.io/ClickStack-helm-charts
 home: https://krateo.io
-icon: https://raw.githubusercontent.com/krateoplatformops/krateo/main/docs/media/logo.svg
+icon: https://raw.githubusercontent.com/krateo-platformops/.github/main/brand/logo.svg
 keywords:
   - krateo
   - platformops
