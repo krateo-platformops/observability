@@ -8,7 +8,7 @@ type: application
 version: 0.1.0
 appVersion: "0.13.0"
 home: https://krateo.io
-icon: https://raw.githubusercontent.com/krateoplatformops/krateo/main/docs/media/logo.svg
+icon: https://raw.githubusercontent.com/krateo-platformops/.github/main/brand/logo.svg
 keywords:
   - mongodb
   - database
