@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema",
   "title": "mongodb-operator values",
-  "description": "Dependency-wrapper for the upstream MongoDB community-operator chart (aliased to `operator`). Values pass through under `operator`.",
+  "description": "Dependency-wrapper for the upstream MongoDB Controllers for Kubernetes (MCK, chart `mongodb-kubernetes`), aliased to `operator`. Values pass through under `operator` — MCK's own `operator`/`community`/`registry` blocks therefore nest one level deeper (e.g. operator.operator.watchedResources).",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -13,8 +13,8 @@
     "operator": {
       "type": "object",
       "additionalProperties": true,
-      "title": "Upstream community-operator passthrough",
-      "description": "Values forwarded to the upstream MongoDB community-operator subchart (operator deployment, RBAC, community-operator-crds, createResource, etc.)."
+      "title": "Upstream mongodb-kubernetes (MCK) passthrough",
+      "description": "Values forwarded to the upstream MongoDB Controllers for Kubernetes subchart. Krateo pins a lean community-only, Apache-2.0 posture (operator.operator.watchedResources=[mongodbcommunity], telemetry off, no cluster roles/webhook); the MongoDBCommunity instance CR is emitted by the ClickStack chart, not here."
     }
   }
 }

@@ -1,8 +1,29 @@
-# mongodb-operator wrapper — values forwarded to the upstream community-operator subchart,
-# which is aliased to `operator` (a key named `mongodb-operator` would collide with this
-# chart's Kind in crdgen).
+# mongodb-operator wrapper — values forwarded to the upstream MCK (mongodb-kubernetes) subchart,
+# aliased to `operator` (a key named `mongodb-operator` would collide with this chart's Kind in
+# crdgen). MCK's own top-level blocks therefore nest under this alias: the subchart's `operator:`
+# block is `operator.operator:` here, its `community:`/`registry:` are `operator.community:` etc.
 #
-# Upstream defaults are correct for our use: the operator + the community-operator-crds
-# subchart (templated CRD) install, and no sample MongoDBCommunity CR is created
-# (createResource defaults false). Left empty so the upstream defaults apply.
-operator: {}
+# We run MCK in a lean, COMMUNITY-ONLY, Apache-2.0 posture — it exists solely to reconcile the
+# MongoDBCommunity CR the ClickStack chart emits for HyperDX's store. MCK still ships all 8 CRDs via
+# its `crds/` dir (helm applies them install-once; unforked upstream — we don't strip them), but the
+# operator only WATCHES mongodbcommunity, and every enterprise/Ops-Manager code path (cluster roles,
+# admission webhook, telemetry phone-home) is turned off so the rendered footprint is fully
+# namespace-scoped (no ClusterRole/ClusterRoleBinding/ValidatingWebhookConfiguration) and emits
+# nothing to MongoDB. No MongoDBCommunity instance CR is created here — ClickStack owns that.
+operator:
+  operator:
+    # Reconcile ONLY the community CR (mongodbcommunity.mongodb.com). Dropping the enterprise kinds
+    # (mongodb, opsmanagers, mongodbusers, mongodbsearch, voyageais) keeps this on the Apache-2.0 path
+    # and avoids watching CRs Krateo never creates.
+    watchedResources:
+    - mongodbcommunity
+    # No phone-home to MongoDB, and no cluster-scoped telemetry RBAC.
+    telemetry:
+      enabled: false
+    # ClusterMongoDBRole is an enterprise custom-roles feature — community doesn't need it (drops a ClusterRole).
+    enableClusterMongoDBRoles: false
+    # The admission webhook validates enterprise MongoDB/OpsManager resources, not MongoDBCommunity —
+    # skip its cluster-scoped ClusterRole + ValidatingWebhookConfiguration registration.
+    webhook:
+      installClusterRole: false
+      registerConfiguration: false
