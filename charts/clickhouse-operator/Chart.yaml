@@ -5,8 +5,13 @@ description: >-
 type: application
 # version = this Krateo wrapper's own release stream. appVersion = the upstream
 # clickhouse-operator-helm version actually deployed.
-version: 0.1.0
-appVersion: "0.0.5"
+# 0.1.1: bump clickhouse-operator-helm dep 0.0.5 → 0.0.7. 0.0.7 renamed the values contract
+# `enable:` → `enabled:` across blocks, so values.yaml migrates operator.webhook/certManager
+# `enable: false` → `enabled: false` (else the toggles silently no-op and the webhook +
+# cert-manager Certificates the umbrella doesn't provide would come back on). CRD set unchanged
+# (clickhouseclusters + keeperclusters); patch-level app bump v0.0.5 → v0.0.7.
+version: 0.1.1
+appVersion: "0.0.7"
 home: https://krateo.io
 icon: https://raw.githubusercontent.com/krateo-platformops/.github/main/brand/logo.svg
 keywords:
@@ -29,5 +34,5 @@ dependencies:
   # The alias makes Helm read the subchart's values from `operator:`.
   - name: clickhouse-operator-helm
     alias: operator
-    version: "0.0.5"
+    version: "0.0.7"
     repository: oci://ghcr.io/clickhouse

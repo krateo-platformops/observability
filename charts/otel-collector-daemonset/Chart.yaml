@@ -9,14 +9,17 @@ type: application
 # values.schema.json.
 # 0.1.5: clickhouse exporter ttl: 168h — 7-day retention stamped into freshly created otel_*
 # tables (retention incident: 10Gi filled in 8 days → insert code 243 → collector OOM loop).
-version: 0.1.6
+# 0.1.7: bump opentelemetry-collector dep 0.158.1 → 0.170.0 (collector 0.153.0 → 0.158.0). The
+# breaking value renames in that range are NOT set by this wrapper — verified by a clean render
+# against 0.170.0's strict values.schema.json. Also repoints the dead-org icon to the canonical asset.
+version: 0.1.7
 appVersion: "0.1.0"
 dependencies:
   - name: opentelemetry-collector
-    version: 0.158.1
+    version: 0.170.0
     repository: https://open-telemetry.github.io/opentelemetry-helm-charts
 home: https://krateo.io
-icon: https://github.com/krateoplatformops/krateo/blob/main/docs/media/logo.svg
+icon: https://raw.githubusercontent.com/krateo-platformops/.github/main/brand/logo.svg
 keywords:
   - krateo
   - platformops
