@@ -3,6 +3,13 @@ global: {}
 opentelemetry-collector:
   mode: daemonset
 
+  # Keep the config on the CANONICAL component names (`k8sattributes`, `filelog`, ...) rather than the
+  # `k8s_attributes`/`file_log` form the chart rewrites to by default since ~0.162.x. The daemonset runs
+  # the upstream contrib image (which still keeps the deprecated aliases), so it works either way — but
+  # we pin false for parity with the deployment (whose custom image only has the canonical names) and to
+  # avoid depending on aliases contrib may eventually drop.
+  rewriteDeprecatedComponentNames: false
+
   # Headless Service exposing the node-local agent's OTLP receiver at a stable in-cluster DNS name
   # (otel-collector-daemonset-opentelemetry-collector.<ns>.svc:4317 grpc / :4318 http) so the engine,
   # cdc controllers and app components can export OTLP -> ClickHouse without needing per-node

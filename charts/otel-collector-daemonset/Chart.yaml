@@ -12,7 +12,8 @@ type: application
 # 0.1.7: bump opentelemetry-collector dep 0.158.1 → 0.170.0 (collector 0.153.0 → 0.158.0). The
 # breaking value renames in that range are NOT set by this wrapper — verified by a clean render
 # against 0.170.0's strict values.schema.json. Also repoints the dead-org icon to the canonical asset.
-version: 0.1.7
+# 0.1.8: rewriteDeprecatedComponentNames=false (parity with the deployment; canonical component names).
+version: 0.1.8
 appVersion: "0.1.0"
 dependencies:
   - name: opentelemetry-collector

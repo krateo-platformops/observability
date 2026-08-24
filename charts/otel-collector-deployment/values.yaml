@@ -32,6 +32,13 @@ collector:
 opentelemetry-collector:
   mode: deployment
 
+  # Keep the collector's config using the CANONICAL component names (e.g. `k8sattributes`, not the
+  # `k8s_attributes` form the chart rewrites to by default since ~0.162.x). The custom krateo otel
+  # image (ghcr.io/krateo-platformops/otel-collector) is a minimal build that registers only
+  # `k8sattributes` — the rewritten `k8s_attributes` id makes it fail at startup with
+  # "unknown type k8s_attributes". This must stay false while the image is built against the older name.
+  rewriteDeprecatedComponentNames: false
+
   replicaCount: 1
 
   image:
