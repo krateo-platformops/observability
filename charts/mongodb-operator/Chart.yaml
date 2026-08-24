@@ -1,12 +1,16 @@
 apiVersion: v2
 name: mongodb-operator
 description: >-
-  MongoDB Community Kubernetes operator packaged as a Krateo composition for the ClickStack data layer.
+  MongoDB Controllers for Kubernetes (MCK) packaged as a Krateo composition for the ClickStack data
+  layer. Runs the MongoDBCommunity reconciler only (Apache-2.0, public quay.io/mongodb images) — it
+  reconciles the MongoDBCommunity CR the ClickStack chart emits for HyperDX's store. Migrated off the
+  archived community-operator (EOL 2025-11), whose repo froze at 0.13.0; MCK keeps the identical
+  MongoDBCommunity CRD (mongodbcommunity.mongodb.com/v1), so the CR surface is unchanged.
 type: application
-# version = this Krateo wrapper's own release stream. appVersion = the upstream
-# community-operator version actually deployed.
-version: 0.1.0
-appVersion: "0.13.0"
+# version = this Krateo wrapper's own release stream. appVersion = the upstream MCK
+# (mongodb-kubernetes) version actually deployed.
+version: 0.2.0
+appVersion: "1.10.0"
 home: https://krateo.io
 icon: https://raw.githubusercontent.com/krateo-platformops/.github/main/brand/logo.svg
 keywords:
@@ -21,13 +25,14 @@ annotations:
   krateo.io/display-name: MongoDB Operator
   krateoSupportedVersion: ">= 2.5.1"
 sources:
-  - https://github.com/mongodb/mongodb-kubernetes-operator
+  - https://github.com/mongodb/mongodb-kubernetes
   - https://github.com/krateo-platformops/clickstack-operators-chart
 dependencies:
   # Aliased to `operator`: a values key named `mongodb-operator` would pascalize to this
   # chart's own Kind (MongodbOperator) and collide in core-provider's crdgen struct-naming.
-  # The alias makes Helm read the subchart's values from `operator:`.
-  - name: community-operator
+  # The alias makes Helm read the subchart's values from `operator:` — so MCK's own top-level
+  # `operator:`/`community:`/`registry:` blocks nest one level deeper (e.g. operator.operator.*).
+  - name: mongodb-kubernetes
     alias: operator
-    version: "0.13.0"
+    version: "1.10.0"
     repository: https://mongodb.github.io/helm-charts

@@ -1,6 +1,6 @@
 dependencies:
-- name: community-operator
+- name: mongodb-kubernetes
   repository: https://mongodb.github.io/helm-charts
-  version: 0.13.0
-digest: sha256:3deb2e25520a41c84fe7977ce0f7b0bcf39ced40636845153f97fa3f680a7095
-generated: "2026-06-18T00:20:44.861137+02:00"
+  version: 1.10.0
+digest: sha256:4a44ecd8c0469fba8ab7ccfef0b5b652d03e0eed999943242036f454e34cc9b4
+generated: "2026-08-24T13:13:03.884916+02:00"
