@@ -6,8 +6,11 @@
 # cert-manager CRs for the operator, and the operator still reconciles ClickHouseCluster /
 # KeeperCluster without the webhook. CRDs stay enabled (templated in the upstream chart, so
 # core-provider applies them and teardown is clean).
+# NB (chart 0.1.1 / operator-helm 0.0.7): the upstream values key is `enabled:` (0.0.7 renamed
+# `enable:` → `enabled:`); the old `enable:` is silently ignored on 0.0.7, which would re-enable
+# both the webhook and cert-manager Certificates.
 operator:
   webhook:
-    enable: false
+    enabled: false
   certManager:
-    enable: false
+    enabled: false
