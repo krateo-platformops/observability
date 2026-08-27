@@ -13,10 +13,13 @@ type: application
 # breaking value renames in that range (rewriteDeprecatedProcessorNames→...ComponentNames,
 # telemetry.metrics.address→...readers) are NOT set by this wrapper — verified by a clean render
 # against 0.170.0's strict values.schema.json. Also repoints the dead-org icon to the canonical asset.
+# 0.3.7: bump the custom collector image to 1.0.3 — compositionresolver falls back to a root
+# composition's own metadata.uid when the involvedObject is a composition with no inherited
+# krateo.io/composition-id label (editor-created compositions' own reconcile events now correlate).
 # 0.3.6: rewriteDeprecatedComponentNames=false — the krateo custom otel image only has `k8sattributes`,
 # not the `k8s_attributes` the 0.170.0 chart rewrites to (runtime "unknown type k8s_attributes").
-version: 0.3.6
-appVersion: "1.0.2"
+version: 0.3.7
+appVersion: "1.0.3"
 dependencies:
   - name: opentelemetry-collector
     version: 0.170.0
