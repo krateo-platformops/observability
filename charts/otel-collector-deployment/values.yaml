@@ -45,10 +45,13 @@ opentelemetry-collector:
     # Renamed otelcol-krateo -> krateo-otel-collector when the custom collector was split
     # into its own single-image repo (krateo-platformops/otel-collector) on the canonical CI.
     repository: ghcr.io/krateo-platformops/otel-collector
+    # 1.0.3: compositionresolver falls back to a root composition's own metadata.uid when the
+    #        involvedObject is a composition with no inherited krateo.io/composition-id label —
+    #        so editor-created (non-installer) compositions' own reconcile events correlate.
     # 1.0.2: + patched clickhouseexporter — recreate the otel_* schema and retry on UNKNOWN_TABLE
     #        (ClickHouse re-provisioned with a fresh DB) instead of dropping data until a restart.
     # 1.0.1: patched k8sobjectsreceiver (recycle timer + restart-on-close) — KOS-1 #112 bug #2
-    tag: "1.0.2"
+    tag: "1.0.3"
     pullPolicy: IfNotPresent
 
   # The container binary is still named otelcol-krateo (OTel builder dist.name / Dockerfile
