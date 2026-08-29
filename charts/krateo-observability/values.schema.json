@@ -187,6 +187,72 @@
         }
       },
       "description": "Upstream clickstack chart values, passed through opaquely."
+    },
+    "defaultAlerts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "alerts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "threshold",
+              "thresholdType",
+              "interval"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "displayName": {
+                "type": "string"
+              },
+              "where": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "threshold": {
+                "type": "number"
+              },
+              "thresholdType": {
+                "type": "string",
+                "enum": [
+                  "above",
+                  "below",
+                  "above_exclusive",
+                  "below_or_equal",
+                  "equal",
+                  "not_equal",
+                  "between",
+                  "not_between"
+                ]
+              },
+              "interval": {
+                "type": "string",
+                "enum": [
+                  "1m",
+                  "5m",
+                  "15m",
+                  "30m",
+                  "1h",
+                  "6h",
+                  "12h",
+                  "1d"
+                ]
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

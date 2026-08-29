@@ -1,0 +1,41 @@
+{{- /*
+  Default Alert rules (observability.krateo.io/v1alpha1 Alert CRs) — a baseline set so a
+  FRESH install lands on a populated /alerts page instead of an empty one. Before this,
+  the chart shipped the Alert CRD + the alert-troubleshooter machinery but seeded ZERO
+  Alert CRs, and the recommended set lived only in a manual ops/ bootstrap script.
+
+  Values-gated (defaultAlerts.enabled, default true) and fully overridable via
+  defaultAlerts.alerts. Each renders as a normal Alert the operator can edit or delete,
+  and is labelled app.kubernetes.io/managed-by=krateo-observability-defaults for easy
+  identification/removal.
+
+  DEPENDENCY: the Alert CRD is served by the clickstack-agent (a separate chart), so these
+  must apply AFTER that CRD exists. The Krateo installer applies clickstack-agent before
+  krateo-observability, so the ordering holds on a standard install. If you install THIS
+  chart standalone without the CRD present, set defaultAlerts.enabled=false (or install
+  the CRD first).
+*/ -}}
+{{- if .Values.defaultAlerts.enabled }}
+{{- range .Values.defaultAlerts.alerts }}
+---
+apiVersion: observability.krateo.io/v1alpha1
+kind: Alert
+metadata:
+  name: {{ .name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: krateo-observability-defaults
+    app.kubernetes.io/part-of: krateo-observability
+spec:
+  displayName: {{ .displayName | default .name | quote }}
+  {{- with .where }}
+  where: {{ . | quote }}
+  {{- end }}
+  threshold: {{ .threshold }}
+  thresholdType: {{ .thresholdType }}
+  interval: {{ .interval }}
+  {{- with .message }}
+  message: {{ . | quote }}
+  {{- end }}
+{{- end }}
+{{- end }}

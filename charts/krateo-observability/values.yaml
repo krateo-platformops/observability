@@ -38,6 +38,52 @@ hyperdxLoadBalancer:
   name: krateo-clickstack-app-lb
   port: 3000
 
+# Default Alert rules so a FRESH install lands on a populated /alerts page instead of an
+# empty one (the chart ships the Alert CRD + alert-troubleshooter but seeded zero Alerts).
+# enabled:true by default; extend/override `alerts` freely, or set enabled:false to seed
+# none. Each renders as an observability.krateo.io Alert CR off the live CRD schema
+# (interval/threshold/thresholdType/where/message) and is user-editable/deletable.
+# NOTE: the Alert CRD is served by the clickstack-agent — these apply AFTER that CRD is
+# present (installer applies clickstack-agent first). Standalone-without-CRD → enabled:false.
+defaultAlerts:
+  enabled: true
+  alerts:
+    - name: crashloopbackoff-detected
+      displayName: CrashLoopBackOff detected
+      where: 'Body:"CrashLoopBackOff" OR Body:"Back-off restarting"'
+      threshold: 1
+      thresholdType: above
+      interval: 5m
+      message: "A container is crash-looping. Open the incident in Autopilot to investigate the workload."
+    - name: pod-restarts-elevated
+      displayName: Pod restarts elevated
+      where: 'Body:"Killing" OR Body:"BackOff" OR Body:"Unhealthy"'
+      threshold: 3
+      thresholdType: above
+      interval: 15m
+      message: "Repeated pod restart / unhealthy events. A workload may be flapping."
+    - name: app-error-rate-elevated
+      displayName: Application error rate elevated
+      where: 'SeverityText:"ERROR" OR SeverityText:"FATAL"'
+      threshold: 50
+      thresholdType: above
+      interval: 15m
+      message: "Elevated ERROR/FATAL log volume across the platform services."
+    - name: node-memory-pressure
+      displayName: Node MemoryPressure condition
+      where: 'Body:"MemoryPressure" OR Body:"DiskPressure"'
+      threshold: 1
+      thresholdType: above
+      interval: 5m
+      message: "A node reported Memory/Disk pressure. Capacity or a noisy pod may need attention."
+    - name: agent-tool-failure
+      displayName: Autopilot agent/tool failure
+      where: 'Body:"failed to upsert tool server" OR Body:"mcp server" OR Body:"tool call failed"'
+      threshold: 1
+      thresholdType: above
+      interval: 15m
+      message: "kagent tool/MCP errors — Autopilot tooling may be degraded."
+
 # ---------------------------------------------------------------------------
 # Upstream clickstack passthrough (verbatim from obs-stack/clickstack/values.yaml)
 # ---------------------------------------------------------------------------
