@@ -35,7 +35,11 @@ type: application
 # optional securityContexts + hyperdx.deployment.{deploymentAnnotations,podAnnotations}. No breaking
 # values removals, subchart dep (otel-collector ~0.146) unchanged, CRD-free app chart. We set none of
 # the newly-deprecated keys (hyperdx.deployment.annotations), so this is a clean pin bump.
-version: 0.1.13
+# 0.1.14: set cluster.spec.versionProbeTemplate container resources (100m/128Mi request,
+# 500m/1Gi limit). The clickhouse.com operator's one-shot version-probe Job has no resources
+# of its own and was OOMKilled/stuck Pending on every install, requiring a manual kubectl
+# patch of the live ClickHouseCluster CR afterward. Now real out of the box.
+version: 0.1.14
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack

@@ -128,6 +128,33 @@ clickstack:
           resources:
             requests:
               storage: 15Gi
+        # VERSION-PROBE OOM: on every install/upgrade the clickhouse.com operator runs a
+        # one-shot "version-probe" Job (a Pod that reports the target ClickHouse image's
+        # version before the real StatefulSet rolls) with NO resource request/limit of its
+        # own — it inherits nothing from containerTemplate above (different pod entirely).
+        # On a memory-constrained node it gets OOMKilled/Pending and the rollout stalls, so
+        # every install had to be finished by hand:
+        #   kubectl patch clickhouseclusters.clickhouse.com -n krateo-system krateo-clickstack-clickhouse \
+        #     --type merge -p '{"spec":{"versionProbeTemplate":{"spec":{"template":{"spec":{"containers":[
+        #     {"name":"version-probe","resources":{"requests":{"cpu":"100m","memory":"128Mi"},
+        #     "limits":{"cpu":"500m","memory":"1Gi"}}}]}}}}}}'
+        # versionProbeTemplate is a real field on the ClickHouseCluster CRD (a bare PodTemplate
+        # spec) and cluster.spec is passed through verbatim same as containerTemplate/
+        # dataVolumeClaimSpec above, so setting it here makes the patch permanent instead of a
+        # per-install manual step.
+        versionProbeTemplate:
+          spec:
+            template:
+              spec:
+                containers:
+                  - name: version-probe
+                    resources:
+                      requests:
+                        cpu: 100m
+                        memory: 128Mi
+                      limits:
+                        cpu: 500m
+                        memory: 1Gi
         # ClickHouse server config merged into /etc/clickhouse-server/config.d/ by the
         # clickhouse.com operator. The GET /events?composition_id=<uid> handler MUST be
         # registered here, NOT via clickhouse.extraVolumes (see below): a predefined HTTP
