@@ -39,7 +39,16 @@ type: application
 # 500m/1Gi limit). The clickhouse.com operator's one-shot version-probe Job has no resources
 # of its own and was OOMKilled/stuck Pending on every install, requiring a manual kubectl
 # patch of the live ClickHouseCluster CR afterward. Now real out of the box.
-version: 0.1.14
+# 0.1.15: bump the ClickHouse SERVER image 25.7-alpine (EOL) -> 26.8-alpine (newest LTS).
+# Upstream clickstack 3.2.0 defaults cluster.spec.containerTemplate.image to
+# {repository: clickhouse/clickhouse-server, tag: 25.7-alpine} — now EOL. We override just
+# the tag (repository deep-merges from upstream) so it lands REAL in the ClickHouseCluster CR
+# spec the operator reads, and DELETE the old inert top-level clickhouse.image:26.3-alpine
+# placeholder (upstream renders only cluster.spec, so that key never applied). This is a
+# ClickHouse version upgrade that ROLLS the StatefulSet — bench-validate; do NOT let it ride an
+# unrelated installer reconcile (Keeper lockstep, versionProbe Job, http_handlers/TTL re-check
+# on 26.8, HyperDX 2.35.0 events-bell smoke-test). Clean re-provision (short-TTL telemetry).
+version: 0.1.15
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack

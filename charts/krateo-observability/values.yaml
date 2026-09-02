@@ -106,6 +106,19 @@ clickstack:
     cluster:
       spec:
         containerTemplate:
+          # ClickHouse server image. Upstream clickstack 3.2.0 defaults this to
+          # clickhouse/clickhouse-server:25.7-alpine (a MAP: image.repository +
+          # image.tag — see charts/clickstack/values.yaml cluster.spec.containerTemplate.image),
+          # which is now EOL. Override only the tag to 26.8-alpine (newest ClickHouse
+          # LTS); repository deep-merges from upstream (clickhouse/clickhouse-server).
+          # This is the REAL, live image now (it lands in the ClickHouseCluster CR spec
+          # the operator reads), NOT the old inert top-level clickhouse.image placeholder
+          # that upstream ignored. Realizing it live is a ClickHouse server version
+          # upgrade (25.7->26.8) that ROLLS the StatefulSet — it must be bench-validated
+          # and must not ride an unrelated installer reconcile (Keeper lockstep,
+          # versionProbe Job, http_handlers/TTL config re-check on 26.8).
+          image:
+            tag: "26.8-alpine"
           resources:
             limits:
               cpu: "4"
@@ -250,13 +263,13 @@ clickstack:
                   handler:
                     type: dynamic_query_handler
                     query_param_name: query
-    # STILL INERT (same wrong-path bug): upstream ignores these top-level keys. The image
-    # stays inert on purpose — realizing it live = ClickHouse version upgrade (25.7->26.3),
-    # a deliberate change that must not ride along. To realize later: image ->
-    # cluster.spec.containerTemplate.image. Storage is now REAL at 15Gi via
+    # STILL INERT (same wrong-path bug): upstream ignores these top-level keys — it renders
+    # ONLY cluster.spec. The image is now set for real above at
+    # cluster.spec.containerTemplate.image.tag (26.8-alpine); the old inert top-level
+    # `image: clickhouse/clickhouse-server:26.3-alpine` placeholder was DELETED because it
+    # implied a live version that was never applied. Storage is likewise REAL at 15Gi via
     # cluster.spec.dataVolumeClaimSpec above (retention incident); the 50Gi below remains
     # an inert aspiration — raising the real value later is a plain PVC expansion.
-    image: "clickhouse/clickhouse-server:26.3-alpine"
     persistence:
       enabled: true
       size: 50Gi
