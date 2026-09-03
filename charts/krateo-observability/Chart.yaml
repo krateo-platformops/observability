@@ -48,7 +48,12 @@ type: application
 # ClickHouse version upgrade that ROLLS the StatefulSet — bench-validate; do NOT let it ride an
 # unrelated installer reconcile (Keeper lockstep, versionProbe Job, http_handlers/TTL re-check
 # on 26.8, HyperDX 2.35.0 events-bell smoke-test). Clean re-provision (short-TTL telemetry).
-version: 0.1.15
+# 0.1.16: HyperDX LoadBalancer now DISABLED BY DEFAULT (hyperdxLoadBalancer.enabled=false).
+# HyperDX OSS has only its own email+password login (no external JWT/SSO federation), so a
+# public LB exposed an internet-facing app guarded solely by that login on a raw cloud IP,
+# outside the platform authn/agentgateway edge. Secure-by-default; opt in explicitly, reach it
+# in-cluster (port-forward the ClusterIP), or front it through the agentgateway.
+version: 0.1.16
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack

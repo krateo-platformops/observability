@@ -30,11 +30,17 @@ otelCredentials:
   password: otelcollectorpass
 
 # HyperDX external access. The upstream chart only emits a ClusterIP Service
-# (krateo-clickstack-app); this renders an ADDITIONAL LoadBalancer Service so the
-# UI is reachable without an imperative `kubectl patch` (no hardcoded IP — the
-# cloud assigns one).
+# (krateo-clickstack-app); enabling this renders an ADDITIONAL LoadBalancer Service
+# for the HyperDX UI (no hardcoded IP — the cloud assigns one).
+#
+# DISABLED BY DEFAULT (secure-by-default). HyperDX 2.35.0 OSS has ONLY its own built-in
+# email+password login — no external JWT/OIDC/SSO federation — so a public LoadBalancer
+# puts an internet-facing app guarded solely by that login on a raw cloud IP, outside the
+# platform authn/agentgateway edge. Leave this false and reach the UI in-cluster
+# (port-forward the krateo-clickstack-app ClusterIP:3000) or front it through the
+# agentgateway. Set enabled:true only if you accept a directly-exposed HyperDX.
 hyperdxLoadBalancer:
-  enabled: true
+  enabled: false
   name: krateo-clickstack-app-lb
   port: 3000
 
