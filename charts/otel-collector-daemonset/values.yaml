@@ -95,11 +95,31 @@ opentelemetry-collector:
 
     processors:
       transform:
+        # error_mode:ignore so a redaction statement on an absent attribute key never fails the
+        # whole batch (drops telemetry) — it just skips that statement.
+        error_mode: ignore
         log_statements:
           - context: log
             statements:
               - 'replace_pattern(body, "\\x1b\\[[0-9;]*[mGKHFABCDsu]", "")'
               - 'set(attributes["krateo.io/composition-id"], resource.attributes["k8s.pod.labels.krateo.io/composition-id"]) where resource.attributes["k8s.pod.labels.krateo.io/composition-id"] != nil'
+        # SECURITY (#122): the upstream kagent-tools server leaks the caller's authn JWT unredacted
+        # into span sinks — the Authorization header (every call) and error/exception messages
+        # ("[Kubernetes] ... --token eyJ...", on kubectl errors) — which this pipeline would persist
+        # into otel_traces (ClickHouse), where a 24h-replayable admin JWT could be lifted. Amplified
+        # by per-user RBAC (TOKEN_PASSTHROUGH=true → --token on every kubectl call). Collector-side
+        # backstop until kagent-dev/tools ships the fix (reported privately). Drop the Authorization
+        # header attr outright; redact any JWT (eyJ… base64url incl. its dots) from the message sinks.
+        trace_statements:
+          - context: span
+            statements:
+              - 'delete_key(attributes, "http.header.Authorization")'
+              - 'replace_pattern(status.message, "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>")'
+              - 'replace_pattern(attributes["exception.message"], "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>") where attributes["exception.message"] != nil'
+          - context: spanevent
+            statements:
+              - 'replace_pattern(attributes["exception.message"], "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>") where attributes["exception.message"] != nil'
+              - 'replace_pattern(attributes["error.message"], "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>") where attributes["error.message"] != nil'
       batch:
         send_batch_size: 10000
         timeout: 5s
@@ -161,7 +181,9 @@ opentelemetry-collector:
         # (the collector ignores unreferenced receivers), so no need to null them.
         traces:
           receivers: [otlp]
-          processors: [memory_limiter, k8sattributes, batch]
+          # `transform` runs the trace_statements above (drop Authorization header + redact JWTs) BEFORE
+          # batch/export, so no caller JWT reaches otel_traces (#122).
+          processors: [memory_limiter, k8sattributes, transform, batch]
           exporters: [clickhouse]
 
   extraEnvs:
