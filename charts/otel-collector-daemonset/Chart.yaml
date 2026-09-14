@@ -16,7 +16,10 @@ type: application
 # 0.1.9: SECURITY (#122) — the traces pipeline now runs a `transform` redaction that drops the
 # http.header.Authorization span attr and strips JWTs (eyJ…) from exception/error/status messages
 # before export, so the upstream kagent-tools JWT-in-span leak can't persist caller tokens into otel_traces.
-version: 0.1.9
+# 0.1.10: SECURITY (#122) — the same redaction on the LOGS pipeline: the agent's pod stdout carries
+# the same `--token eyJ…`, and filelog puts the whole line in the log body, so otel_logs kept the
+# token while otel_traces was already clean.
+version: 0.1.10
 appVersion: "0.1.0"
 dependencies:
   - name: opentelemetry-collector
