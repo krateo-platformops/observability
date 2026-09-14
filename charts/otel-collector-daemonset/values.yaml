@@ -98,18 +98,22 @@ opentelemetry-collector:
         # error_mode:ignore so a redaction statement on an absent attribute key never fails the
         # whole batch (drops telemetry) — it just skips that statement.
         error_mode: ignore
+        # SECURITY (#122): the upstream kagent-tools server leaks the caller's authn JWT unredacted
+        # — the Authorization header (every call) and error/exception messages ("[Kubernetes] ...
+        # --token eyJ...", on kubectl errors). It reaches BOTH sinks: spans over OTLP, and the
+        # agent's pod stdout via filelog — so otel_traces AND otel_logs would persist a
+        # 24h-replayable admin JWT in ClickHouse. Amplified by per-user RBAC (TOKEN_PASSTHROUGH=true
+        # -> --token on every kubectl call). Collector-side backstop until kagent-dev/tools ships
+        # the fix (reported privately). Drop the Authorization header attr outright; redact any JWT
+        # (eyJ base64url incl. its dots) from every sink it can land in.
         log_statements:
           - context: log
             statements:
               - 'replace_pattern(body, "\\x1b\\[[0-9;]*[mGKHFABCDsu]", "")'
+              # The container parser puts the whole pod log line in body as a string, so body is
+              # the sink for every token an agent prints to stdout.
+              - 'replace_pattern(body, "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>")'
               - 'set(attributes["krateo.io/composition-id"], resource.attributes["k8s.pod.labels.krateo.io/composition-id"]) where resource.attributes["k8s.pod.labels.krateo.io/composition-id"] != nil'
-        # SECURITY (#122): the upstream kagent-tools server leaks the caller's authn JWT unredacted
-        # into span sinks — the Authorization header (every call) and error/exception messages
-        # ("[Kubernetes] ... --token eyJ...", on kubectl errors) — which this pipeline would persist
-        # into otel_traces (ClickHouse), where a 24h-replayable admin JWT could be lifted. Amplified
-        # by per-user RBAC (TOKEN_PASSTHROUGH=true → --token on every kubectl call). Collector-side
-        # backstop until kagent-dev/tools ships the fix (reported privately). Drop the Authorization
-        # header attr outright; redact any JWT (eyJ… base64url incl. its dots) from the message sinks.
         trace_statements:
           - context: span
             statements:
