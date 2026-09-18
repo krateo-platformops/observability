@@ -248,9 +248,21 @@
                   "12h",
                   "1d"
                 ]
+              },
+              "tier": {
+                "type": "string",
+                "enum": [
+                  "core",
+                  "extended"
+                ],
+                "description": "core ships whenever defaultAlerts.enabled; extended also requires defaultAlerts.extended. Absent is treated as core."
               }
             }
           }
+        },
+        "extended": {
+          "type": "boolean",
+          "description": "Also ship the extended tier: catch-all and baseline-relative alerts whose thresholds mean 'far above normal' rather than 'anything at all', and which need retuning per cluster."
         }
       }
     }

@@ -9,6 +9,14 @@
   and is labelled app.kubernetes.io/managed-by=krateo-observability-defaults for easy
   identification/removal.
 
+  The set itself lives in values.yaml, where the rules that decide whether an Alert can
+  fire AT ALL are documented — `where` is ClickHouse SQL and not the Lucene the CRD's own
+  field description advertises, and SeverityText is empty on every row. Read that comment
+  before adding an entry: an alert with a filter that never evaluates looks exactly like a
+  cluster with nothing wrong, which is how the five alerts this set replaces survived since
+  install. Entries carry a `tier` (core | extended); extended ones ship only when
+  defaultAlerts.extended is set.
+
   DEPENDENCY: the Alert CRD is served by the clickstack-agent (a separate chart), so these
   must apply AFTER that CRD exists. The Krateo installer applies clickstack-agent before
   krateo-observability, so the ordering holds on a standard install. If you install THIS
@@ -17,6 +25,9 @@
 */ -}}
 {{- if .Values.defaultAlerts.enabled }}
 {{- range .Values.defaultAlerts.alerts }}
+{{- /* Tier gate: `core` always ships; `extended` only when defaultAlerts.extended is set. An entry
+       with no tier is treated as core, so a values override that predates tiering keeps working. */}}
+{{- if or (ne (.tier | default "core") "extended") $.Values.defaultAlerts.extended }}
 ---
 apiVersion: observability.krateo.io/v1alpha1
 kind: Alert
@@ -37,5 +48,6 @@ spec:
   {{- with .message }}
   message: {{ . | quote }}
   {{- end }}
+{{- end }}
 {{- end }}
 {{- end }}
