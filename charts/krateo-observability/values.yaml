@@ -52,43 +52,254 @@ hyperdxLoadBalancer:
 # NOTE: the Alert CRD is served by the clickstack-agent — these apply AFTER that CRD is
 # present (installer applies clickstack-agent first). Standalone-without-CRD → enabled:false.
 defaultAlerts:
+  # Ship the default alert set. Requires the Alert CRD (served by the clickstack-agent chart); set
+  # false when installing this chart standalone without it.
   enabled: true
+
+  # Also ship the EXTENDED tier. Core alerts are the ones that should be silent on a healthy
+  # cluster. Extended ones are catch-alls and baseline-relative rates — a busy cluster has a
+  # non-zero steady level of them, so their thresholds mean "far above normal" and want retuning
+  # against the cluster's own baseline before they are trusted.
+  extended: false
+
+  # THE ALERT SET.
+  #
+  # Every `where` below was RUN against 7 days of real rows before it was written here, and the
+  # count it returned is recorded in docs/alerts.md. A zero there is not a defect — it means that
+  # failure mode did not occur in the window, which is the healthy state for most of this list.
+  # What the counts buy is the difference between "quiet because nothing is wrong" and "quiet
+  # because the filter can never match", and the second is not hypothetical: the five alerts this
+  # set replaces were all of the second kind.
+  #
+  # THREE RULES, each learned from an alert that could not fire:
+  #
+  #  1. `where` is CLICKHOUSE SQL, not Lucene — whatever the CRD's own field description says. The
+  #     reconciler copies the filter verbatim into the query's WHERE clause, where Lucene dies:
+  #         WHERE (Body:"MemoryPressure" OR Body:"DiskPressure")
+  #         -> Code: 62. DB::Exception: Syntax error ... (SYNTAX_ERROR)
+  #     The alert then sits at OK forever, indistinguishable from a healthy cluster.
+  #  2. NEVER filter on SeverityText. This OTel pipeline leaves it empty on every row: measured
+  #     0 non-empty of 8,140,061 rows over 24h. Any severity predicate counts zero forever.
+  #     Filter on Body, or on the event's own JSON.
+  #  3. A LOG alert must exclude the observability stack; an EVENT alert need not. HyperDX writes
+  #     the query it is running into its own container logs, so a log alert searching for a word
+  #     finds the line in which the platform echoed that very word and diagnoses itself. Container
+  #     logs carry telemetry.source = '' and events carry 'k8s-events', so scoping to events is a
+  #     structural guard and scoping to logs needs the explicit ServiceName exclusion used below.
+  #
+  # NOT COVERED, DELIBERATELY: saturation — CPU, memory, disk and PV percentages, node capacity,
+  # certificate DAYS REMAINING. The Alert CRD counts rows in a logs source and cannot address a
+  # metric, so writing those as log searches would produce exactly the always-OK alerts rule 1 is
+  # about. They are blocked on the Metric CRD + metricRef design (alert-troubleshooter#34).
+  #
+  # COST: each firing alert starts a model-driven RCA and opens a TroubleshootingReport, one per
+  # alert (observed: 3 firing alerts -> exactly 3 reports). AlertTroubleshooter's reportCooldown
+  # bounds re-runs per alert, not the fan-out across alerts.
+  #
+  # NAMES ARE PREFIXED sre- because Helm will not adopt a resource it does not already own: an
+  # entry reusing the name of an alert someone hand-applied fails the upgrade outright with an
+  # ownership error, which a draft of this set did against a hand-applied CR on a live cluster.
   alerts:
-    - name: crashloopbackoff-detected
-      displayName: CrashLoopBackOff detected
-      where: 'Body:"CrashLoopBackOff" OR Body:"Back-off restarting"'
-      threshold: 1
+    - name: sre-pod-crashloop
+      tier: core
+      displayName: Pod crash-looping
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') = 'BackOff' AND positionCaseInsensitive(JSONExtractString(Body, 'object', 'message'), 'restarting failed container') > 0
+      threshold: 0
       thresholdType: above
       interval: 5m
-      message: "A container is crash-looping. Open the incident in Autopilot to investigate the workload."
-    - name: pod-restarts-elevated
-      displayName: Pod restarts elevated
-      where: 'Body:"Killing" OR Body:"BackOff" OR Body:"Unhealthy"'
+      message: A container is exiting and kubelet is backing off restarting it. Check the container's own last log lines for why it exits — the event says only that it did.
+    - name: sre-pod-oomkilled
+      tier: core
+      displayName: Pod killed for memory
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND (JSONExtractString(Body, 'object', 'reason') = 'OOMKilling' OR positionCaseInsensitive(JSONExtractString(Body, 'object', 'message'), 'oomkill') > 0)
+      threshold: 0
+      thresholdType: above
+      interval: 5m
+      message: A container was killed for exceeding its memory limit. A runtime OOM kill writes no application log line — the evidence is in the pod's status.containerStatuses[].lastState.terminated, which the investigation reads.
+    - name: sre-image-pull-failure
+      tier: core
+      displayName: Image pull failing
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') IN ('Failed', 'ErrImagePull', 'ImagePullBackOff') AND positionCaseInsensitive(JSONExtractString(Body, 'object', 'message'), 'pull image') > 0
+      threshold: 0
+      thresholdType: above
+      interval: 5m
+      message: 'A pod cannot pull its image: the tag may not exist, or the registry rejected the credentials. Usually a bad deploy or an expired pull secret.'
+    - name: sre-pod-unschedulable
+      tier: core
+      displayName: Pod cannot be scheduled
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') = 'FailedScheduling'
+      threshold: 0
+      thresholdType: above
+      interval: 15m
+      message: The scheduler cannot place a pod — no node satisfies its requests, affinity, taints or topology constraints. Often the first visible symptom of a cluster that has run out of room.
+    - name: sre-pod-evicted
+      tier: core
+      displayName: Pod evicted
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') IN ('Evicted', 'EvictionThresholdMet')
+      threshold: 0
+      thresholdType: above
+      interval: 5m
+      message: 'The kubelet evicted a pod to reclaim a starved node resource. Treat as a NODE problem first: the evicted pod is usually the victim, not the cause.'
+    - name: sre-pod-sandbox-failure
+      tier: core
+      displayName: Pod sandbox / lifecycle failure
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') IN ('FailedCreatePodSandBox', 'FailedKillPod', 'FailedSync')
+      threshold: 0
+      thresholdType: above
+      interval: 5m
+      message: The container runtime could not create or tear down a pod sandbox. Typically CNI, containerd or a node-level fault rather than anything wrong with the workload.
+    - name: sre-probe-failing
+      tier: core
+      displayName: Readiness or liveness probe failing
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') = 'Unhealthy'
+      threshold: 5
+      thresholdType: above
+      interval: 15m
+      message: Probes are failing repeatedly. A failing liveness probe restarts the container; a failing readiness probe silently removes it from its Service's endpoints, which looks like partial outage rather than an outage.
+    - name: sre-job-failed
+      tier: core
+      displayName: Job or CronJob failed
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') IN ('BackoffLimitExceeded', 'JobFailed', 'FailedCreate')
+      threshold: 0
+      thresholdType: above
+      interval: 15m
+      message: A Job exhausted its backoffLimit or could not create its pods. Scheduled work is silently not happening — backups and reconciliation jobs fail this way for weeks unnoticed.
+    - name: sre-volume-attach-failure
+      tier: core
+      displayName: Volume mount or attach failing
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') IN ('FailedMount', 'FailedAttachVolume')
       threshold: 3
       thresholdType: above
       interval: 15m
-      message: "Repeated pod restart / unhealthy events. A workload may be flapping."
-    - name: app-error-rate-elevated
-      displayName: Application error rate elevated
-      where: 'SeverityText:"ERROR" OR SeverityText:"FATAL"'
+      message: 'A pod cannot mount or attach its volume. Common causes: the PV is still attached to another node, a missing Secret or ConfigMap named as a volume, or a CSI driver that is down.'
+    - name: sre-pvc-provisioning-failure
+      tier: core
+      displayName: PersistentVolume provisioning failed
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') IN ('ProvisioningFailed', 'FailedBinding')
+      threshold: 0
+      thresholdType: above
+      interval: 15m
+      message: A PersistentVolumeClaim cannot be satisfied — no matching PV, a storage class that does not exist, or a quota refusal from the storage backend.
+    - name: sre-node-not-ready
+      tier: core
+      displayName: Node not ready
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') IN ('NodeNotReady', 'NodeNotSchedulable', 'Rebooted')
+      threshold: 0
+      thresholdType: above
+      interval: 5m
+      message: A node stopped reporting ready, was cordoned, or rebooted. Everything it was running is being rescheduled — expect correlated workload alerts and treat this one as the cause.
+    - name: sre-node-resource-pressure
+      tier: core
+      displayName: Node under resource pressure
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') IN ('NodeHasDiskPressure', 'NodeHasInsufficientMemory', 'NodeHasInsufficientPID', 'FreeDiskSpaceFailed', 'ImageGCFailed')
+      threshold: 0
+      thresholdType: above
+      interval: 5m
+      message: 'A node is short of disk, memory or PIDs. Evictions follow if it is not relieved. NOTE: this catches the kubelet''s pressure TRANSITIONS, not a utilisation percentage — a true saturation threshold needs the metric support this catalogue''s header describes.'
+    - name: sre-node-preempted
+      tier: core
+      displayName: Node preempted or scheduled for termination
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') IN ('Preempting', 'Preempted', 'TerminationScheduled')
+      threshold: 0
+      thresholdType: above
+      interval: 5m
+      message: A spot/preemptible node is being reclaimed by the cloud provider. Expected on preemptible pools — alarming on a pool that is supposed to be on-demand, which is exactly the misconfiguration worth catching.
+    - name: sre-loadbalancer-failure
+      tier: core
+      displayName: LoadBalancer reconciliation failing
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') IN ('SyncLoadBalancerFailed', 'CreatingLoadBalancerFailed', 'DeleteLoadBalancerFailed')
+      threshold: 0
+      thresholdType: above
+      interval: 15m
+      message: The cloud controller cannot create, update or delete a LoadBalancer. A failing DELETE is the expensive one — it leaks a billed cloud resource that no longer appears in the cluster.
+    - name: sre-telemetry-pipeline-stalled
+      tier: core
+      displayName: Telemetry pipeline stalled
+      where: ''
+      threshold: 100
+      thresholdType: below
+      interval: 15m
+      message: 'Almost no logs reached the store in the last window. This is a DEAD-MAN''S SWITCH: it fires on the ABSENCE of data, which is the one failure every other alert here is blind to — a broken collector makes the whole catalogue go quiet and look healthy.'
+    - name: sre-krateo-composition-reconcile-error
+      tier: core
+      displayName: Krateo — composition reconcile errors
+      where: (positionCaseInsensitive(Body, 'Reconciler error') > 0 OR JSONExtractString(Body, 'object', 'reason') = 'CannotObserveExternalResource') AND ResourceAttributes['telemetry.source'] = '' AND ServiceName NOT IN ('krateo-observability', 'krateo-alert-troubleshooter', 'krateo-clickstack', 'krateo-clickstack-clickhouse-clickhouse', 'krateo-clickstack-keeper-keeper', 'krateo-clickstack-mongodb', 'clickhouse-mcp-server', 'clickhouse-operator', 'incident-agent', 'krateo-autopilot', 'kagent', 'repo-mcp-server')
+      threshold: 2
+      thresholdType: above
+      interval: 15m
+      message: Compositions are failing to reconcile. The composition may still report Ready — Ready means the chart rendered and applied, not that its children are healthy — so trust this over the status pill.
+    - name: sre-krateo-provider-connection-failure
+      tier: core
+      displayName: Krateo — provider cannot reach its target
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') = 'CannotConnectToProvider'
+      threshold: 10
+      thresholdType: above
+      interval: 15m
+      message: A Krateo provider cannot reach the system it manages — expired credentials, a rotated token, or the endpoint being unreachable. Everything that provider manages is frozen while this lasts.
+    - name: sre-app-panic
+      tier: core
+      displayName: Application panic or unhandled traceback
+      where: 'ResourceAttributes[''telemetry.source''] = '''' AND ServiceName NOT IN (''krateo-observability'', ''krateo-alert-troubleshooter'', ''krateo-clickstack'', ''krateo-clickstack-clickhouse-clickhouse'', ''krateo-clickstack-keeper-keeper'', ''krateo-clickstack-mongodb'', ''clickhouse-mcp-server'', ''clickhouse-operator'', ''incident-agent'', ''krateo-autopilot'', ''kagent'', ''repo-mcp-server'') AND (position(Body, ''panic: '') > 0 OR position(Body, ''Traceback (most recent call last)'') > 0 OR position(Body, ''Unhandled exception'') > 0)'
+      threshold: 0
+      thresholdType: above
+      interval: 15m
+      message: 'A process crashed on an unhandled error. Distinct from the crash-loop alert: this catches the FIRST crash and names the failing code, before kubelet backoff makes it visible as a restart loop.'
+    - name: sre-app-out-of-memory
+      tier: core
+      displayName: Out-of-memory reported by an application
+      where: ResourceAttributes['telemetry.source'] = '' AND ServiceName NOT IN ('krateo-observability', 'krateo-alert-troubleshooter', 'krateo-clickstack', 'krateo-clickstack-clickhouse-clickhouse', 'krateo-clickstack-keeper-keeper', 'krateo-clickstack-mongodb', 'clickhouse-mcp-server', 'clickhouse-operator', 'incident-agent', 'krateo-autopilot', 'kagent', 'repo-mcp-server') AND (positionCaseInsensitive(Body, 'out of memory') > 0 OR position(Body, 'OutOfMemoryError') > 0 OR positionCaseInsensitive(Body, 'cannot allocate memory') > 0)
+      threshold: 0
+      thresholdType: above
+      interval: 15m
+      message: A runtime reported memory exhaustion itself — a JVM heap error, a Go allocation failure, a malloc refusal. Complements the OOMKilled alert, which only sees kills the KERNEL performed.
+    - name: sre-certificate-expiry-warning
+      tier: core
+      displayName: Certificate expiry or TLS verification failure
+      where: 'ResourceAttributes[''telemetry.source''] = '''' AND ServiceName NOT IN (''krateo-observability'', ''krateo-alert-troubleshooter'', ''krateo-clickstack'', ''krateo-clickstack-clickhouse-clickhouse'', ''krateo-clickstack-keeper-keeper'', ''krateo-clickstack-mongodb'', ''clickhouse-mcp-server'', ''clickhouse-operator'', ''incident-agent'', ''krateo-autopilot'', ''kagent'', ''repo-mcp-server'') AND ((positionCaseInsensitive(Body, ''certificate'') > 0 AND (positionCaseInsensitive(Body, ''expir'') > 0 OR positionCaseInsensitive(Body, ''has expired'') > 0)) OR positionCaseInsensitive(Body, ''x509: certificate'') > 0)'
+      threshold: 0
+      thresholdType: above
+      interval: 1h
+      message: Something reported an expiring, expired or unverifiable certificate. Caught from LOG LINES, so it fires when a client already failed — expiry measured in days remaining needs the metric support described in this file's header.
+    - name: sre-rbac-denied-burst
+      tier: extended
+      displayName: Authorization failures elevated
+      where: 'ResourceAttributes[''telemetry.source''] = '''' AND ServiceName NOT IN (''krateo-observability'', ''krateo-alert-troubleshooter'', ''krateo-clickstack'', ''krateo-clickstack-clickhouse-clickhouse'', ''krateo-clickstack-keeper-keeper'', ''krateo-clickstack-mongodb'', ''clickhouse-mcp-server'', ''clickhouse-operator'', ''incident-agent'', ''krateo-autopilot'', ''kagent'', ''repo-mcp-server'') AND (positionCaseInsensitive(Body, ''is forbidden: user'') > 0 OR positionCaseInsensitive(Body, ''permission denied'') > 0 OR position(Body, ''AccessDenied'') > 0)'
+      threshold: 20
+      thresholdType: above
+      interval: 15m
+      message: A burst of authorization refusals. Either a ServiceAccount lost a binding it needs — a controller silently stops working this way — or something is probing for access it should not have.
+    - name: sre-upstream-timeouts
+      tier: extended
+      displayName: Upstream timeouts elevated
+      where: ResourceAttributes['telemetry.source'] = '' AND ServiceName NOT IN ('krateo-observability', 'krateo-alert-troubleshooter', 'krateo-clickstack', 'krateo-clickstack-clickhouse-clickhouse', 'krateo-clickstack-keeper-keeper', 'krateo-clickstack-mongodb', 'clickhouse-mcp-server', 'clickhouse-operator', 'incident-agent', 'krateo-autopilot', 'kagent', 'repo-mcp-server') AND (position(Body, 'context deadline exceeded') > 0 OR positionCaseInsensitive(Body, 'i/o timeout') > 0 OR positionCaseInsensitive(Body, 'connection refused') > 0)
       threshold: 50
       thresholdType: above
       interval: 15m
-      message: "Elevated ERROR/FATAL log volume across the platform services."
-    - name: node-memory-pressure
-      displayName: Node MemoryPressure condition
-      where: 'Body:"MemoryPressure" OR Body:"DiskPressure"'
-      threshold: 1
+      message: 'Calls between services are timing out or being refused. Baseline-relative by nature: a healthy cluster has a non-zero rate, so retune the threshold to this cluster rather than trusting the default.'
+    - name: sre-volume-resize-issue
+      tier: extended
+      displayName: Volume resize pending or failed
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') IN ('FileSystemResizeRequired', 'VolumeResizeFailed', 'ExternalExpanding')
+      threshold: 0
       thresholdType: above
-      interval: 5m
-      message: "A node reported Memory/Disk pressure. Capacity or a noisy pod may need attention."
-    - name: agent-tool-failure
-      displayName: Autopilot agent/tool failure
-      where: 'Body:"failed to upsert tool server" OR Body:"mcp server" OR Body:"tool call failed"'
-      threshold: 1
+      interval: 1h
+      message: A volume expansion is stuck or needs a pod restart to complete the filesystem resize. Usually benign, occasionally the reason a disk-full condition never actually clears.
+    - name: sre-krateo-external-resource-failure
+      tier: extended
+      displayName: Krateo — external resource operations failing
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') LIKE 'Cannot%ExternalResource'
+      threshold: 200
       thresholdType: above
       interval: 15m
-      message: "kagent tool/MCP errors — Autopilot tooling may be degraded."
+      message: 'Providers are failing to observe, create, update or delete the resources they manage. DELIBERATELY BLUNT and extended-tier: on a busy platform this reason has a high steady baseline, so the default threshold means `far above normal`, not `any failure`. Retune it to this cluster''s own baseline.'
+    - name: sre-kubernetes-warning-burst
+      tier: extended
+      displayName: Kubernetes warning events elevated
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'type') = 'Warning'
+      threshold: 100
+      thresholdType: above
+      interval: 15m
+      message: 'A catch-all safety net: warning events across the cluster are far above normal. It names nothing specific by design — it exists to catch the failure modes this catalogue does NOT have a named alert for, which is the whole point of having one.'
 
 # ---------------------------------------------------------------------------
 # Upstream clickstack passthrough (verbatim from obs-stack/clickstack/values.yaml)
