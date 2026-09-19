@@ -76,27 +76,46 @@ about whether your cluster has that problem.
 | `sre-krateo-external-resource-failure` | extended | events | above 200 | 15m | 57,567 |
 | `sre-kubernetes-warning-burst` | extended | events | above 100 | 15m | 71,291 |
 
+## What a threshold means
+
+`above N` is **`count >= N`**, not `count > N`. Read from the running HyperDX build (2.35.0,
+`packages/api/build/tasks/checkAlerts/index.js`):
+
+```js
+ABOVE -> value >= threshold        ABOVE_EXCLUSIVE -> value > threshold
+BELOW -> value <  threshold        BELOW_OR_EQUAL  -> value <= threshold
+```
+
+So **`threshold: 0` with `above` is unconditionally true** and fires on an empty result. The first
+version of this catalogue shipped 15 such alerts. Every one went `ALERT` on a cluster where the
+condition was not occurring, and each firing alert opened a `TroubleshootingReport` — 3 reports
+became 18 within minutes.
+
+Verified by A/B on a live cluster rather than by reading: two alerts with a clause matching zero
+rows, identical but for the threshold — **0 fired, 1 stayed OK** — and a third with threshold 1 over
+a clause matching 2,538 rows fired correctly.
+
+A threshold is therefore **the smallest count that should fire**. `1` means "any occurrence".
+
 ## Threshold calibration
 
-Non-zero thresholds were checked against the share of **673 fifteen-minute windows** each
-would have been ALERTing in, because a threshold that fires constantly trains people to ignore
-it and one that never fires is the same as having no alert:
+Non-zero thresholds were checked against the share of **673 fifteen-minute windows** each would be
+ALERTing in. They are written as N+1 against the measured `> N`, which is not pedantry — the
+boundary case is where the difference lives:
 
 | alert | threshold | % of windows firing |
 |---|---|---|
-| `sre-probe-failing` | > 5 | 2.8% |
-| `sre-volume-attach-failure` | > 3 | 0.6% |
-| `sre-krateo-provider-connection-failure` | > 10 | 1.6% |
-| `sre-telemetry-pipeline-stalled` | < 100 | 0.0% (observed floor: 67,081 rows/window) |
+| `sre-probe-failing` | >= 6 | 3.1%  (at `>= 5` it is 3.3%) |
+| `sre-volume-attach-failure` | >= 4 | 0.6%  (**at `>= 3` it is 9.4%** — a 15x difference) |
+| `sre-krateo-provider-connection-failure` | >= 11 | 1.6% |
+| `sre-telemetry-pipeline-stalled` | < 100 | 0.0%  (observed floor: 67,081 rows/window) |
 
-Where measurement contradicted the draft, the draft changed: `sre-loadbalancer-failure` was
-written at 5, measured at **max 3 per window, mean 2.98**, and would have fired in **0% of
-windows while a LoadBalancer delete was failing continuously** — hiding a leaking billed cloud
-resource. It ships at 0.
+`below` is exclusive, so the dead-man's switch reads correctly as "fewer than 100 rows".
 
-A threshold of 0 with `above` means strictly greater, so it fires on the first matching row.
-On a cluster with a genuine ongoing fault such an alert STAYS in `ALERT` until the fault is
-fixed. That is intended, not a misconfiguration.
+Where measurement contradicted the draft, the draft changed: `sre-loadbalancer-failure` was written
+at 5, measured at max 3 per window, and would have fired in 0% of windows while a LoadBalancer
+delete was failing continuously — hiding a leaking billed cloud resource. It fires on any
+occurrence.
 
 ## What is deliberately not covered
 
