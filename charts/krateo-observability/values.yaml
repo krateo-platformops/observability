@@ -241,7 +241,7 @@ defaultAlerts:
     - name: sre-krateo-composition-reconcile-error
       tier: core
       displayName: Krateo — composition reconcile errors
-      where: (positionCaseInsensitive(Body, 'Reconciler error') > 0 OR JSONExtractString(Body, 'object', 'reason') = 'CannotObserveExternalResource') AND ResourceAttributes['telemetry.source'] = '' AND ServiceName NOT IN ('krateo-observability', 'krateo-alert-troubleshooter', 'krateo-clickstack', 'krateo-clickstack-clickhouse-clickhouse', 'krateo-clickstack-keeper-keeper', 'krateo-clickstack-mongodb', 'clickhouse-mcp-server', 'clickhouse-operator', 'incident-agent', 'krateo-autopilot', 'kagent', 'repo-mcp-server')
+      where: (positionCaseInsensitive(Body, 'Reconciler error') > 0 OR JSONExtractString(Body, 'object', 'reason') = 'CannotObserveExternalResource') AND ResourceAttributes['telemetry.source'] = '' AND ServiceName NOT IN ('krateo-observability', 'krateo-alert-troubleshooter', 'krateo-alert-provider', 'krateo-clickstack', 'krateo-clickstack-clickhouse-clickhouse', 'krateo-clickstack-keeper-keeper', 'krateo-clickstack-mongodb', 'clickhouse-mcp-server', 'clickhouse-operator', 'incident-agent', 'krateo-autopilot', 'kagent', 'repo-mcp-server')
       threshold: 3
       thresholdType: above
       interval: 15m
@@ -257,7 +257,7 @@ defaultAlerts:
     - name: sre-app-panic
       tier: core
       displayName: Application panic or unhandled traceback
-      where: 'ResourceAttributes[''telemetry.source''] = '''' AND ServiceName NOT IN (''krateo-observability'', ''krateo-alert-troubleshooter'', ''krateo-clickstack'', ''krateo-clickstack-clickhouse-clickhouse'', ''krateo-clickstack-keeper-keeper'', ''krateo-clickstack-mongodb'', ''clickhouse-mcp-server'', ''clickhouse-operator'', ''incident-agent'', ''krateo-autopilot'', ''kagent'', ''repo-mcp-server'') AND (position(Body, ''panic: '') > 0 OR position(Body, ''Traceback (most recent call last)'') > 0 OR position(Body, ''Unhandled exception'') > 0)'
+      where: 'ResourceAttributes[''telemetry.source''] = '''' AND ServiceName NOT IN (''krateo-observability'', ''krateo-alert-troubleshooter'', ''krateo-alert-provider'', ''krateo-clickstack'', ''krateo-clickstack-clickhouse-clickhouse'', ''krateo-clickstack-keeper-keeper'', ''krateo-clickstack-mongodb'', ''clickhouse-mcp-server'', ''clickhouse-operator'', ''incident-agent'', ''krateo-autopilot'', ''kagent'', ''repo-mcp-server'') AND (position(Body, ''panic: '') > 0 OR position(Body, ''Traceback (most recent call last)'') > 0 OR position(Body, ''Unhandled exception'') > 0)'
       threshold: 1
       thresholdType: above
       interval: 15m
@@ -265,7 +265,7 @@ defaultAlerts:
     - name: sre-app-out-of-memory
       tier: core
       displayName: Out-of-memory reported by an application
-      where: ResourceAttributes['telemetry.source'] = '' AND ServiceName NOT IN ('krateo-observability', 'krateo-alert-troubleshooter', 'krateo-clickstack', 'krateo-clickstack-clickhouse-clickhouse', 'krateo-clickstack-keeper-keeper', 'krateo-clickstack-mongodb', 'clickhouse-mcp-server', 'clickhouse-operator', 'incident-agent', 'krateo-autopilot', 'kagent', 'repo-mcp-server') AND (positionCaseInsensitive(Body, 'out of memory') > 0 OR position(Body, 'OutOfMemoryError') > 0 OR positionCaseInsensitive(Body, 'cannot allocate memory') > 0)
+      where: ResourceAttributes['telemetry.source'] = '' AND ServiceName NOT IN ('krateo-observability', 'krateo-alert-troubleshooter', 'krateo-alert-provider', 'krateo-clickstack', 'krateo-clickstack-clickhouse-clickhouse', 'krateo-clickstack-keeper-keeper', 'krateo-clickstack-mongodb', 'clickhouse-mcp-server', 'clickhouse-operator', 'incident-agent', 'krateo-autopilot', 'kagent', 'repo-mcp-server') AND (positionCaseInsensitive(Body, 'out of memory') > 0 OR position(Body, 'OutOfMemoryError') > 0 OR positionCaseInsensitive(Body, 'cannot allocate memory') > 0)
       threshold: 1
       thresholdType: above
       interval: 15m
@@ -273,7 +273,7 @@ defaultAlerts:
     - name: sre-certificate-expiry-warning
       tier: core
       displayName: Certificate expiry or TLS verification failure
-      where: 'ResourceAttributes[''telemetry.source''] = '''' AND ServiceName NOT IN (''krateo-observability'', ''krateo-alert-troubleshooter'', ''krateo-clickstack'', ''krateo-clickstack-clickhouse-clickhouse'', ''krateo-clickstack-keeper-keeper'', ''krateo-clickstack-mongodb'', ''clickhouse-mcp-server'', ''clickhouse-operator'', ''incident-agent'', ''krateo-autopilot'', ''kagent'', ''repo-mcp-server'') AND ((positionCaseInsensitive(Body, ''certificate'') > 0 AND (positionCaseInsensitive(Body, ''expir'') > 0 OR positionCaseInsensitive(Body, ''has expired'') > 0)) OR positionCaseInsensitive(Body, ''x509: certificate'') > 0)'
+      where: 'ResourceAttributes[''telemetry.source''] = '''' AND ServiceName NOT IN (''krateo-observability'', ''krateo-alert-troubleshooter'', ''krateo-alert-provider'', ''krateo-clickstack'', ''krateo-clickstack-clickhouse-clickhouse'', ''krateo-clickstack-keeper-keeper'', ''krateo-clickstack-mongodb'', ''clickhouse-mcp-server'', ''clickhouse-operator'', ''incident-agent'', ''krateo-autopilot'', ''kagent'', ''repo-mcp-server'') AND ((positionCaseInsensitive(Body, ''certificate'') > 0 AND (positionCaseInsensitive(Body, ''expir'') > 0 OR positionCaseInsensitive(Body, ''has expired'') > 0)) OR positionCaseInsensitive(Body, ''x509: certificate'') > 0)'
       threshold: 1
       thresholdType: above
       interval: 1h
@@ -281,7 +281,7 @@ defaultAlerts:
     - name: sre-rbac-denied-burst
       tier: extended
       displayName: Authorization failures elevated
-      where: 'ResourceAttributes[''telemetry.source''] = '''' AND ServiceName NOT IN (''krateo-observability'', ''krateo-alert-troubleshooter'', ''krateo-clickstack'', ''krateo-clickstack-clickhouse-clickhouse'', ''krateo-clickstack-keeper-keeper'', ''krateo-clickstack-mongodb'', ''clickhouse-mcp-server'', ''clickhouse-operator'', ''incident-agent'', ''krateo-autopilot'', ''kagent'', ''repo-mcp-server'') AND (positionCaseInsensitive(Body, ''is forbidden: user'') > 0 OR positionCaseInsensitive(Body, ''permission denied'') > 0 OR position(Body, ''AccessDenied'') > 0)'
+      where: 'ResourceAttributes[''telemetry.source''] = '''' AND ServiceName NOT IN (''krateo-observability'', ''krateo-alert-troubleshooter'', ''krateo-alert-provider'', ''krateo-clickstack'', ''krateo-clickstack-clickhouse-clickhouse'', ''krateo-clickstack-keeper-keeper'', ''krateo-clickstack-mongodb'', ''clickhouse-mcp-server'', ''clickhouse-operator'', ''incident-agent'', ''krateo-autopilot'', ''kagent'', ''repo-mcp-server'') AND (positionCaseInsensitive(Body, ''is forbidden: user'') > 0 OR positionCaseInsensitive(Body, ''permission denied'') > 0 OR position(Body, ''AccessDenied'') > 0)'
       threshold: 20
       thresholdType: above
       interval: 15m
@@ -289,7 +289,7 @@ defaultAlerts:
     - name: sre-upstream-timeouts
       tier: extended
       displayName: Upstream timeouts elevated
-      where: ResourceAttributes['telemetry.source'] = '' AND ServiceName NOT IN ('krateo-observability', 'krateo-alert-troubleshooter', 'krateo-clickstack', 'krateo-clickstack-clickhouse-clickhouse', 'krateo-clickstack-keeper-keeper', 'krateo-clickstack-mongodb', 'clickhouse-mcp-server', 'clickhouse-operator', 'incident-agent', 'krateo-autopilot', 'kagent', 'repo-mcp-server') AND (position(Body, 'context deadline exceeded') > 0 OR positionCaseInsensitive(Body, 'i/o timeout') > 0 OR positionCaseInsensitive(Body, 'connection refused') > 0)
+      where: ResourceAttributes['telemetry.source'] = '' AND ServiceName NOT IN ('krateo-observability', 'krateo-alert-troubleshooter', 'krateo-alert-provider', 'krateo-clickstack', 'krateo-clickstack-clickhouse-clickhouse', 'krateo-clickstack-keeper-keeper', 'krateo-clickstack-mongodb', 'clickhouse-mcp-server', 'clickhouse-operator', 'incident-agent', 'krateo-autopilot', 'kagent', 'repo-mcp-server') AND (position(Body, 'context deadline exceeded') > 0 OR positionCaseInsensitive(Body, 'i/o timeout') > 0 OR positionCaseInsensitive(Body, 'connection refused') > 0)
       threshold: 50
       thresholdType: above
       interval: 15m
