@@ -221,7 +221,8 @@
                 "type": "string"
               },
               "threshold": {
-                "type": "number"
+                "type": "integer",
+                "description": "A row count. Typed integer, not number: crdgen types number as a string in the generated CRD."
               },
               "thresholdType": {
                 "type": "string",
