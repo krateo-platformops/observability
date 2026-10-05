@@ -55,7 +55,11 @@ type: application
 # in-cluster (port-forward the ClusterIP), or front it through the agentgateway.
 # 0.1.19: the log-scoped default alerts also exclude ServiceName 'krateo-alert-provider', the
 # alert-provider's own logs (it quotes incident-comparison verdicts, which can echo alert text).
-version: 0.1.19
+# 0.1.20: the log-scoped default alerts also exclude ServiceName 'incident-controller', whose own
+# "Reconciler error" lines (about Incidents) kept sre-krateo-composition-reconcile-error firing every
+# minute; sre-volume-attach-failure skips the incident-check pods' FailedMount events in
+# krateo-incident-checks.
+version: 0.1.20
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack

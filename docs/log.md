@@ -12,6 +12,12 @@ timestamp: 2026-08-07T00:00:00Z
 Curated, newest first. Release notes live in GitHub Releases; the `Chart.yaml` comment
 blocks carry the per-bump rationale.
 
+- **2026-10-05 — the default alerts stop alerting on the incident pipeline (0.1.20).** The
+  log-scoped alerts exclude ServiceName `incident-controller`, whose own `Reconciler error` lines
+  kept `sre-krateo-composition-reconcile-error` firing every minute on krateo-057, and
+  `sre-volume-attach-failure` skips the incident-check pods' events in `krateo-incident-checks`.
+  Measured counts in [alerts.md](alerts.md#the-three-rules).
+
 - **2026-08-13 — operator charts folded in (six charts now).** The retired
   `clickstack-operators-chart` repo's two composition wrappers — `clickhouse-operator`
   (wraps `clickhouse-operator-helm 0.0.5`, webhook + cert-manager off) and `mongodb-operator`
