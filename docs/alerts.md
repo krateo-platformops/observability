@@ -41,6 +41,22 @@ the line in which the platform echoed that word and diagnoses itself. Container 
 `telemetry.source = ''` and events carry `'k8s-events'`, so scoping to events is a structural
 guard; scoping to logs needs the explicit `ServiceName NOT IN (...)` exclusion.
 
+The incident pipeline counts as part of that stack. `incident-controller` logs `Reconciler error`
+for each Incident it cannot reconcile, and the incident checks it runs in `krateo-incident-checks`
+raise their own events. On krateo-057 (24h to 2026-10-05) the former were 21,440 rows, which kept
+`sre-krateo-composition-reconcile-error` ALERT in all 1,440 minutes, and the check pods' `FailedMount`
+(a check's ConfigMap gone before its pod mounted it) were 57 of the 131 rows
+`sre-volume-attach-failure` matched. Every alert that fires opens an Incident, so an alert on
+this pipeline's own noise keeps feeding itself. The log alerts exclude `incident-controller`, and
+`sre-volume-attach-failure` skips `krateo-incident-checks`:
+
+| alert, 24h on krateo-057 | rows before | rows after | minutes ALERT before | after | still matches |
+|---|---|---|---|---|---|
+| `sre-krateo-composition-reconcile-error` | 21,446 | 11 | 1,440 | 30 | core-provider CompositionDefinition errors, mongodb-operator |
+| `sre-volume-attach-failure` | 131 | 74 | 124 | 55 | FailedMount in kube-system and gmp-system, FailedAttachVolume in krateo-system |
+
+"Minutes ALERT" counts the minutes whose trailing 15 minutes held at least the threshold.
+
 ## Measured behaviour
 
 Counts are matching rows over **7 days** on a live cluster (krateo-057). **A zero is not a
