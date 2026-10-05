@@ -4,7 +4,7 @@ title: clickstack-chart — log
 description: Curated history of the observability chart repo — incidents, load-bearing fixes, renames and structural changes, newest first.
 resource: oci://ghcr.io/krateo-platformops/charts/krateo-observability
 tags: [log, history, incidents]
-timestamp: 2026-08-07T00:00:00Z
+timestamp: 2026-10-05T00:00:00Z
 ---
 
 # Log

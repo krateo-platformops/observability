@@ -4,7 +4,7 @@ title: observability — the default alert set
 description: The 25 Alert CRs the chart seeds, the measured evidence behind every filter and threshold, and the three rules that decide whether an Alert can fire at all — `where` is ClickHouse SQL and not the Lucene the CRD advertises, SeverityText is empty on every row, and log alerts must exclude the observability stack or they diagnose themselves.
 resource: oci://ghcr.io/krateo-platformops/charts/krateo-observability
 tags: [alerting, alerts, observability, clickhouse, hyperdx, sre, runbook]
-timestamp: 2026-09-18T00:00:00Z
+timestamp: 2026-10-05T00:00:00Z
 ---
 
 # The default alert set
