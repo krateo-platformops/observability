@@ -59,7 +59,13 @@ type: application
 # "Reconciler error" lines (about Incidents) kept sre-krateo-composition-reconcile-error firing every
 # minute; sre-volume-attach-failure skips the incident-check pods' FailedMount events in
 # krateo-incident-checks.
-version: 0.1.20
+# 0.1.21: the HyperDX app's liveness failureThreshold goes 3 -> 10. Upstream's 10 + 30x3 budget
+# kills at ~70s and measured boot-to-first-/health-200 on 057 is 41.4s, a ~29s margin that a stack
+# roll closes -- 15 SIGKILLs on 2026-10-11, each during boot. A startupProbe is not templated by
+# clickstack 3.2.0 and we do not patch upstream, so failureThreshold is the exposed knob. Also sets
+# requests (100m / 512Mi) against upstream's empty `resources`, which left the pod in BestEffort;
+# no limits, on purpose.
+version: 0.1.21
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack
