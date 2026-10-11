@@ -164,6 +164,104 @@
                   "type": "boolean"
                 }
               }
+            },
+            "deployment": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "livenessProbe": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "initialDelaySeconds": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "periodSeconds": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "timeoutSeconds": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "failureThreshold": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "readinessProbe": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "initialDelaySeconds": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "periodSeconds": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "timeoutSeconds": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "failureThreshold": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "resources": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "requests": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "properties": {
+                        "cpu": {
+                          "type": [
+                            "string",
+                            "integer"
+                          ]
+                        },
+                        "memory": {
+                          "type": [
+                            "string",
+                            "integer"
+                          ]
+                        }
+                      }
+                    },
+                    "limits": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "properties": {
+                        "cpu": {
+                          "type": [
+                            "string",
+                            "integer"
+                          ]
+                        },
+                        "memory": {
+                          "type": [
+                            "string",
+                            "integer"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
             }
           }
         },

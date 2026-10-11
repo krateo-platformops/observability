@@ -533,6 +533,38 @@ clickstack:
     ingress:
       enabled: false
 
+    # The HyperDX app flapped 15 times on krateo-057 (2026-10-11), every one a SIGKILL after a
+    # failed liveness probe. The decisive evidence is that the PREVIOUS container's log held only
+    # the OpenTelemetry startup banner and nothing after it: it was being killed DURING BOOT, not
+    # while wedged.
+    #
+    # Upstream's liveness budget is initialDelaySeconds 10 + periodSeconds 30 x failureThreshold 3,
+    # so the kill lands ~70s after the container starts. Measured boot-to-first-/health-200 on 057:
+    # 41.4s. That leaves a margin of ~29s, so a boot 70% slower than nominal is fatal -- which is
+    # exactly what a stack roll produces (mongo restarting, image pulls, node contention). It then
+    # went quiet once the node was warm, which is why this reads as transient and is not.
+    #
+    # A startupProbe is the right instrument and we cannot use it: upstream clickstack 3.2.0 does
+    # not template one (grepped templates/, not assumed) and we do not patch third-party charts.
+    # failureThreshold IS exposed, so it is the knob: 10 moves the kill to 10 + 30x10 = 310s, about
+    # 7.5x the measured boot, while still restarting a genuinely wedged process inside ~5 minutes --
+    # an acceptable detection delay for an observability UI, and the trade is explicit rather than
+    # incidental. readinessProbe is deliberately left at upstream defaults: it already keeps the pod
+    # out of the Service until /health answers, and it cannot kill.
+    deployment:
+      livenessProbe:
+        failureThreshold: 10
+      # Upstream ships `resources: {}`, so the pod lands in BestEffort QoS and is first to be evicted
+      # under node pressure. Requests ONLY, deliberately. Measured steady state is 441Mi / 38m, and
+      # the observed failure is a probe-budget failure, not a memory failure: a memory LIMIT would
+      # add an OOMKill path that does not exist today, and a CPU limit would throttle precisely the
+      # boot path whose slowness caused the flapping in the first place. Requests move it to
+      # Burstable and fix scheduling without introducing a new way to die.
+      resources:
+        requests:
+          cpu: 100m
+          memory: 512Mi
+
   mongodb:
     enabled: true
     persistence:
