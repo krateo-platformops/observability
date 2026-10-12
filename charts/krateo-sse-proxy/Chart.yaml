@@ -4,8 +4,14 @@ description: >-
   Krateo SSE proxy. Polls ClickHouse and pushes new K8s events to connected
   browsers via Server-Sent Events.
 type: application
-version: 0.1.12
-appVersion: "1.1.6"
+# 0.1.13: bump the sse-proxy image to 1.1.7 — prunes the GET /events?composition_id=... scan with a
+# tokenbf prefilter on Body (sse-proxy#20/#21). The composition predicate was JSONExtractString over
+# a non-indexed column, so it could not prune and cost ~2s REGARDLESS of result size; the 0-row case
+# was the slowest of all because nothing could early-exit at LIMIT 200. Measured on krateo-057
+# 2026-10-12 with the shipped SELECT shape (medians of 3 interleaved rounds): 18.49s for a
+# composition with no events, 5.21s with events, against a 1.33s unfiltered control.
+version: 0.1.13
+appVersion: "1.1.7"
 home: https://krateo.io
 icon: https://github.com/krateoplatformops/krateo/blob/main/docs/media/logo.svg
 keywords:

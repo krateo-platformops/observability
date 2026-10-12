@@ -18,8 +18,16 @@ type: application
 # krateo.io/composition-id label (editor-created compositions' own reconcile events now correlate).
 # 0.3.6: rewriteDeprecatedComponentNames=false — the krateo custom otel image only has `k8sattributes`,
 # not the `k8s_attributes` the 0.170.0 chart rewrites to (runtime "unknown type k8s_attributes").
-version: 0.3.7
-appVersion: "1.0.3"
+# 0.3.8: bump the custom collector image to 1.0.4 — compositionresolver invalidates the RESTMapper
+# on a NO-MATCH, so a composition group/version minted after the collector pod started can be
+# learned (otel-collector#22/#24). Measured on krateo-057 2026-10-12: composition-kind event
+# labelling was ~100% for established group/versions but 0% for newly minted ones —
+# composition.krateo.io/v1-12-42 0/8 and v0-3-413 0/6 (both rolled that morning) against
+# v0-3-0 8159/8165 and v0-1-0 3224/3225. Every chart bump mints a new vX-Y-Z, and the upstream
+# DeferredDiscoveryRESTMapper self-heal is dead because memCacheClient.Fresh() reports POPULATED,
+# not current. 1.0.4 also carries the Go 1.25 builder fix that made 1.0.4's first cut unbuildable.
+version: 0.3.8
+appVersion: "1.0.4"
 dependencies:
   - name: opentelemetry-collector
     version: 0.170.0
