@@ -427,6 +427,26 @@ clickstack:
         # serving its default routes, so the operator probes + native query API must be re-declared.
         settings:
           extraConfig:
+            # SERVER LOG FILES — the other half of the retention incident below.
+            # That fix bounded the system.* log TABLES with a 3-day ttl, but the server's own
+            # log FILES on /var/log/clickhouse-server share the SAME PVC as the data, and nothing
+            # bounded them. Upstream defaults are level=trace, size=1000M, count=50 — a rotation
+            # budget of 50GB on a 15Gi volume, i.e. rotation can never reclaim anything because it
+            # is allowed to hold more than three times the disk.
+            #
+            # Measured on krateo-057 2026-10-12: /var/log/clickhouse-server was 3.4G of a 13.1G/14.7G
+            # (90% full) volume — a live 600M clickhouse-server.log growing ~100MB/h plus 15 rotated
+            # ~100M .gz files. Data itself was only 9.7G. ClickHouse needs free space to merge, so a
+            # volume held at 90% by its own logs degrades SELECTs on the data beside them.
+            #
+            # level `information` is ClickHouse's conventional production level; `trace` logs every
+            # query pipeline step and also feeds system.text_log (29M rows / 1.13GiB here), so it
+            # costs CPU and write bandwidth on a server that is already CPU-throttled.
+            # size x count = 100M x 5 = 500MB ceiling, ~3% of the volume instead of 333%.
+            logger:
+              level: information
+              size: 100M
+              count: 5
             # SYSTEM-LOG RETENTION — DO NOT REMOVE (see the dataVolumeClaimSpec comment
             # above: with no <ttl> the system.* log tables grow unbounded and were
             # ~3.6GiB of the 10Gi disk when the bench filled up and inserts died with
