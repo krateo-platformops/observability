@@ -10,8 +10,18 @@ type: application
 # was the slowest of all because nothing could early-exit at LIMIT 200. Measured on krateo-057
 # 2026-10-12 with the shipped SELECT shape (medians of 3 interleaved rounds): 18.49s for a
 # composition with no events, 5.21s with events, against a 1.33s unfiltered control.
-version: 0.1.13
-appVersion: "1.1.7"
+# 0.1.14: bump the sse-proxy image to 1.1.8 — the /events composition predicate is now ONE indexed
+# map lookup (sse-proxy#20/#22). 0.1.13's tokenbf prefilter pruned the scan ~1.7x but left the
+# JSONExtractString half parsing every surviving row; removing it takes the pathological 0-row case
+# from 18.49s to 0.42s (medians, shipped SELECT shape, 3 interleaved rounds, 1.33s control).
+# Safe because otel-collector#11 returns a root composition's own metadata.uid as its composition-id,
+# so a composition's OWN events are labelled too (1,612 of devday-milan's 1,613 over 12h on 057).
+# COST: rows written while composition-id stamping was broken are now invisible to the panel. That
+# decay is fixed going forward by otel-collector 1.0.4, but affected rows persist for otel_logs'
+# 7-day TTL — concentrated on components rolled during the window (v1-12-42 0/8, v0-3-413 0/6),
+# not on long-lived compositions (v0-1-0 3224/3225).
+version: 0.1.14
+appVersion: "1.1.8"
 home: https://krateo.io
 icon: https://github.com/krateoplatformops/krateo/blob/main/docs/media/logo.svg
 keywords:
