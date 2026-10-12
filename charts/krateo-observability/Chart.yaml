@@ -65,7 +65,10 @@ type: application
 # clickstack 3.2.0 and we do not patch upstream, so failureThreshold is the exposed knob. Also sets
 # requests (100m / 512Mi) against upstream's empty `resources`, which left the pod in BestEffort;
 # no limits, on purpose.
-version: 0.1.21
+# 0.1.22: bound the ClickHouse SERVER LOG FILES (logger level information, size 100M, count 5).
+# Upstream defaults trace/1000M/50 give a 50GB rotation budget on a 15Gi PVC shared with the
+# data, and on 057 they held /var/log/clickhouse-server at 3.4G of a 90%-full volume.
+version: 0.1.22
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack
