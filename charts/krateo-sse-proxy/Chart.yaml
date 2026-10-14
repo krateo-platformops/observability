@@ -20,8 +20,21 @@ type: application
 # decay is fixed going forward by otel-collector 1.0.4, but affected rows persist for otel_logs'
 # 7-day TTL — concentrated on components rolled during the window (v1-12-42 0/8, v0-3-413 0/6),
 # not on long-lived compositions (v0-1-0 3224/3225).
-version: 0.1.14
-appVersion: "1.1.8"
+# 0.1.15: bump the sse-proxy image to 1.1.9 (sse-proxy#25/#26), with two scan fixes:
+#   (1) The poll cursor was `toUnixTimestamp(Timestamp) > N`. Because the column was wrapped in a
+#   function, no index could prune, so every 3s poll scanned ALL k8s-events rows. On krateo-057 that
+#   was ~828 polls an hour at ~4.25M rows each, using ~3.25 of ClickHouse's 4-core limit; ClickHouse
+#   was pinned at its CPU limit and every other query waited on it. The cursor is now
+#   `Timestamp >= toDateTime64(N+1, 9)`, which selects the same rows. EXPLAIN indexes=1: 53 parts /
+#   731 granules -> 1 part / 1 granule.
+#   (2) /events tries the newest window first (1h, then 24h, then unbounded) and stops at the
+#   first window that fills the limit. The result is identical to the unbounded query, because
+#   every row outside a full window is older than every row inside it. Granules read: unfiltered
+#   730 -> 4; devday-milan 528 -> 86.
+#   Result equivalence was checked on 057 with pinned samples (count + cityHash64 match).
+#   Independent gate: reviewer-small PASS, from pushed SHA f61dd601.
+version: 0.1.15
+appVersion: "1.1.9"
 home: https://krateo.io
 icon: https://github.com/krateoplatformops/krateo/blob/main/docs/media/logo.svg
 keywords:
