@@ -68,7 +68,8 @@ type: application
 # 0.1.22: bound the ClickHouse SERVER LOG FILES (logger level information, size 100M, count 5).
 # Upstream defaults trace/1000M/50 give a 50GB rotation budget on a 15Gi PVC shared with the
 # data, and on 057 they held /var/log/clickhouse-server at 3.4G of a 90%-full volume.
-version: 0.1.22
+# 0.1.23: event alerts skip DELETED watch records, the Event's expiry copy an hour after it.
+version: 0.1.23
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack

@@ -1,7 +1,7 @@
 ---
 type: Configuration
 title: observability — the default alert set
-description: The 25 Alert CRs the chart seeds, the measured evidence behind every filter and threshold, and the three rules that decide whether an Alert can fire at all — `where` is ClickHouse SQL and not the Lucene the CRD advertises, SeverityText is empty on every row, and log alerts must exclude the observability stack or they diagnose themselves.
+description: The 25 Alert CRs the chart seeds, the measured evidence behind every filter and threshold, and the three rules that decide whether an Alert can fire at all — `where` is ClickHouse SQL and not the Lucene the CRD advertises, SeverityText is empty on every row, and log alerts must exclude the observability stack or they diagnose themselves. Event alerts skip the DELETED copy of an expired Event.
 resource: oci://ghcr.io/krateo-platformops/charts/krateo-observability
 tags: [alerting, alerts, observability, clickhouse, hyperdx, sre, runbook]
 timestamp: 2026-09-18T00:00:00Z
@@ -56,6 +56,35 @@ this pipeline's own noise keeps feeding itself. The log alerts exclude `incident
 | `sre-volume-attach-failure` | 131 | 74 | 124 | 55 | FailedMount in kube-system and gmp-system, FailedAttachVolume in krateo-system |
 
 "Minutes ALERT" counts the minutes whose trailing 15 minutes held at least the threshold.
+
+## Event alerts skip DELETED records
+
+The collector's `k8sobjects` receiver watches Events, so it writes one row per change to an
+Event: `ADDED`, `MODIFIED` as its count grows, and `DELETED` when the apiserver expires it, an
+hour after its last update by default. The `DELETED` row repeats the Event's last state: same
+reason, same message. An alert counting it fires a second time an hour after every failure, and
+that echo opens or counts on an Incident like a real firing. On krateo-057, the two `installer`
+Warnings of 2026-10-13 22:03 opened an incident, and their `DELETED` copies at 23:03 opened
+another for the same problem.
+
+So every event alert carries `JSONExtractString(Body, 'type') != 'DELETED'`. `MODIFIED` stays: it
+is the Event recurring. Over the 7 days to 2026-10-19 13:00 on krateo-057, with this file's
+thresholds and windows (the alerts with no rows in the window are left out):
+
+| alert | rows before | rows after | minutes ALERT before | after |
+|---|---|---|---|---|
+| `sre-pod-crashloop` | 2 | 2 | 8 | 8 |
+| `sre-pod-oomkilled` | 12 | 6 | 30 | 15 |
+| `sre-pod-unschedulable` | 57 | 44 | 144 | 111 |
+| `sre-pod-sandbox-failure` | 98 | 49 | 22 | 11 |
+| `sre-probe-failing` | 266 | 223 | 184 | 156 |
+| `sre-volume-attach-failure` | 14 | 10 | 15 | 15 |
+| `sre-node-not-ready` | 33 | 21 | 91 | 66 |
+| `sre-node-resource-pressure` | 161 | 88 | 639 | 418 |
+| `sre-krateo-external-resource-failure` | 3,616 | 1,815 | 134 | 0 |
+| `sre-kubernetes-warning-burst` | 5,473 | 3,211 | 254 | 190 |
+
+"Minutes ALERT" counts the minutes whose trailing window held at least the threshold.
 
 ## Measured behaviour
 
