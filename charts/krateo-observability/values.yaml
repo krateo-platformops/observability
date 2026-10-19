@@ -105,6 +105,12 @@ defaultAlerts:
   #     logs carry telemetry.source = '' and events carry 'k8s-events', so scoping to events is a
   #     structural guard and scoping to logs needs the explicit ServiceName exclusion used below.
   #
+  # AN EVENT ALERT SKIPS DELETED WATCH RECORDS. The collector watches Events, so it writes one row
+  # per change: ADDED, MODIFIED as the Event's count grows, and DELETED when the apiserver expires
+  # it (1h by default). The DELETED row repeats the Event's last state, so an alert counting it
+  # fires again an hour after every failure; each event alert therefore carries
+  # `JSONExtractString(Body, 'type') != 'DELETED'`. Measured in docs/alerts.md.
+  #
   # NOT COVERED, DELIBERATELY: saturation — CPU, memory, disk and PV percentages, node capacity,
   # certificate DAYS REMAINING. The Alert CRD counts rows in a logs source and cannot address a
   # metric, so writing those as log searches would produce exactly the always-OK alerts rule 1 is
@@ -121,7 +127,7 @@ defaultAlerts:
     - name: sre-pod-crashloop
       tier: core
       displayName: Pod crash-looping
-      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') = 'BackOff' AND positionCaseInsensitive(JSONExtractString(Body, 'object', 'message'), 'restarting failed container') > 0
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'type') != 'DELETED' AND JSONExtractString(Body, 'object', 'reason') = 'BackOff' AND positionCaseInsensitive(JSONExtractString(Body, 'object', 'message'), 'restarting failed container') > 0
       threshold: 1
       thresholdType: above
       interval: 5m
@@ -129,7 +135,7 @@ defaultAlerts:
     - name: sre-pod-oomkilled
       tier: core
       displayName: Pod killed for memory
-      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND (JSONExtractString(Body, 'object', 'reason') = 'OOMKilling' OR positionCaseInsensitive(JSONExtractString(Body, 'object', 'message'), 'oomkill') > 0)
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'type') != 'DELETED' AND (JSONExtractString(Body, 'object', 'reason') = 'OOMKilling' OR positionCaseInsensitive(JSONExtractString(Body, 'object', 'message'), 'oomkill') > 0)
       threshold: 1
       thresholdType: above
       interval: 5m
@@ -137,7 +143,7 @@ defaultAlerts:
     - name: sre-image-pull-failure
       tier: core
       displayName: Image pull failing
-      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') IN ('Failed', 'ErrImagePull', 'ImagePullBackOff') AND positionCaseInsensitive(JSONExtractString(Body, 'object', 'message'), 'pull image') > 0
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'type') != 'DELETED' AND JSONExtractString(Body, 'object', 'reason') IN ('Failed', 'ErrImagePull', 'ImagePullBackOff') AND positionCaseInsensitive(JSONExtractString(Body, 'object', 'message'), 'pull image') > 0
       threshold: 1
       thresholdType: above
       interval: 5m
@@ -145,7 +151,7 @@ defaultAlerts:
     - name: sre-pod-unschedulable
       tier: core
       displayName: Pod cannot be scheduled
-      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') = 'FailedScheduling'
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'type') != 'DELETED' AND JSONExtractString(Body, 'object', 'reason') = 'FailedScheduling'
       threshold: 1
       thresholdType: above
       interval: 15m
@@ -153,7 +159,7 @@ defaultAlerts:
     - name: sre-pod-evicted
       tier: core
       displayName: Pod evicted
-      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') IN ('Evicted', 'EvictionThresholdMet')
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'type') != 'DELETED' AND JSONExtractString(Body, 'object', 'reason') IN ('Evicted', 'EvictionThresholdMet')
       threshold: 1
       thresholdType: above
       interval: 5m
@@ -161,7 +167,7 @@ defaultAlerts:
     - name: sre-pod-sandbox-failure
       tier: core
       displayName: Pod sandbox / lifecycle failure
-      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') IN ('FailedCreatePodSandBox', 'FailedKillPod', 'FailedSync')
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'type') != 'DELETED' AND JSONExtractString(Body, 'object', 'reason') IN ('FailedCreatePodSandBox', 'FailedKillPod', 'FailedSync')
       threshold: 1
       thresholdType: above
       interval: 5m
@@ -169,7 +175,7 @@ defaultAlerts:
     - name: sre-probe-failing
       tier: core
       displayName: Readiness or liveness probe failing
-      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') = 'Unhealthy'
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'type') != 'DELETED' AND JSONExtractString(Body, 'object', 'reason') = 'Unhealthy'
       threshold: 6
       thresholdType: above
       interval: 15m
@@ -177,7 +183,7 @@ defaultAlerts:
     - name: sre-job-failed
       tier: core
       displayName: Job or CronJob failed
-      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') IN ('BackoffLimitExceeded', 'JobFailed', 'FailedCreate')
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'type') != 'DELETED' AND JSONExtractString(Body, 'object', 'reason') IN ('BackoffLimitExceeded', 'JobFailed', 'FailedCreate')
       threshold: 1
       thresholdType: above
       interval: 15m
@@ -185,7 +191,7 @@ defaultAlerts:
     - name: sre-volume-attach-failure
       tier: core
       displayName: Volume mount or attach failing
-      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') IN ('FailedMount', 'FailedAttachVolume') AND JSONExtractString(Body, 'object', 'involvedObject', 'namespace') != 'krateo-incident-checks'
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'type') != 'DELETED' AND JSONExtractString(Body, 'object', 'reason') IN ('FailedMount', 'FailedAttachVolume') AND JSONExtractString(Body, 'object', 'involvedObject', 'namespace') != 'krateo-incident-checks'
       threshold: 4
       thresholdType: above
       interval: 15m
@@ -193,7 +199,7 @@ defaultAlerts:
     - name: sre-pvc-provisioning-failure
       tier: core
       displayName: PersistentVolume provisioning failed
-      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') IN ('ProvisioningFailed', 'FailedBinding')
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'type') != 'DELETED' AND JSONExtractString(Body, 'object', 'reason') IN ('ProvisioningFailed', 'FailedBinding')
       threshold: 1
       thresholdType: above
       interval: 15m
@@ -201,7 +207,7 @@ defaultAlerts:
     - name: sre-node-not-ready
       tier: core
       displayName: Node not ready
-      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') IN ('NodeNotReady', 'NodeNotSchedulable', 'Rebooted')
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'type') != 'DELETED' AND JSONExtractString(Body, 'object', 'reason') IN ('NodeNotReady', 'NodeNotSchedulable', 'Rebooted')
       threshold: 1
       thresholdType: above
       interval: 5m
@@ -209,7 +215,7 @@ defaultAlerts:
     - name: sre-node-resource-pressure
       tier: core
       displayName: Node under resource pressure
-      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') IN ('NodeHasDiskPressure', 'NodeHasInsufficientMemory', 'NodeHasInsufficientPID', 'FreeDiskSpaceFailed', 'ImageGCFailed')
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'type') != 'DELETED' AND JSONExtractString(Body, 'object', 'reason') IN ('NodeHasDiskPressure', 'NodeHasInsufficientMemory', 'NodeHasInsufficientPID', 'FreeDiskSpaceFailed', 'ImageGCFailed')
       threshold: 1
       thresholdType: above
       interval: 5m
@@ -217,7 +223,7 @@ defaultAlerts:
     - name: sre-node-preempted
       tier: core
       displayName: Node preempted or scheduled for termination
-      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') IN ('Preempting', 'Preempted', 'TerminationScheduled')
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'type') != 'DELETED' AND JSONExtractString(Body, 'object', 'reason') IN ('Preempting', 'Preempted', 'TerminationScheduled')
       threshold: 1
       thresholdType: above
       interval: 5m
@@ -225,7 +231,7 @@ defaultAlerts:
     - name: sre-loadbalancer-failure
       tier: core
       displayName: LoadBalancer reconciliation failing
-      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') IN ('SyncLoadBalancerFailed', 'CreatingLoadBalancerFailed', 'DeleteLoadBalancerFailed')
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'type') != 'DELETED' AND JSONExtractString(Body, 'object', 'reason') IN ('SyncLoadBalancerFailed', 'CreatingLoadBalancerFailed', 'DeleteLoadBalancerFailed')
       threshold: 1
       thresholdType: above
       interval: 15m
@@ -249,7 +255,7 @@ defaultAlerts:
     - name: sre-krateo-provider-connection-failure
       tier: core
       displayName: Krateo — provider cannot reach its target
-      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') = 'CannotConnectToProvider'
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'type') != 'DELETED' AND JSONExtractString(Body, 'object', 'reason') = 'CannotConnectToProvider'
       threshold: 11
       thresholdType: above
       interval: 15m
@@ -297,7 +303,7 @@ defaultAlerts:
     - name: sre-volume-resize-issue
       tier: extended
       displayName: Volume resize pending or failed
-      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') IN ('FileSystemResizeRequired', 'VolumeResizeFailed', 'ExternalExpanding')
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'type') != 'DELETED' AND JSONExtractString(Body, 'object', 'reason') IN ('FileSystemResizeRequired', 'VolumeResizeFailed', 'ExternalExpanding')
       threshold: 1
       thresholdType: above
       interval: 1h
@@ -305,7 +311,7 @@ defaultAlerts:
     - name: sre-krateo-external-resource-failure
       tier: extended
       displayName: Krateo — external resource operations failing
-      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'reason') LIKE 'Cannot%ExternalResource'
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'type') != 'DELETED' AND JSONExtractString(Body, 'object', 'reason') LIKE 'Cannot%ExternalResource'
       threshold: 200
       thresholdType: above
       interval: 15m
@@ -313,7 +319,7 @@ defaultAlerts:
     - name: sre-kubernetes-warning-burst
       tier: extended
       displayName: Kubernetes warning events elevated
-      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'object', 'type') = 'Warning'
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'type') != 'DELETED' AND JSONExtractString(Body, 'object', 'type') = 'Warning'
       threshold: 100
       thresholdType: above
       interval: 15m
