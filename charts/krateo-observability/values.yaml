@@ -105,11 +105,7 @@ defaultAlerts:
   #     logs carry telemetry.source = '' and events carry 'k8s-events', so scoping to events is a
   #     structural guard and scoping to logs needs the explicit ServiceName exclusion used below.
   #
-  # AN EVENT ALERT SKIPS DELETED WATCH RECORDS. The collector watches Events, so it writes one row
-  # per change: ADDED, MODIFIED as the Event's count grows, and DELETED when the apiserver expires
-  # it (1h by default). The DELETED row repeats the Event's last state, so an alert counting it
-  # fires again an hour after every failure; each event alert therefore carries
-  # `JSONExtractString(Body, 'type') != 'DELETED'`. Measured in docs/alerts.md.
+  # Event alerts skip DELETED rows, the copy of an expired Event that re-fires them an hour later.
   #
   # NOT COVERED, DELIBERATELY: saturation — CPU, memory, disk and PV percentages, node capacity,
   # certificate DAYS REMAINING. The Alert CRD counts rows in a logs source and cannot address a
