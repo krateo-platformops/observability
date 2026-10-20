@@ -19,7 +19,26 @@ type: application
 # 0.1.10: SECURITY (#122) — the same redaction on the LOGS pipeline: the agent's pod stdout carries
 # the same `--token eyJ…`, and filelog puts the whole line in the log body, so otel_logs kept the
 # token while otel_traces was already clean.
-version: 0.1.10
+# 0.1.11: give the Krateo audit record a DEDICATED logs pipeline and its OWN ClickHouse table.
+# Adds a `logs/audit` pipeline (receivers [otlp] -> exporters [clickhouse/audit]) plus a second
+# named exporter instance writing `krateo_audit` with ttl 8760h (365d, Diego's decision on
+# installer#407). The main `logs` pipeline is BYTE-IDENTICAL to before -- filelog only -- so the
+# pod-log hot path is untouched; the whole diff is two additions.
+# Before this, an OTLP log export had no consumer on this agent and was dropped silently, which
+# is why the snowplow chart ships OTEL_LOGS_ENABLED="false" EXPLICITLY even with the OTEL_ENABLED
+# master on. Prerequisite for the server-authored audit record (installer#408); the flag flip is
+# a snowplow-chart change and is NOT part of this.
+# A separate pipeline rather than `otlp` on `logs`: mixing audit with every pod log would then
+# need un-mixing, by a routing connector (component unverified in otelcol-krateo) or by paired
+# filter processors (double-processing the firehose). A receiver feeds only the pipelines naming
+# it, so separation is free. Safe because snowplow is the ONLY component with an
+# OTEL_LOGS_ENABLED knob, verified three ways.
+# `transform` is kept on the audit pipeline ON PURPOSE: it carries the <REDACTED-JWT>
+# replace_pattern, and dropping it would bypass JWT redaction on the stream most likely to carry
+# identity -- on a platform that has already purged 384 leaked bearer tokens from otel_traces.
+# NOTE this chart no longer needs the separate-table work to land first: it IS that work. The
+# remaining sequencing constraint is only that OTEL_LOGS_ENABLED stays false until this ships.
+version: 0.1.11
 appVersion: "0.1.0"
 dependencies:
   - name: opentelemetry-collector
