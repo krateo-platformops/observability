@@ -163,13 +163,82 @@ opentelemetry-collector:
           initial_interval: 5s
           max_interval: 30s
           max_elapsed_time: 300s
+      # A SECOND, NAMED instance for the Krateo audit record, so audit gets its OWN table and its
+      # OWN retention instead of inheriting the 168h above, which is shared with every pod log on
+      # the cluster. A 7-day audit trail that LOOKS like a working one is worse than none
+      # (installer#407). Each signal's exporter creates only its own signal's tables at start(),
+      # so two instances with different `ttl` values yield two tables with different retention --
+      # read from the contrib exporter's source, not assumed.
+      # JOINABILITY IS PRESERVED. snowplow's audit package rejects "an audit id-space parallel to
+      # traceparent/trace_id" as un-joinable, and that objection is about the ID SPACE, not the
+      # table: the Logs SDK stamps TraceId/SpanId as LogRecord FIELDS, so they are columns here
+      # exactly as in otel_logs and still join to otel_traces.
+      clickhouse/audit:
+        endpoint: "tcp://krateo-clickstack-clickhouse-clickhouse-headless.krateo-system.svc:9000"
+        username: "${env:CH_USERNAME}"
+        password: "${env:CH_PASSWORD}"
+        database: default
+        logs_table_name: krateo_audit
+        create_schema: true
+        # 8760h = 365 days, Diego's retention decision on installer#407. Cost is not a factor:
+        # the non-preview trail measures ~1.5 MiB/year. SAME CAVEAT as the sibling ttl above --
+        # create_schema is CREATE ... IF NOT EXISTS, so this applies at table CREATION only.
+        # krateo_audit does not exist yet, which is the one window in which this value is free;
+        # once it does, changing it needs ALTER TABLE krateo_audit MODIFY TTL.
+        ttl: 8760h
+        timeout: 10s
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+          max_elapsed_time: 300s
 
     service:
       pipelines:
+        # `otlp` ON THE LOGS PIPELINE — DO NOT REMOVE. Without it an OTLP log export has NO
+        # CONSUMER on this agent: the records leave the exporting process and are dropped here,
+        # silently. snowplow's AuditEvent (internal/support/audit, D19a) is exactly such an
+        # exporter — it emits the canonical Krateo audit record as an OTLP LogRecord aimed at
+        # otel_logs — and that is why the snowplow chart ships OTEL_LOGS_ENABLED="false"
+        # EXPLICITLY even with the OTEL_ENABLED master on: without the override the per-signal
+        # gate would default to the master and the pipeline would export into a void.
+        # The receiver itself is NOT declared in this chart's config.receivers — it comes from
+        # the upstream opentelemetry-collector chart's defaults and is deep-merged in. Verified
+        # on the LIVE agent ConfigMap rather than assumed: the rendered config carries
+        # otlp.protocols.{grpc ${env:MY_POD_IP}:4317, http ${env:MY_POD_IP}:4318}, and snowplow
+        # already dials http://$(HOST_IP):4318. The metrics and traces pipelines have referenced
+        # `otlp` all along and run clean, which is the empirical proof the receiver resolves.
         logs:
           receivers: [filelog]
           processors: [memory_limiter, k8sattributes, transform, batch]
           exporters: [clickhouse]
+        # THE AUDIT PIPELINE, deliberately SEPARATE from `logs` above rather than adding `otlp`
+        # to it. Without an otlp-fed logs pipeline somewhere, an OTLP log export has NO CONSUMER
+        # on this agent: the records leave the exporting process and are dropped here, silently.
+        # That is why the snowplow chart ships OTEL_LOGS_ENABLED="false" EXPLICITLY even with the
+        # OTEL_ENABLED master on, and its package doc calls the gap "entirely collector-side".
+        # WHY SEPARATE AND NOT `otlp` ON `logs`: one pipeline would mix the audit stream with
+        # every pod log on every node, which then has to be un-mixed -- by a routing connector
+        # (needs that component compiled into otelcol-krateo, unverified) or by a pair of filter
+        # processors (runs k8sattributes + transform TWICE over the pod-log firehose and discards
+        # one copy). A receiver feeds only the pipelines that NAME it, so filelog -> `logs` and
+        # otlp -> here keeps the streams apart at zero cost, with the pod-log hot path untouched.
+        # Safe because snowplow is the ONLY component carrying an OTEL_LOGS_ENABLED knob --
+        # verified, not assumed: absent from the installer schema, absent as direct env on every
+        # workload, present in exactly one ConfigMap -- so OTLP logs have one producer. If a
+        # second ever appears, gate THIS pipeline with a filter on event.name=="audit" rather
+        # than letting foreign records land in krateo_audit.
+        # THE PROCESSOR LIST IS DELIBERATELY IDENTICAL, `transform` INCLUDED. It reads as
+        # filelog-specific because it strips ANSI escapes from body, but it also carries
+        # `replace_pattern(body, "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>")` -- the JWT
+        # redaction. Dropping it here would bypass that control on the one stream most likely to
+        # carry identity, on a platform that has already had to purge 384 leaked bearer tokens
+        # from otel_traces. Its other statements are inert for these records: there is no ANSI in
+        # an audit body, and the composition-id copy is guarded `where ... != nil`.
+        logs/audit:
+          receivers: [otlp]
+          processors: [memory_limiter, k8sattributes, transform, batch]
+          exporters: [clickhouse/audit]
         # KOS-1 #112 bug #2: wire OTLP metrics -> ClickHouse. The reconcile RED suite
         # (unstructured_runtime.reconcile.*) + the kagent GenAI token metrics arrive as OTLP on the
         # node-local agent's otlp receiver (same one the traces pipeline below uses); without it in
