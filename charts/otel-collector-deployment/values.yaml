@@ -170,6 +170,23 @@ opentelemetry-collector:
         allocatable_types_to_report: [cpu, memory, ephemeral-storage]
 
     processors:
+      # SECURITY, installer#394/#396: until 0.1.x this pipeline had NO redaction at all. The
+      # k8sobjects receiver ships Kubernetes objects and events verbatim, and an event message can
+      # quote a command line ("--token eyJ..."), so a token reaching etcd reached ClickHouse too.
+      # The daemonset has carried a redaction since 0.1.9; this one did not, which is the kind of
+      # asymmetry that only shows up when you ask each pipeline what it runs rather than assuming
+      # the two collectors are configured alike.
+      # replace_all_patterns sweeps every attribute VALUE rather than enumerating keys -- on the
+      # traces side the enumerated list missed `http.path` and leaked for days (installer#396).
+      transform:
+        # error_mode:ignore so a redaction statement on an absent key skips rather than dropping
+        # the whole batch.
+        error_mode: ignore
+        log_statements:
+          - context: log
+            statements:
+              - 'replace_pattern(body, "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>")'
+              - 'replace_all_patterns(attributes, "value", "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>")'
       batch:
         send_batch_size: 10000
         timeout: 5s
@@ -246,7 +263,10 @@ opentelemetry-collector:
       pipelines:
         logs:
           receivers: [k8sobjects]
-          processors: [memory_limiter, k8sattributes, resource, compositionresolver, batch]
+          # transform sits after compositionresolver and before batch: redact as late as possible
+          # so anything an earlier processor ADDS to the record is swept too, but before batching so
+          # a redacted record is what gets grouped and exported.
+          processors: [memory_limiter, k8sattributes, resource, compositionresolver, transform, batch]
           exporters: [clickhouse]
         # To enable the Prometheus -> OTLP bridge: restore the prometheus receiver (nulled by
         # default under config.receivers — requires a prometheus-capable collector image) and
