@@ -140,6 +140,48 @@ opentelemetry-collector:
               - 'replace_all_patterns(attributes, "value", "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>")'
               - 'replace_pattern(attributes["exception.message"], "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>") where attributes["exception.message"] != nil'
               - 'replace_pattern(attributes["error.message"], "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>") where attributes["error.message"] != nil'
+      # THE AUDIT TABLE HAS TWO PRODUCERS NOW, so the pipelines below partition the OTLP log
+      # stream instead of letting both land in krateo_audit. The `logs/audit` comment below
+      # anticipated exactly this: "If a second [OTLP log producer] ever appears, gate THIS
+      # pipeline with a filter on event.name==\"audit\" rather than letting foreign records land
+      # in krateo_audit." It has appeared. MEASURED on krateo-057 2026-10-22, krateo_audit held
+      # 2,493 rows: 10 from snowplow's audit exporter (ScopeName .../snowplow/audit) and 2,483
+      # from the AGENT GATEWAY's access log (ServiceName krateo-agent-gateway, ScopeName
+      # request), which has no other destination because `logs/audit` is the only otlp-fed logs
+      # pipeline on this agent. Consequences that forced the fix rather than a query-side
+      # workaround: (a) every audit consumer -- widget, RestAction, ad-hoc query -- has to
+      # remember a ScopeName predicate or it reports 2,493 "audit records" when there are 10,
+      # and installer#415's userAccessFilter matches ZERO rows in whichever population it was
+      # not written for while still returning a result (on an audit view that fails toward
+      # disclosure); (b) krateo_audit carries TTL 365 DAYS against otel_logs' 7, so the access
+      # logs were being retained 52x longer than the pod logs they belong with.
+      # WHY TWO FILTERS AND A THIRD PIPELINE, not one filter: dropping the gateway records
+      # would lose them, and they are useful -- they are the only per-request record of the LLM
+      # and MCP hops. A receiver feeds every pipeline that NAMES it, so otlp fans out to both
+      # `logs/audit` and `logs/gateway` and each keeps the complement of the other. The
+      # partition is exact and total: a record either has event.name=="audit" or it does not.
+      # Cost is k8s_attributes + transform running twice over the OTLP log stream (~1.2k
+      # records/day), NOT over the filelog firehose, which is why the pair-of-filters objection
+      # in the `logs/audit` comment does not apply here -- that objection was about adding otlp
+      # to the `logs` pipeline and re-processing every pod log on every node.
+      # error_mode:ignore is deliberate and its bias differs per filter. filterprocessor with
+      # ignore RETAINS a record whose condition errored, so an audit record whose event.name is
+      # somehow unevaluable stays in krateo_audit rather than being silently dropped. Silent
+      # loss from an audit trail is the one failure mode worth biasing against; a gateway record
+      # duplicated into otel_logs is harmless.
+      filter/audit-only:
+        error_mode: ignore
+        logs:
+          log_record:
+            # DROPS what matches, so this keeps ONLY audit records. A gateway access-log record
+            # has no event.name key at all: OTTL resolves the missing key to nil, nil != "audit"
+            # is true, and the record is dropped here -- which is the intent.
+            - 'attributes["event.name"] != "audit"'
+      filter/not-audit:
+        error_mode: ignore
+        logs:
+          log_record:
+            - 'attributes["event.name"] == "audit"'
       batch:
         send_batch_size: 10000
         timeout: 5s
@@ -253,8 +295,22 @@ opentelemetry-collector:
         # an audit body, and the composition-id copy is guarded `where ... != nil`.
         logs/audit:
           receivers: [otlp]
-          processors: [memory_limiter, k8sattributes, transform, batch]
+          processors: [memory_limiter, k8sattributes, transform, filter/audit-only, batch]
           exporters: [clickhouse/audit]
+        # The gateway access logs' own home: same otlp receiver, inverse filter, and the 7-day
+        # `clickhouse` exporter (otel_logs) rather than the 365-day krateo_audit. Without this
+        # pipeline the filter above would DELETE them; they are the only per-request record of
+        # the LLM and MCP hops, carrying jwt.sub, team, gen_ai.* token counts, mcp.* and the
+        # per-request http.*, so they belong with the other logs, not in the audit trail and
+        # not nowhere. `transform` is kept: these records are the ones most likely to carry a
+        # token in an attribute, and 1,568 of the 2,483 measured carry a 176-192 character
+        # mcp.session.id -- AES-256-GCM ciphertext, not a credential (see installer#394), but
+        # the sweep costs nothing and the next attribute added here is not guaranteed to be
+        # as harmless.
+        logs/gateway:
+          receivers: [otlp]
+          processors: [memory_limiter, k8sattributes, transform, filter/not-audit, batch]
+          exporters: [clickhouse]
         # KOS-1 #112 bug #2: wire OTLP metrics -> ClickHouse. The reconcile RED suite
         # (unstructured_runtime.reconcile.*) + the kagent GenAI token metrics arrive as OTLP on the
         # node-local agent's otlp receiver (same one the traces pipeline below uses); without it in
