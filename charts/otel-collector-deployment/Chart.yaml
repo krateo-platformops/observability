@@ -34,7 +34,18 @@ type: application
 #   (`replace_all_patterns`) rather than naming keys — naming keys is what let `http.path` through on
 #   the daemonset's traces side. Placed after compositionresolver and before batch, so anything an
 #   earlier processor adds is swept and the batch carries already-redacted records.
-version: 0.3.9
+# 0.3.10: REVERT the 0.3.9 transform. It crash-looped this collector on krateo-057:
+#     error decoding 'processors': unknown type: "transform" for id: "transform"
+#     (valid values: [memory_limiter k8sattributes resource compositionresolver batch])
+#   This collector runs the CUSTOM image ghcr.io/krateo-platformops/otel-collector, which is built
+#   with that exact component set and has no transform processor -- 0.3.6's note says so and 0.3.9
+#   was written past it. `helm template` cannot catch this: the chart renders a valid-looking config
+#   and only the collector validates its own component set, at startup, so the failure lands in the
+#   cluster rather than in CI. Redacting k8sobjects logs needs `transform` added to the custom
+#   image's builder manifest first (krateo-platformops/otel-collector); until then this pipeline is
+#   unredacted and installer#394 stays open for it. The daemonset's 0.1.12 sweep is unaffected --
+#   it runs opentelemetry-collector-contrib, which has transform.
+version: 0.3.10
 appVersion: "1.0.4"
 dependencies:
   - name: opentelemetry-collector

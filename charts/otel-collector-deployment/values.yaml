@@ -170,23 +170,6 @@ opentelemetry-collector:
         allocatable_types_to_report: [cpu, memory, ephemeral-storage]
 
     processors:
-      # SECURITY, installer#394/#396: until 0.1.x this pipeline had NO redaction at all. The
-      # k8sobjects receiver ships Kubernetes objects and events verbatim, and an event message can
-      # quote a command line ("--token eyJ..."), so a token reaching etcd reached ClickHouse too.
-      # The daemonset has carried a redaction since 0.1.9; this one did not, which is the kind of
-      # asymmetry that only shows up when you ask each pipeline what it runs rather than assuming
-      # the two collectors are configured alike.
-      # replace_all_patterns sweeps every attribute VALUE rather than enumerating keys -- on the
-      # traces side the enumerated list missed `http.path` and leaked for days (installer#396).
-      transform:
-        # error_mode:ignore so a redaction statement on an absent key skips rather than dropping
-        # the whole batch.
-        error_mode: ignore
-        log_statements:
-          - context: log
-            statements:
-              - 'replace_pattern(body, "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>")'
-              - 'replace_all_patterns(attributes, "value", "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>")'
       batch:
         send_batch_size: 10000
         timeout: 5s
@@ -263,10 +246,17 @@ opentelemetry-collector:
       pipelines:
         logs:
           receivers: [k8sobjects]
-          # transform sits after compositionresolver and before batch: redact as late as possible
-          # so anything an earlier processor ADDS to the record is swept too, but before batching so
-          # a redacted record is what gets grouped and exported.
-          processors: [memory_limiter, k8sattributes, resource, compositionresolver, transform, batch]
+          # NO `transform` here, and it is not an omission: this collector runs the CUSTOM image
+          # ghcr.io/krateo-platformops/otel-collector, whose component set is exactly
+          # [memory_limiter k8sattributes resource compositionresolver batch]. Adding transform in
+          # 0.3.9 crash-looped it on 057 with
+          #   error decoding 'processors': unknown type: "transform" for id: "transform"
+          # `helm template` cannot catch this -- only the collector validates its own component set
+          # at startup -- so a config referencing a processor the BUILD lacks renders clean and then
+          # fails closed in the cluster. Redacting k8sobjects logs needs `transform` added to the
+          # custom image's builder manifest first (krateo-platformops/otel-collector), tracked as a
+          # follow-up; until then this pipeline is unredacted and installer#394 stays open for it.
+          processors: [memory_limiter, k8sattributes, resource, compositionresolver, batch]
           exporters: [clickhouse]
         # To enable the Prometheus -> OTLP bridge: restore the prometheus receiver (nulled by
         # default under config.receivers — requires a prometheus-capable collector image) and
