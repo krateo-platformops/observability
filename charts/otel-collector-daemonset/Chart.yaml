@@ -38,7 +38,20 @@ type: application
 # identity -- on a platform that has already purged 384 leaked bearer tokens from otel_traces.
 # NOTE this chart no longer needs the separate-table work to land first: it IS that work. The
 # remaining sequencing constraint is only that OTEL_LOGS_ENABLED stays false until this ships.
-version: 0.1.11
+# 0.1.12: SECURITY (installer#396) — redact by SWEEPING attribute VALUES, not by naming keys.
+#   The per-key statements added in 0.1.9/0.1.10 were measured on krateo-057 and still leaked: 22
+#   spans in otel_traces carried a raw JWT, every one of them in `http.path`, on spans named
+#   `GET /events/*` and `GET krateo-sse-proxy...:8080`. The list could not catch it because nobody
+#   had thought of that key — which is the flaw in enumerating keys, not a missing entry. All three
+#   contexts (log, span, spanevent) now also run
+#   `replace_all_patterns(attributes, "value", "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>")`.
+#   This also closes a gap on the LOGS side: before this, log bodies were redacted and log
+#   ATTRIBUTES were not. The enumerated statements are kept — delete_key removes the Authorization
+#   header rather than redacting it, and status.message is not an attribute so the sweep misses it.
+#   BACKSTOP, not a fix: the root cause is installer#395, the events bell putting the bearer token
+#   in the URL because EventSource cannot set headers. This stops the token reaching ClickHouse; it
+#   does not stop the browser sending it in a URL, where any proxy or access log can still record it.
+version: 0.1.12
 appVersion: "0.1.0"
 dependencies:
   - name: opentelemetry-collector

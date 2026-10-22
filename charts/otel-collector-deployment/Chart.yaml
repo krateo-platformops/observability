@@ -26,7 +26,15 @@ type: application
 # v0-3-0 8159/8165 and v0-1-0 3224/3225. Every chart bump mints a new vX-Y-Z, and the upstream
 # DeferredDiscoveryRESTMapper self-heal is dead because memCacheClient.Fresh() reports POPULATED,
 # not current. 1.0.4 also carries the Go 1.25 builder fix that made 1.0.4's first cut unbuildable.
-version: 0.3.8
+# 0.3.9: SECURITY (installer#394/#396) — this pipeline had NO redaction at all. The daemonset has
+#   carried one since 0.1.9; this collector never did, and the two are easy to assume alike. The
+#   k8sobjects receiver ships Kubernetes objects and events verbatim, and an event message can quote
+#   a command line ("--token eyJ..."), so a token that reached etcd reached ClickHouse too. Adds a
+#   `transform` processor on the logs pipeline redacting the body and SWEEPING every attribute value
+#   (`replace_all_patterns`) rather than naming keys — naming keys is what let `http.path` through on
+#   the daemonset's traces side. Placed after compositionresolver and before batch, so anything an
+#   earlier processor adds is swept and the batch carries already-redacted records.
+version: 0.3.9
 appVersion: "1.0.4"
 dependencies:
   - name: opentelemetry-collector

@@ -113,15 +113,31 @@ opentelemetry-collector:
               # The container parser puts the whole pod log line in body as a string, so body is
               # the sink for every token an agent prints to stdout.
               - 'replace_pattern(body, "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>")'
+              # body was the only sink redacted until 0.1.12, which left log ATTRIBUTES unredacted.
+              # replace_all_patterns sweeps every attribute VALUE, so a token in any key -- present
+              # or added later -- is caught without enumerating the key. Enumerating is what let
+              # http.path through on the traces side for days (installer#396).
+              - 'replace_all_patterns(attributes, "value", "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>")'
               - 'set(attributes["krateo.io/composition-id"], resource.attributes["k8s.pod.labels.krateo.io/composition-id"]) where resource.attributes["k8s.pod.labels.krateo.io/composition-id"] != nil'
         trace_statements:
           - context: span
             statements:
               - 'delete_key(attributes, "http.header.Authorization")'
+              # MEASURED on krateo-057 2026-10-22 (installer#396): 22 spans still carried a raw JWT
+              # after the per-key statements below, every one of them in `http.path`, on spans named
+              # `GET /events/*` and `GET krateo-sse-proxy...:8080`. The enumerated keys could not
+              # catch it because nobody had thought of that key. replace_all_patterns sweeps every
+              # attribute VALUE instead, so the fix does not depend on predicting the key.
+              # Root cause is installer#395 -- the events bell puts the bearer token in the URL
+              # because EventSource cannot set headers, and the gateway records the URL as http.path.
+              # This is a BACKSTOP: it stops the token reaching ClickHouse, it does not stop the
+              # browser sending it in a URL, where it also lands in any proxy or access log.
+              - 'replace_all_patterns(attributes, "value", "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>")'
               - 'replace_pattern(status.message, "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>")'
               - 'replace_pattern(attributes["exception.message"], "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>") where attributes["exception.message"] != nil'
           - context: spanevent
             statements:
+              - 'replace_all_patterns(attributes, "value", "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>")'
               - 'replace_pattern(attributes["exception.message"], "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>") where attributes["exception.message"] != nil'
               - 'replace_pattern(attributes["error.message"], "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>") where attributes["error.message"] != nil'
       batch:
