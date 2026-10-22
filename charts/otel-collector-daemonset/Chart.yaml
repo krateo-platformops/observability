@@ -38,6 +38,28 @@ type: application
 # identity -- on a platform that has already purged 384 leaked bearer tokens from otel_traces.
 # NOTE this chart no longer needs the separate-table work to land first: it IS that work. The
 # remaining sequencing constraint is only that OTEL_LOGS_ENABLED stays false until this ships.
+# 0.1.13: PARTITION the OTLP log stream -- krateo_audit had acquired a SECOND producer, which
+# 0.1.11's own note said to guard against ("If a second ever appears, gate THIS pipeline with a
+# filter on event.name==\"audit\""). MEASURED on krateo-057 2026-10-22: of 2,493 krateo_audit rows,
+# 10 were snowplow audit records and 2,483 were the AGENT GATEWAY's access log, which had no other
+# destination because `logs/audit` is the only otlp-fed logs pipeline here. Two harms, both real:
+# every audit consumer had to remember a ScopeName predicate or count 2,493 "audit records" where
+# there are 10 (and installer#415's userAccessFilter matches zero rows in whichever population it
+# was not written for, while still returning a result -- on an audit view that fails toward
+# disclosure); and krateo_audit's 365d TTL was retaining gateway access logs 52x longer than the
+# pod logs they belong with.
+# The fix is a pair of complementary `filter` processors and a THIRD pipeline, not a drop: a
+# receiver feeds every pipeline that NAMES it, so otlp fans out to `logs/audit` (keeps
+# event.name=="audit", -> krateo_audit, 365d) and `logs/gateway` (keeps the complement, ->
+# otel_logs, 7d). Exact and total partition; the gateway records are preserved at the right
+# retention rather than deleted. The paired-filter objection in 0.1.11's note does NOT apply --
+# that was about adding otlp to `logs` and re-processing every pod log on every node; this
+# double-processes ~1.2k OTLP records/day and never touches the filelog firehose.
+# `filter` IS compiled into the running image -- verified with `otelcol-contrib components` on a
+# live agent pod BEFORE writing this, not inferred from "it's contrib". That check exists because
+# otel-collector-deployment 0.3.9 added `transform` to a chart whose custom image lacks it and
+# crash-looped 057: `helm template` renders an invalid component reference perfectly cleanly, and
+# only the collector validates its own component set, at startup.
 # 0.1.12: SECURITY (installer#396) — redact by SWEEPING attribute VALUES, not by naming keys.
 #   The per-key statements added in 0.1.9/0.1.10 were measured on krateo-057 and still leaked: 22
 #   spans in otel_traces carried a raw JWT, every one of them in `http.path`, on spans named
@@ -51,7 +73,7 @@ type: application
 #   BACKSTOP, not a fix: the root cause is installer#395, the events bell putting the bearer token
 #   in the URL because EventSource cannot set headers. This stops the token reaching ClickHouse; it
 #   does not stop the browser sending it in a URL, where any proxy or access log can still record it.
-version: 0.1.12
+version: 0.1.13
 appVersion: "0.1.0"
 dependencies:
   - name: opentelemetry-collector
