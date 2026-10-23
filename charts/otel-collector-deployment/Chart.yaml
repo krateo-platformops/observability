@@ -5,6 +5,14 @@ description: >-
   upstream opentelemetry-collector chart with a custom otelcol-krateo image that
   enriches K8s events with krateo.io/composition-id and exports to ClickHouse.
 type: application
+# 0.3.11: disable k8s.replicaset.available / k8s.replicaset.desired at the k8s_cluster receiver —
+# 22.7% of otel_metrics_gauge (24,055,076 of 105,789,485 rows, 1.64 GiB total, measured on 057
+# 2026-10-23) with no consumer. ReplicaSets churn on every Deployment rollout, so the rows are
+# dominated by dead ReplicaSets reporting 0/0; k8s.deployment.{available,desired} carries the same
+# fact at the owning controller for 1.6% of the volume. Disabled at the RECEIVER, not via a filter
+# processor: this collector's builder-config.yaml ships only [batch memory_limiter k8sattributes
+# resource compositionresolver], so a filter/ would fail at startup and helm template cannot catch
+# it. TTL stays 168h and the PVC is NOT resized (disk was 32%, 4.7G of 14.7G — headroom, not a fire).
 # 0.3.4: explicit lenient probe tolerances + Quantity (integer|string) resources typing in
 # values.schema.json.
 # 0.3.3: clickhouse exporter ttl: 168h — 7-day retention stamped into freshly created otel_*
@@ -45,7 +53,7 @@ type: application
 #   image's builder manifest first (krateo-platformops/otel-collector); until then this pipeline is
 #   unredacted and installer#394 stays open for it. The daemonset's 0.1.12 sweep is unaffected --
 #   it runs opentelemetry-collector-contrib, which has transform.
-version: 0.3.10
+version: 0.3.11
 appVersion: "1.0.4"
 dependencies:
   - name: opentelemetry-collector

@@ -168,6 +168,33 @@ opentelemetry-collector:
         collection_interval: 60s
         node_conditions_to_report: [Ready, MemoryPressure, DiskPressure, PIDPressure]
         allocatable_types_to_report: [cpu, memory, ephemeral-storage]
+        # 22.7% of otel_metrics_gauge was these two metrics and nothing reads them.
+        #
+        # Measured on krateo-057 (2026-10-23): otel_metrics_gauge held 105,789,485 rows
+        # in 1.64 GiB, of which k8s.replicaset.available and k8s.replicaset.desired were
+        # 12,027,538 rows EACH -- 24,055,076 together, 22.7% of the table. ReplicaSets are
+        # churned by every Deployment rollout, so the cardinality is dominated by dead
+        # ReplicaSets reporting 0/0 forever.
+        #
+        # The signal is NOT lost: k8s.deployment.available / k8s.deployment.desired carry
+        # the same fact at the controller that actually owns it, at 1.6% of the rows.
+        #
+        # Verified before disabling: no RESTAction consumes these. The three RESTActions
+        # that match "replicaset" (krateo-compositions/composition-events,
+        # krateo-compositions/composition-resources, krateo-observability/component-detail)
+        # reference the ReplicaSet *resource*, not these gauges.
+        #
+        # Done at the RECEIVER, not with a filter processor, deliberately: the deployment
+        # collector runs ghcr.io/krateo-platformops/otel-collector, whose builder-config.yaml
+        # ships only [batch memory_limiter k8sattributes resource compositionresolver]. A
+        # filter/ or transform/ processor here would fail at STARTUP, and `helm template`
+        # cannot catch it -- only the collector validates its own component set. Disabling
+        # at the receiver also means the metrics are never generated at all.
+        metrics:
+          k8s.replicaset.available:
+            enabled: false
+          k8s.replicaset.desired:
+            enabled: false
 
     processors:
       batch:
