@@ -280,6 +280,21 @@ defaultAlerts:
       thresholdType: above
       interval: 1h
       message: Something reported an expiring, expired or unverifiable certificate. Caught from LOG LINES, so it fires when a client already failed — expiry measured in days remaining needs the metric support described in this file's header.
+    # The redaction detector for installer#394. The collector DOES sweep JWTs out of log bodies
+    # AND log attributes (transform/log_statements: replace_pattern on body, replace_all_patterns
+    # on attributes) — but that processor runs error_mode: ignore, so a redaction statement that
+    # FAILS is skipped SILENTLY and the pipeline keeps shipping. Switching to propagate would turn
+    # a redaction bug into a telemetry outage, so the detector is the only thing that survives a
+    # skipped statement. Matches the JWT SHAPE, not the string 'eyJ': a redacted row carries
+    # <REDACTED-JWT> and must not match, which is the control measured below.
+    - name: sre-jwt-in-telemetry
+      tier: core
+      displayName: JWT leaked into telemetry
+      where: 'ResourceAttributes[''telemetry.source''] = '''' AND ServiceName NOT IN (''krateo-observability'', ''krateo-alert-troubleshooter'', ''krateo-alert-provider'', ''incident-controller'', ''krateo-clickstack'', ''krateo-clickstack-clickhouse-clickhouse'', ''krateo-clickstack-keeper-keeper'', ''krateo-clickstack-mongodb'', ''clickhouse-mcp-server'', ''clickhouse-operator'', ''incident-agent'', ''krateo-autopilot'', ''kagent'', ''repo-mcp-server'') AND (match(Body, ''eyJ[A-Za-z0-9._-]{20,}'') OR match(toString(mapValues(LogAttributes)), ''eyJ[A-Za-z0-9._-]{20,}''))'
+      threshold: 1
+      thresholdType: above
+      interval: 15m
+      message: A bearer token reached the telemetry store UNREDACTED. The collector sweeps JWTs from log bodies and attributes, but that processor runs error_mode ignore, so a failed redaction statement is skipped silently and this is the only signal left. Treat the matched window as disclosed — the store is queryable by anyone with ClickHouse access and rows live for the retention period. Find the emitting ServiceName, stop it at source, then confirm this returns to 0.
     - name: sre-rbac-denied-burst
       tier: extended
       displayName: Authorization failures elevated

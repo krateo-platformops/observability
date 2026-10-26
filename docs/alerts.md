@@ -1,7 +1,7 @@
 ---
 type: Configuration
 title: observability — the default alert set
-description: The 25 Alert CRs the chart seeds, the measured evidence behind every filter and threshold, and the three rules that decide whether an Alert can fire at all — `where` is ClickHouse SQL and not the Lucene the CRD advertises, SeverityText is empty on every row, and log alerts must exclude the observability stack or they diagnose themselves. Event alerts skip the DELETED copy of an expired Event.
+description: The 26 Alert CRs the chart seeds, the measured evidence behind every filter and threshold, and the three rules that decide whether an Alert can fire at all — `where` is ClickHouse SQL and not the Lucene the CRD advertises, SeverityText is empty on every row, and log alerts must exclude the observability stack or they diagnose themselves. Event alerts skip the DELETED copy of an expired Event.
 resource: oci://ghcr.io/krateo-platformops/charts/krateo-observability
 tags: [alerting, alerts, observability, clickhouse, hyperdx, sre, runbook]
 timestamp: 2026-09-18T00:00:00Z
@@ -115,11 +115,36 @@ about whether your cluster has that problem.
 | `sre-app-panic` | core | logs | above 0 | 15m | 0 |
 | `sre-app-out-of-memory` | core | logs | above 0 | 15m | 0 |
 | `sre-certificate-expiry-warning` | core | logs | above 0 | 1h | 7,434 |
+| `sre-jwt-in-telemetry` | core | logs | above 1 | 15m | 0 (see below) |
 | `sre-rbac-denied-burst` | extended | logs | above 20 | 15m | 3,240 |
 | `sre-upstream-timeouts` | extended | logs | above 50 | 15m | 1,217 |
 | `sre-volume-resize-issue` | extended | events | above 0 | 1h | 4 |
 | `sre-krateo-external-resource-failure` | extended | events | above 200 | 15m | 57,567 |
 | `sre-kubernetes-warning-burst` | extended | events | above 100 | 15m | 71,291 |
+
+### `sre-jwt-in-telemetry`: a zero that is not vacuous
+
+This one's 7-day count is **0**, and by the rule above a zero normally establishes nothing about
+whether the clause evaluates. It is established here by a **control arm** measured in the same
+query:
+
+```
+rows containing  REDACTED-JWT                                839
+of those, rows ALSO matching eyJ[A-Za-z0-9._-]{20,}             0
+```
+
+So the regex is live and discriminating: the collector's redaction fired 839 times in the window,
+and the detector correctly matches none of those redacted rows. A zero for the detector therefore
+means *no token escaped redaction*, not *the filter cannot match*.
+
+It exists because the collector's `transform` runs `error_mode: ignore` — a redaction statement
+that **fails** is skipped silently and the pipeline keeps shipping. Switching to `propagate`
+would turn a redaction bug into a telemetry outage, so this detector is the only thing that
+survives a skipped statement. For installer#394.
+
+One caveat on the control: the 839 tracks whatever is currently leaking into logs. If an upstream
+leak is fixed (installer#395 removes a bearer token from a URL), that count legitimately drops and
+the control weakens. Re-measure it rather than assuming it holds.
 
 ## What a threshold means
 
@@ -166,9 +191,16 @@ occurrence.
 
 Saturation — CPU, memory, disk and PV percentages, node capacity, certificate **days
 remaining**. The Alert CRD counts rows in a logs source and has no way to address a metric, so
-none of it can be expressed today, and writing it as log searches would produce exactly the
-always-OK alerts rule 1 is about. Blocked on the `Metric` CRD + `metricRef` design
-([alert-troubleshooter#34](https://github.com/krateo-platformops/alert-troubleshooter/issues/34)).
+none of it can be expressed as a LOG alert, and writing it as a log search would produce exactly
+the always-OK alerts rule 1 is about.
+
+**Update:** [alert-troubleshooter#34](https://github.com/krateo-platformops/alert-troubleshooter/issues/34)
+(*Metric as a custom resource + metricRef on Alert*) is **CLOSED**, and the Alert CRD now carries
+`metricRef` and `labels`. So saturation is no longer blocked on a design — it needs a `Metric` CR
+per quantity, and there are **zero** `Metric` resources on krateo-057, so the metric path is
+unexercised rather than unavailable. A PV-headroom alert additionally needs `k8s.volume.*`, which
+kubeletstats does not emit under its default `metric_groups` (`container`, `pod`, `node`) — the
+`volume` group has to be enabled first. See installer#393.
 
 ## Cost
 
