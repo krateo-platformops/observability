@@ -172,6 +172,74 @@
     "affinity": {
       "type": "object",
       "additionalProperties": true
+    },
+    "otel": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "OpenTelemetry export. Default-off; each key is emitted as an env var only when set, so the binary's own defaults stay authoritative.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Master gate (OTEL_ENABLED). The per-signal flags default to this in the binary."
+        },
+        "tracing": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "OTEL_TRACING_ENABLED. null inherits `enabled`."
+        },
+        "metrics": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "OTEL_METRICS_ENABLED. null inherits `enabled`."
+        },
+        "endpoint": {
+          "type": "string",
+          "description": "OTEL_EXPORTER_OTLP_ENDPOINT. Empty resolves to the node-local daemonset OTLP collector in this release's namespace, which is the only collector with an OTLP receiver. There is no `protocol` key: telemetry.go builds the HTTP exporters directly and they ignore OTEL_EXPORTER_OTLP_PROTOCOL."
+        }
+      }
+    },
+    "rbacScoping": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Per-caller event scoping (sse-proxy#29). Enabling it also grants the ServiceAccount the SubjectAccessReview and namespace-list permissions it needs, in this same chart: the flag without the grants makes every /notifications request answer 500.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "RBAC_SCOPING_ENABLED. Also creates the ClusterRole and binding the proxy needs."
+        },
+        "verb": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "RBAC_SCOPING_VERB. null = the binary's default (list)."
+        },
+        "resource": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "RBAC_SCOPING_RESOURCE. null = the binary's default (events)."
+        },
+        "apiGroup": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "RBAC_SCOPING_APIGROUP. null = the binary's default (the core group)."
+        },
+        "cacheTTL": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "RBAC_SCOPING_CACHE_TTL, a Go duration. null = the binary's default (60s)."
+        }
+      }
     }
   }
 }
