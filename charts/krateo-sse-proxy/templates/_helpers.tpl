@@ -54,3 +54,24 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- default "default" .Values.serviceAccount.name -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Does ANY OTel signal resolve to ON?
+
+This mirrors telemetry.go's envEnabledOr exactly: OTEL_TRACING_ENABLED and
+OTEL_METRICS_ENABLED each DEFAULT to the master OTEL_ENABLED and OVERRIDE it when
+set. It exists so OTEL_EXPORTER_OTLP_ENDPOINT is emitted whenever a signal is on,
+rather than only when the master is. Gating the endpoint on `otel.enabled` alone
+would make `enabled: false` + `tracing: true` a silent black hole: the binary
+turns tracing on, no endpoint is set, and the exporter falls back to its own
+default of localhost:4318 — which inside a pod is the pod itself, so every span
+is exported to nothing and the only symptom is a connection-refused line.
+*/}}
+{{- define "krateo-sse-proxy.otelAnySignal" -}}
+{{- $o := .Values.otel -}}
+{{- $tracing := $o.enabled -}}
+{{- if not (kindIs "invalid" $o.tracing) -}}{{- $tracing = $o.tracing -}}{{- end -}}
+{{- $metrics := $o.enabled -}}
+{{- if not (kindIs "invalid" $o.metrics) -}}{{- $metrics = $o.metrics -}}{{- end -}}
+{{- if or $tracing $metrics -}}true{{- end -}}
+{{- end -}}

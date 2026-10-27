@@ -55,6 +55,50 @@ spec:
             # a non-co-located authn.
             - name: URL_AUTHN
               value: {{ .Values.auth.urlAuthn | default (printf "http://authn.%s.svc.cluster.local:8082" .Release.Namespace) | quote }}
+          {{- if eq (include "krateo-sse-proxy.otelAnySignal" .) "true" }}
+            # OTLP export (telemetry.go). EVERY var below is emitted ONLY when the
+            # corresponding value is set, so an unset value leaves the BINARY's own default
+            # authoritative instead of silently pinning it from here. Until this block
+            # existed the chart offered no way to enable export at all, so the four
+            # sse_proxy_* instruments were computed on every poll and discarded.
+            {{- if .Values.otel.enabled }}
+            - name: OTEL_ENABLED
+              value: "true"
+            {{- end }}
+            {{- if not (kindIs "invalid" .Values.otel.tracing) }}
+            - name: OTEL_TRACING_ENABLED
+              value: {{ .Values.otel.tracing | quote }}
+            {{- end }}
+            {{- if not (kindIs "invalid" .Values.otel.metrics) }}
+            - name: OTEL_METRICS_ENABLED
+              value: {{ .Values.otel.metrics | quote }}
+            {{- end }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.otel.endpoint | default (printf "http://otel-collector-daemonset-opentelemetry-collector.%s.svc:4318" .Release.Namespace) | quote }}
+          {{- end }}
+          {{- if .Values.rbacScoping.enabled }}
+            # Per-caller event scoping (rbac.go). The grants this needs are created by this
+            # same flag in rbac-event-scoping.yaml — see that file for why they cannot be
+            # separated.
+            - name: RBAC_SCOPING_ENABLED
+              value: "true"
+            {{- if not (kindIs "invalid" .Values.rbacScoping.verb) }}
+            - name: RBAC_SCOPING_VERB
+              value: {{ .Values.rbacScoping.verb | quote }}
+            {{- end }}
+            {{- if not (kindIs "invalid" .Values.rbacScoping.resource) }}
+            - name: RBAC_SCOPING_RESOURCE
+              value: {{ .Values.rbacScoping.resource | quote }}
+            {{- end }}
+            {{- if not (kindIs "invalid" .Values.rbacScoping.apiGroup) }}
+            - name: RBAC_SCOPING_APIGROUP
+              value: {{ .Values.rbacScoping.apiGroup | quote }}
+            {{- end }}
+            {{- if not (kindIs "invalid" .Values.rbacScoping.cacheTTL) }}
+            - name: RBAC_SCOPING_CACHE_TTL
+              value: {{ .Values.rbacScoping.cacheTTL | quote }}
+            {{- end }}
+          {{- end }}
           # Lenient liveness tolerance (org standard): the Kubernetes defaults
           # (timeoutSeconds: 1, failureThreshold: 3) kill HEALTHY pods under CPU
           # contention — a slow-but-alive /health reply counts as a failure and the
@@ -87,7 +131,8 @@ spec:
             runAsNonRoot: true
             allowPrivilegeEscalation: false
             capabilities:
-              drop: [ALL]
+              drop:
+                - ALL
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

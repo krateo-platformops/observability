@@ -1,0 +1,63 @@
+{{/*
+The cluster grants the per-caller event scoping path needs, created by THE SAME FLAG
+that turns the feature on.
+
+This is deliberately not a separate `rbac.create` knob. With RBAC_SCOPING_ENABLED=true
+and no grants, resolveRequestScope cannot resolve a caller's namespaces, and its failure
+answers HTTP 500 — not 403 and not an unfiltered 200. Every /notifications request on the
+cluster fails, for admins too, so the bell goes dead platform-wide. A flag that bricks the
+feature unless a second, independent knob is also set is a trap, so there is only one knob
+and it carries its own permissions.
+
+Both calls the proxy makes are cluster-scoped, so these must be a ClusterRole and a
+ClusterRoleBinding rather than namespaced Roles:
+
+  - POST /apis/authorization.k8s.io/v1/subjectaccessreviews  (rbac.go:290)
+  - GET  /api/v1/namespaces?limit=500                        (rbac.go:310)
+
+The name carries an `-event-scoping` suffix on purpose. A ClusterRole named exactly
+`krateo-sse-proxy` ALREADY EXISTS on an installed platform — core-provider derives it for
+the composition, with `rules: null` — and it belongs to the engine, not to this workload.
+Emitting that name here would have this chart adopt and overwrite an object it does not own.
+*/}}
+{{- if .Values.rbacScoping.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "krateo-sse-proxy.fullname" . }}-event-scoping
+  labels:
+    {{- include "krateo-sse-proxy.labels" . | nindent 4 }}
+rules:
+  # Resolve what a caller is allowed to read. The proxy POSTs a SubjectAccessReview per
+  # candidate namespace on behalf of the JWT's subject; `create` is the only verb a
+  # SubjectAccessReview has.
+  - apiGroups:
+      - authorization.k8s.io
+    resources:
+      - subjectaccessreviews
+    verbs:
+      - create
+  # Enumerate the candidate namespaces to review. The request is paginated (limit=500),
+  # which `list` covers; `get` and `watch` are not used and are not granted.
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    verbs:
+      - list
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "krateo-sse-proxy.fullname" . }}-event-scoping
+  labels:
+    {{- include "krateo-sse-proxy.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "krateo-sse-proxy.fullname" . }}-event-scoping
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "krateo-sse-proxy.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

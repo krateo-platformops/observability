@@ -1,0 +1,45 @@
+# Render-gate for krateo-sse-proxy's feature knobs.
+#
+# WHY THIS EXISTS, given lint.yaml already renders every chart. The canonical lint runs
+# `helm template smoke <dir>` with DEFAULT values. Both features this chart gates are
+# default-OFF, so every conditional branch they control is UNRENDERED in the only case lint
+# exercises: the knobs could be deleted outright and lint would stay green. A gate that
+# cannot see the field you changed reports on something else.
+#
+# It is a separate workflow on purpose. lint.yaml is the org-wide canonical chart-repo lint,
+# identical across every krateo-* chart repo; a per-chart assertion does not belong in it.
+#
+# What it actually guards is a 500-for-everyone failure: RBAC_SCOPING_ENABLED without the
+# SubjectAccessReview grants makes every /notifications request fail, admins included. The
+# flag and its ClusterRole therefore live in one template, and case F asserts they stay
+# together. Case C guards the mirror-image trap on the OTel side — a per-signal flag on
+# while the master is off, which turns export on in-binary but would leave the endpoint
+# unset, silently exporting every span to the pod itself.
+
+name: check-sse-proxy-render
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Assert every knob renders as specified
+        run: python3 hack/check-sse-proxy-render.py .

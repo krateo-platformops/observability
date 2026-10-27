@@ -54,6 +54,57 @@ clickhouse:
 
 listenAddr: ":8080"
 
+# OpenTelemetry export. DEFAULT-OFF, and every key below is emitted as an env var ONLY when
+# it is set — so with the defaults the BINARY's own defaults remain the single source of
+# truth. A chart that always writes a value makes the binary's default dead code and leaves
+# nobody able to say which is authoritative (the cdc shipped WORKERS=10 on 68 configmaps for
+# exactly this reason, and main.go's default has been unreachable ever since).
+#
+# Until this block existed there was NO WAY to enable export at all: the Deployment hardcoded
+# five env vars and the chart offered no hook, so sse_proxy_events_delivered_total,
+# _dropped_total, _poll_errors_total and _connected_clients were computed and discarded.
+otel:
+  # Master gate (OTEL_ENABLED). The per-signal flags below default to this in the binary.
+  enabled: false
+  # Per-signal overrides (OTEL_TRACING_ENABLED / OTEL_METRICS_ENABLED). Leave null to inherit
+  # `enabled`; set true/false only to diverge from it.
+  tracing: null
+  metrics: null
+  # OTEL_EXPORTER_OTLP_ENDPOINT. Empty resolves to the node-local daemonset OTLP agent in
+  # THIS release's namespace. That collector is the only one on the estate with an OTLP
+  # receiver (verified on krateo-057: its otlp receiver binds :4318 and feeds the `traces`
+  # and `metrics` pipelines into clickhouse); the gateway collector
+  # (`...-deployment-...`) declares port 4318 on its Service but runs only k8s_cluster and
+  # k8sobjects receivers, so it ACCEPTS THE CONNECTION AND DROPS EVERYTHING.
+  #
+  # core-provider's chart hardcodes `krateo-system` here and documents that a non-default
+  # namespace needs an override; deriving it from .Release.Namespace removes that caveat and
+  # matches how this chart already defaults URL_AUTHN.
+  endpoint: ""
+  #
+  # There is deliberately NO `protocol` key. telemetry.go constructs otlptracehttp /
+  # otlpmetrichttp directly, and the Go OTLP-HTTP exporters do not read
+  # OTEL_EXPORTER_OTLP_PROTOCOL (only the autoexport/otelconf packages do). The collector
+  # DOES listen on :4317 for gRPC, so `protocol: grpc` would look entirely plausible, pass
+  # schema validation, reach the pod, and change nothing. Offering gRPC means changing the
+  # exporter in telemetry.go; the values key belongs with that change, not ahead of it.
+
+# Per-caller event scoping (sse-proxy#29). DEFAULT-OFF.
+#
+# ENABLING THIS ALSO GRANTS THE SERVICE ACCOUNT, in this same chart, and that is deliberate:
+# the proxy resolves a caller's namespaces with SubjectAccessReviews, and if the flag is on
+# while the SA cannot create them, resolveRequestScope fails and EVERY /notifications request
+# answers 500 — killing every bell on the cluster, admins included. The flag and the grants
+# must be one change, so they are one template.
+rbacScoping:
+  enabled: false
+  # RBAC_SCOPING_VERB / _RESOURCE / _APIGROUP / _CACHE_TTL. All null = the binary's defaults
+  # (list / events / "" / 60s). Set one only to diverge.
+  verb: null
+  resource: null
+  apiGroup: null
+  cacheTTL: null
+
 resources:
   limits:
     cpu: 200m
