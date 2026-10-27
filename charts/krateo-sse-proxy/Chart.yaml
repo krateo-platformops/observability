@@ -34,7 +34,7 @@ type: application
 #   Result equivalence was checked on 057 with pinned samples (count + cityHash64 match).
 #   Independent gate: reviewer-small PASS, from pushed SHA f61dd601.
 version: 0.1.16
-appVersion: "1.1.9"
+appVersion: "1.2.0"
 home: https://krateo.io
 icon: https://github.com/krateoplatformops/krateo/blob/main/docs/media/logo.svg
 keywords:

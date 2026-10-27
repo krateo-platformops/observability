@@ -19,7 +19,7 @@ image:
   # repository so a mirror/air-gap relocation only swaps the host and preserves the repo path.
   registry: ghcr.io
   repository: krateo-platformops/sse-proxy
-  tag: "1.1.9"
+  tag: "1.2.0"
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
