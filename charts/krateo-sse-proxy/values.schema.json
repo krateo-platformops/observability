@@ -128,51 +128,6 @@
     "listenAddr": {
       "type": "string"
     },
-    "resources": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "limits": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "cpu": {
-              "type": "string"
-            },
-            "memory": {
-              "type": "string"
-            }
-          }
-        },
-        "requests": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "cpu": {
-              "type": "string"
-            },
-            "memory": {
-              "type": "string"
-            }
-          }
-        }
-      }
-    },
-    "podAnnotations": {
-      "type": "object",
-      "additionalProperties": true
-    },
-    "nodeSelector": {
-      "type": "object",
-      "additionalProperties": true
-    },
-    "tolerations": {
-      "type": "array"
-    },
-    "affinity": {
-      "type": "object",
-      "additionalProperties": true
-    },
     "otel": {
       "type": "object",
       "additionalProperties": false,
@@ -240,6 +195,51 @@
           "description": "RBAC_SCOPING_CACHE_TTL, a Go duration. null = the binary's default (60s)."
         }
       }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cpu": {
+              "type": "string"
+            },
+            "memory": {
+              "type": "string"
+            }
+          }
+        },
+        "requests": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cpu": {
+              "type": "string"
+            },
+            "memory": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "podAnnotations": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "nodeSelector": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "tolerations": {
+      "type": "array"
+    },
+    "affinity": {
+      "type": "object",
+      "additionalProperties": true
     }
   }
 }
