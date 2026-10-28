@@ -1,4 +1,4 @@
-krateo-audit-worm {{ .Chart.AppVersion }} installed as {{ include "krateo-audit-worm.fullname" . }}.
+krateo-audit-worm {{ .Chart.Version }} installed as {{ include "krateo-audit-worm.fullname" . }}.
 
 Tamper-evidence for the audit trail is now active:
   - WORM table : {{ .Values.clickhouse.database }}.{{ .Values.wormTable }}  (append-only, ingestion-stamped copy of {{ .Values.sourceTable }})

@@ -4,12 +4,12 @@ description: >-
   Tamper-evidence (WORM) for the Krateo audit trail. Hash-chains the audit rows
   the OTel collector writes to ClickHouse (krateo_audit) into an append-only seal
   chain, and continuously verifies it so any retroactive edit or delete is
-  detected. C8 of the Krateo CMP epic (D19).
+  detected.
 type: application
-version: 0.1.0
-# The sealing/verification logic version. Bumped independently of the chart so
-# the mechanism can evolve without a chart-structure change.
-appVersion: "0.1.0"
+# No appVersion: this chart ships no first-party image. The seal/verify logic
+# lives in the chart's own ConfigMap and runs on the upstream ClickHouse client
+# image, so the chart version IS the logic version.
+version: 0.1.1
 keywords:
   - audit
   - worm

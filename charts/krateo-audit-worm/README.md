@@ -1,6 +1,6 @@
 # krateo-audit-worm
 
-Tamper-evidence (WORM) for the Krateo audit trail — **C8** of the CMP program (D19).
+Tamper-evidence (WORM) for the Krateo audit trail.
 
 The OTel collector already writes the canonical audit records (`event.name="audit"`)
 to the ClickHouse `krateo_audit` table with 365-day retention. That table is a
