@@ -1,0 +1,73 @@
+# krateo-audit-worm — tamper-evidence for the audit trail.
+#
+# This chart adds NO new ingest path: it reads the krateo_audit table the OTel
+# collector already writes (event.name=="audit" pipeline, 365d TTL), copies each
+# row into an append-only WORM table stamped with its ingestion time, and
+# hash-chains sealed windows so any later edit or delete is detectable.
+
+# ClickHouse connection (native protocol). Credentials are read from a Secret —
+# the same one the OTel collectors use — never inlined.
+clickhouse:
+  host: krateo-clickstack-clickhouse-clickhouse-headless.krateo-system.svc
+  port: 9000
+  # Database that holds krateo_audit (the collector's clickhouse/audit exporter
+  # writes database `default`). The WORM + seal tables are created here too.
+  database: default
+  credentialsSecret:
+    name: otel-clickhouse-credentials
+    usernameKey: username
+    passwordKey: password
+
+# Table names. sourceTable is created by the collector; the other two by this chart.
+sourceTable: krateo_audit
+wormTable: krateo_audit_worm
+sealTable: krateo_audit_seal
+
+image:
+  repository: clickhouse/clickhouse-server
+  tag: "24.8-alpine"
+  pullPolicy: IfNotPresent
+
+# Sealing: seal rows whose ingestion time is older than lagSeconds (a watermark
+# that lets late/retried/post-outage rows settle before their window is sealed).
+seal:
+  schedule: "*/15 * * * *"
+  lagSeconds: 300
+
+# Verification: recompute the chain and emit an OTel-shaped JSON line to stdout
+# every run (status ok|tampered|stale). The line is collected into otel_logs and
+# HyperDX alerts on status!=ok AND on the line's ABSENCE (a stopped verifier).
+verify:
+  schedule: "0 * * * *"
+  # Flag the chain stale if the newest seal is older than this (a stopped or
+  # erroring sealer leaves rows unsealed — invisible without this check).
+  staleAfterSeconds: 5400
+
+# A failed seal/verify run should surface as the workload being unhealthy, so the
+# reconciler (installer pin) reports it — not vanish silently.
+concurrencyPolicy: Forbid
+activeDeadlineSeconds: 120
+successfulJobsHistoryLimit: 1
+failedJobsHistoryLimit: 3
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 20m
+    memory: 64Mi
+
+# Hardened by default (mirrors the budget-evaluator pattern).
+podSecurityContext:
+  runAsNonRoot: true
+containerSecurityContext:
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 65534
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+
+nameOverride: ""
+fullnameOverride: ""

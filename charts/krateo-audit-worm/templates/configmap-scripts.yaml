@@ -1,0 +1,209 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "krateo-audit-worm.fullname" . }}-scripts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "krateo-audit-worm.labels" . | nindent 4 }}
+data:
+  schema.sql: |
+    -- WORM copy of the audit rows, stamped with their INGESTION time (now64 at
+    -- MV insert) and a per-row content hash. Sealing runs on ingested_at (a
+    -- monotonic insert axis), NOT event Timestamp, so a late/out-of-order row
+    -- gets a current ingested_at and lands AHEAD of the watermark, never inside
+    -- an already-sealed window. Append-only by contract.
+    CREATE TABLE IF NOT EXISTS {{ .Values.wormTable }}
+    (
+        ingested_at        DateTime64(9),
+        Timestamp          DateTime64(9),
+        TraceId            String,
+        SpanId             String,
+        SeverityText       LowCardinality(String),
+        ServiceName        LowCardinality(String),
+        Body               String,
+        ResourceAttributes Map(LowCardinality(String), String),
+        LogAttributes      Map(LowCardinality(String), String),
+        row_hash           String
+    )
+    ENGINE = MergeTree
+    ORDER BY (ingested_at, row_hash);
+
+    -- Copy on insert; stamp ingested_at; hash every immutable field (maps are
+    -- mapSort'd so the hash is key-order independent). Only captures rows
+    -- inserted AFTER this MV exists — the trail begins at the first seal run.
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {{ .Values.wormTable }}_mv TO {{ .Values.wormTable }} AS
+    SELECT
+        now64(9) AS ingested_at,
+        Timestamp, TraceId, SpanId, SeverityText, ServiceName, Body,
+        ResourceAttributes, LogAttributes,
+        lower(hex(SHA256(concat(
+            toString(Timestamp), '|', TraceId, '|', SpanId, '|',
+            toString(SeverityText), '|', toString(ServiceName), '|', Body, '|',
+            toString(mapSort(ResourceAttributes)), '|', toString(mapSort(LogAttributes))
+        )))) AS row_hash
+    FROM {{ .Values.sourceTable }};
+
+    -- The hash-chain: one row per sealed window, chained to the previous.
+    CREATE TABLE IF NOT EXISTS {{ .Values.sealTable }}
+    (
+        seal_seq       UInt64,
+        window_start   DateTime64(9),
+        window_end     DateTime64(9),
+        row_count      UInt64,
+        segment_hash   String,
+        prev_seal_hash String,
+        seal_hash      String,
+        sealed_at      DateTime64(9)
+    )
+    ENGINE = MergeTree
+    ORDER BY seal_seq;
+
+  lib.sh: |
+    # Shared by seal.sh and verify.sh.
+    CHQ() { clickhouse-client --host "$CH_HOST" --port "$CH_PORT" --user "$CH_USER" --password "$CH_PASSWORD" --database "$CH_DB" --history_file=/dev/null "$@"; }
+
+    # has NAME -> 1 if a table, view or materialized view NAME exists in CH_DB.
+    has() { CHQ -q "SELECT count() FROM system.tables WHERE database = currentDatabase() AND name = '$1'"; }
+
+    # emit SERVICE STATUS SEV_TEXT SEV_NUM BODY [EXTRA_MAP_ENTRIES]
+    # Writes ONE OTel-shaped JSON line to stdout; the collector ships it to
+    # otel_logs and HyperDX alerts on krateo.audit.status != ok. The line is built
+    # server-side (toJSONString escapes every value). EXTRA_MAP_ENTRIES is a
+    # comma-led list of literal map entries built only from internal values
+    # (status names, counts, seal numbers) — never from audit-row content.
+    emit() {
+      CHQ -q "SELECT concat('{\"timestamp\":\"', formatDateTime(now(),'%Y-%m-%dT%H:%i:%SZ','UTC'), '\",\"trace_id\":\"', lower(hex(rand64())), lower(hex(rand64())), '\",\"span_id\":\"', lower(hex(rand64())), '\",\"severity_text\":\"$3\",\"severity_number\":$4,\"body\":\"$5\",\"attributes\":', toJSONString(map('event.name','krateo.audit.integrity','service.name','$1','krateo.audit.status','$2'${6:-})), '}') FORMAT TSVRaw"
+    }
+
+  seal.sh: |
+    #!/bin/sh
+    # Owns the schema: there is no Helm hook. Every run applies schema.sql
+    # idempotently, then seals the window (prev_window_end, now()-lag].
+    # segment_hash is the SHA256 of the window's arraySort'd row_hashes (a
+    # deterministic set hash); seal_hash = SHA256(segment_hash || prev_seal_hash).
+    set -eu
+    . /scripts/lib.sh
+
+    if [ "$(has {{ .Values.sourceTable }})" != "1" ]; then
+      echo "source table {{ .Values.sourceTable }} does not exist yet: the collector's audit pipeline has not created it; retrying next run" >&2
+      exit 1
+    fi
+
+    # The WORM table present without its MV means mirroring was switched off
+    # after install (a fresh install has neither). Restore it, but say so loudly.
+    HAD_WORM=$(has {{ .Values.wormTable }})
+    HAD_MV=$(has {{ .Values.wormTable }}_mv)
+    CHQ --multiquery < /scripts/schema.sql
+
+    GENESIS=$(CHQ -q "SELECT lower(hex(SHA256('krateo-audit-genesis')))")
+    PREV_SEQ=$(CHQ -q "SELECT ifNull(max(seal_seq),0) FROM {{ .Values.sealTable }}")
+    RESET=0
+    if [ "$PREV_SEQ" = "0" ]; then
+      PREV_END="1970-01-01 00:00:00.000000000"
+      PREV_HASH="$GENESIS"
+      if [ "$HAD_WORM" = "1" ] && [ "$(CHQ -q "SELECT count() FROM {{ .Values.wormTable }}")" != "0" ]; then
+        # The WORM table already held rows but no seal exists: the chain was
+        # dropped or truncated. Restart from a RESET genesis, never the canonical
+        # one, so verification can never come back green over the lost history.
+        RESET=1
+        PREV_HASH=$(CHQ -q "SELECT lower(hex(SHA256(concat('krateo-audit-genesis-reset|', toString(now64(9))))))")
+      fi
+    else
+      PREV_END=$(CHQ -q "SELECT toString(window_end) FROM {{ .Values.sealTable }} WHERE seal_seq=$PREV_SEQ")
+      PREV_HASH=$(CHQ -q "SELECT seal_hash FROM {{ .Values.sealTable }} WHERE seal_seq=$PREV_SEQ")
+    fi
+    WM=$(CHQ -q "SELECT toString(now64(9) - toIntervalSecond(${LAG_SECONDS}))")
+    CNT=$(CHQ -q "SELECT count() FROM {{ .Values.wormTable }} WHERE ingested_at > '$PREV_END' AND ingested_at <= '$WM'")
+    SEG=$(CHQ -q "SELECT lower(hex(SHA256(arrayStringConcat(arraySort(groupArray(row_hash)), '')))) FROM {{ .Values.wormTable }} WHERE ingested_at > '$PREV_END' AND ingested_at <= '$WM'")
+    SEAL=$(CHQ -q "SELECT lower(hex(SHA256(concat('$SEG','$PREV_HASH'))))")
+    NEXT=$((PREV_SEQ + 1))
+    CHQ -q "INSERT INTO {{ .Values.sealTable }} (seal_seq,window_start,window_end,row_count,segment_hash,prev_seal_hash,seal_hash,sealed_at) VALUES ($NEXT,'$PREV_END','$WM',$CNT,'$SEG','$PREV_HASH','$SEAL',now64(9))"
+    echo "sealed seq=$NEXT rows=$CNT window_end=$WM"
+
+    FAIL=0
+    if [ "$HAD_WORM" = "1" ] && [ "$HAD_MV" != "1" ]; then
+      # Audit rows written while the MV was absent were never mirrored, so the
+      # chain cannot vouch for them. Fail the Job so the gap is visible.
+      emit krateo-audit-sealer mirroring_restored ERROR 17 "audit mirroring was disabled and has been restored" ",'krateo.audit.seal_seq','$NEXT'"
+      FAIL=1
+    fi
+    if [ "$RESET" = "1" ]; then
+      emit krateo-audit-sealer chain_reset ERROR 17 "audit seal chain was missing and has been restarted; earlier history cannot be verified" ",'krateo.audit.seal_seq','$NEXT'"
+      FAIL=1
+    fi
+    exit $FAIL
+
+  verify.sh: |
+    #!/bin/sh
+    # Observes, never repairs: recompute every seal's segment + chained hash from
+    # the WORM table and check the linkage. Emits ONE OTel-shaped JSON line per
+    # run (status ok|tampered|unprotected|stale); HyperDX alerts on status!=ok AND
+    # on the line's ABSENCE (a stopped verifier). Exits 1 unless ok.
+    set -eu
+    . /scripts/lib.sh
+
+    HAS_WORM=$(has {{ .Values.wormTable }})
+    HAS_MV=$(has {{ .Values.wormTable }}_mv)
+    HAS_SEAL=$(has {{ .Values.sealTable }})
+
+    if [ "$HAS_WORM$HAS_MV$HAS_SEAL" = "000" ]; then
+      # Fresh install, first seal run not yet happened: nothing to verify.
+      emit krateo-audit-verifier ok INFO 9 "audit seal chain not initialized yet" ",'krateo.audit.checked_seals','0'"
+      exit 0
+    fi
+
+    PROBLEMS=""
+    [ "$HAS_WORM" = "1" ] || PROBLEMS="$PROBLEMS worm_table:missing"
+    [ "$HAS_SEAL" = "1" ] || PROBLEMS="$PROBLEMS seal_table:missing"
+
+    GENESIS=$(CHQ -q "SELECT lower(hex(SHA256('krateo-audit-genesis')))")
+    EXPECTED_PREV="$GENESIS"
+    CHECKED=0
+    AGE=0
+    HEAD_SEQ=0
+    HEAD_HASH=""
+    SEALS=""
+    if [ "$HAS_WORM" = "1" ] && [ "$HAS_SEAL" = "1" ]; then
+      SEALS=$(CHQ -q "SELECT seal_seq, toString(window_start), toString(window_end), segment_hash, prev_seal_hash, seal_hash FROM {{ .Values.sealTable }} ORDER BY seal_seq FORMAT TSV")
+      AGE=$(CHQ -q "SELECT ifNull(toUInt64(dateDiff('second', max(sealed_at), now64(9))), 4294967295) FROM {{ .Values.sealTable }}")
+    fi
+    if [ -n "$SEALS" ]; then
+      OLDIFS="$IFS"
+      while IFS="$(printf '\t')" read -r SEQ WSTART WEND SSEG SPREV SSEAL; do
+        [ -z "$SEQ" ] && continue
+        CHECKED=$((CHECKED + 1))
+        RSEG=$(CHQ -q "SELECT lower(hex(SHA256(arrayStringConcat(arraySort(groupArray(row_hash)), '')))) FROM {{ .Values.wormTable }} WHERE ingested_at > '$WSTART' AND ingested_at <= '$WEND'")
+        RSEAL=$(CHQ -q "SELECT lower(hex(SHA256(concat('$RSEG','$SPREV'))))")
+        [ "$RSEG" != "$SSEG" ] && PROBLEMS="$PROBLEMS ${SEQ}:segment"
+        [ "$RSEAL" != "$SSEAL" ] && PROBLEMS="$PROBLEMS ${SEQ}:seal"
+        [ "$SPREV" != "$EXPECTED_PREV" ] && PROBLEMS="$PROBLEMS ${SEQ}:linkage"
+        EXPECTED_PREV="$SSEAL"
+        HEAD_SEQ="$SEQ"
+        HEAD_HASH="$SSEAL"
+      done <<SEALSEOF
+    $SEALS
+    SEALSEOF
+      IFS="$OLDIFS"
+    fi
+
+    STALE=$([ "$AGE" -gt {{ .Values.verify.staleAfterSeconds }} ] && echo 1 || echo 0)
+
+    # Precedence: tampered > unprotected > stale > ok.
+    if [ -n "$PROBLEMS" ]; then
+      STATUS=tampered; SEV_TEXT=ERROR; SEV_NUM=17
+    elif [ "$HAS_MV" != "1" ]; then
+      STATUS=unprotected; SEV_TEXT=ERROR; SEV_NUM=17   # mirroring is off: new audit rows are not being sealed
+    elif [ "$CHECKED" = "0" ]; then
+      STATUS=ok; SEV_TEXT=INFO; SEV_NUM=9               # schema exists, first seal not yet written
+    elif [ "$STALE" = "1" ]; then
+      STATUS=stale; SEV_TEXT=ERROR; SEV_NUM=17
+    else
+      STATUS=ok; SEV_TEXT=INFO; SEV_NUM=9
+    fi
+    PROBLEMS_TRIM=$(echo "$PROBLEMS" | sed 's/^ *//')
+
+    # head_seal_seq/head_seal_hash put the chain head into the log stream on every
+    # run: an out-of-band trail in which a full wipe shows as the head going back.
+    emit krateo-audit-verifier "$STATUS" "$SEV_TEXT" "$SEV_NUM" "audit seal chain $STATUS" ",'krateo.audit.checked_seals','$CHECKED','krateo.audit.problem_seals','$PROBLEMS_TRIM','krateo.audit.newest_seal_age_seconds','$AGE','krateo.audit.head_seal_seq','$HEAD_SEQ','krateo.audit.head_seal_hash','$HEAD_HASH'"
+
+    [ "$STATUS" = "ok" ] || exit 1
