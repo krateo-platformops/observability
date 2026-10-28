@@ -73,8 +73,25 @@ spec:
             - name: OTEL_METRICS_ENABLED
               value: {{ .Values.otel.metrics | quote }}
             {{- end }}
+            # The collector Service is HEADLESS (clusterIP: None), so its DNS name resolves to
+            # EVERY collector pod and the exporter connects to an arbitrary one — measured on
+            # krateo-057: a pod on node …-s9a6, whose local collector is 10.40.3.2, got back all
+            # four collector IPs. internalTrafficPolicy: Local is set on that Service but is inert
+            # on a headless one, so it does not rescue the DNS path. Export still WORKED (every
+            # collector has the same otlp receiver and clickhouse exporter), which is why the
+            # earlier node-local CLAIM went unchallenged — the cost was a cross-node hop per batch
+            # and the loss of node attribution, not a failure.
+            #
+            # $(HOST_IP) is expanded by the kubelet from THIS pod's node, so it reaches the
+            # collector on the same node with no DNS and no hop. This is the pattern snowplow
+            # already uses on the estate; matching it also means one way to read the wiring
+            # instead of two.
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: {{ .Values.otel.endpoint | default (printf "http://otel-collector-daemonset-opentelemetry-collector.%s.svc:4318" .Release.Namespace) | quote }}
+              value: {{ .Values.otel.endpoint | default "http://$(HOST_IP):4318" | quote }}
           {{- end }}
           {{- if .Values.rbacScoping.enabled }}
             # Per-caller event scoping (rbac.go). The grants this needs are created by this

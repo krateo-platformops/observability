@@ -32,7 +32,13 @@ BASE = {
     "LISTEN_ADDR",
     "URL_AUTHN",
 }
-DAEMONSET_OTLP = f"http://otel-collector-daemonset-opentelemetry-collector.{NS}.svc:4318"
+# The endpoint default is now the pod's OWN node via a projected HOST_IP, not the collector
+# Service's DNS name. The Service is headless, so its name resolved to every collector pod and
+# was never node-local despite the comment that claimed it was (measured on krateo-057: a pod
+# resolved all four collector IPs). Case B therefore also asserts the HOST_IP env EXISTS and is
+# projected from status.hostIP — without that, "$(HOST_IP)" is an unexpanded literal and the
+# exporter would dial a hostname that does not resolve.
+NODE_LOCAL_OTLP = "http://$(HOST_IP):4318"
 
 
 def render(root: pathlib.Path, values: dict, namespace: str = NS) -> list[dict]:
@@ -56,6 +62,18 @@ def env_of(objs: list[dict]) -> dict[str, object]:
         if o.get("kind") == "Deployment":
             env = o["spec"]["template"]["spec"]["containers"][0].get("env", [])
             return {e["name"]: e.get("value", e.get("valueFrom")) for e in env}
+    raise AssertionError("no Deployment rendered")
+
+
+def _raw_env(objs: list[dict]) -> list[dict]:
+    """The Deployment container's env as the RAW list, so valueFrom survives.
+
+    env_of() flattens to name -> value|valueFrom, which loses the structure needed to assert
+    that HOST_IP is projected from status.hostIP rather than set to a literal.
+    """
+    for o in objs:
+        if o.get("kind") == "Deployment":
+            return o["spec"]["template"]["spec"]["containers"][0].get("env", [])
     raise AssertionError("no Deployment rendered")
 
 
@@ -89,12 +107,22 @@ def main() -> int:
           "no scoping ClusterRole/ClusterRoleBinding rendered")
 
     # ---- B. master gate on ----
-    env = env_of(render(root, {"otel": {"enabled": True}}))
-    check("B otel.enabled", set(env) == BASE | {"OTEL_ENABLED", "OTEL_EXPORTER_OTLP_ENDPOINT"},
-          f"adds exactly OTEL_ENABLED + endpoint ({diff(set(env), BASE | {'OTEL_ENABLED', 'OTEL_EXPORTER_OTLP_ENDPOINT'})})")
+    # Keep the rendered objects, not just the flattened env: asserting HOST_IP is PROJECTED
+    # (valueFrom.fieldRef) rather than set to a literal needs the raw structure, and reusing the
+    # previous case's `objs` is how the first version of this check failed — it was reading case
+    # A's defaults render, where otel is off and HOST_IP legitimately does not exist.
+    objs = render(root, {"otel": {"enabled": True}})
+    env = env_of(objs)
+    check("B otel.enabled", set(env) == BASE | {"OTEL_ENABLED", "OTEL_EXPORTER_OTLP_ENDPOINT", "HOST_IP"},
+          f"adds exactly OTEL_ENABLED + endpoint ({diff(set(env), BASE | {'OTEL_ENABLED', 'OTEL_EXPORTER_OTLP_ENDPOINT', 'HOST_IP'})})")
     check("B otel.enabled", env.get("OTEL_ENABLED") == "true", "OTEL_ENABLED == 'true'")
-    check("B otel.enabled", env.get("OTEL_EXPORTER_OTLP_ENDPOINT") == DAEMONSET_OTLP,
-          f"endpoint defaults to the daemonset collector in-namespace ({env.get('OTEL_EXPORTER_OTLP_ENDPOINT')})")
+    check("B otel.enabled", env.get("OTEL_EXPORTER_OTLP_ENDPOINT") == NODE_LOCAL_OTLP,
+          f"endpoint defaults to the pod's OWN node ({env.get('OTEL_EXPORTER_OTLP_ENDPOINT')})")
+    hostip = next((e for e in _raw_env(objs) if e["name"] == "HOST_IP"), None)
+    check("B otel.enabled",
+          bool(hostip) and (hostip.get("valueFrom", {}).get("fieldRef", {}).get("fieldPath")
+                            == "status.hostIP"),
+          f"HOST_IP is projected from status.hostIP, so $(HOST_IP) expands ({hostip})")
 
     # ---- C. THE BLACK-HOLE GUARD: a per-signal flag on while the master is off ----
     # telemetry.go turns tracing ON here (the per-signal flag overrides the master), so the
@@ -102,17 +130,17 @@ def main() -> int:
     # localhost:4318 and every span is lost silently.
     env = env_of(render(root, {"otel": {"enabled": False, "tracing": True}}))
     check("C tracing-without-master",
-          set(env) == BASE | {"OTEL_TRACING_ENABLED", "OTEL_EXPORTER_OTLP_ENDPOINT"},
-          f"adds exactly OTEL_TRACING_ENABLED + endpoint ({diff(set(env), BASE | {'OTEL_TRACING_ENABLED', 'OTEL_EXPORTER_OTLP_ENDPOINT'})})")
-    check("C tracing-without-master", env.get("OTEL_EXPORTER_OTLP_ENDPOINT") == DAEMONSET_OTLP,
+          set(env) == BASE | {"OTEL_TRACING_ENABLED", "OTEL_EXPORTER_OTLP_ENDPOINT", "HOST_IP"},
+          f"adds exactly OTEL_TRACING_ENABLED + endpoint ({diff(set(env), BASE | {'OTEL_TRACING_ENABLED', 'OTEL_EXPORTER_OTLP_ENDPOINT', 'HOST_IP'})})")
+    check("C tracing-without-master", env.get("OTEL_EXPORTER_OTLP_ENDPOINT") == NODE_LOCAL_OTLP,
           "endpoint IS emitted even though the master gate is false")
     check("C tracing-without-master", "OTEL_ENABLED" not in env,
           "OTEL_ENABLED is NOT emitted (the master stays off; the binary's default governs)")
 
     # ---- D. per-signal flag diverging downward from an on master ----
     env = env_of(render(root, {"otel": {"enabled": True, "metrics": False}}))
-    check("D metrics-off", set(env) == BASE | {"OTEL_ENABLED", "OTEL_METRICS_ENABLED", "OTEL_EXPORTER_OTLP_ENDPOINT"},
-          f"adds OTEL_ENABLED + OTEL_METRICS_ENABLED + endpoint ({diff(set(env), BASE | {'OTEL_ENABLED', 'OTEL_METRICS_ENABLED', 'OTEL_EXPORTER_OTLP_ENDPOINT'})})")
+    check("D metrics-off", set(env) == BASE | {"OTEL_ENABLED", "OTEL_METRICS_ENABLED", "OTEL_EXPORTER_OTLP_ENDPOINT", "HOST_IP"},
+          f"adds OTEL_ENABLED + OTEL_METRICS_ENABLED + endpoint ({diff(set(env), BASE | {'OTEL_ENABLED', 'OTEL_METRICS_ENABLED', 'OTEL_EXPORTER_OTLP_ENDPOINT', 'HOST_IP'})})")
     check("D metrics-off", env.get("OTEL_METRICS_ENABLED") == "false",
           "OTEL_METRICS_ENABLED == 'false' (explicit, so it overrides the master in-binary)")
 
@@ -168,9 +196,9 @@ def main() -> int:
     objs = render(root, {"otel": {"enabled": True}, "rbacScoping": {"enabled": True}}, namespace="krateo")
     env = env_of(objs)
     check("H other-namespace",
-          env.get("OTEL_EXPORTER_OTLP_ENDPOINT")
-          == "http://otel-collector-daemonset-opentelemetry-collector.krateo.svc:4318",
-          "the derived endpoint tracks .Release.Namespace")
+          env.get("OTEL_EXPORTER_OTLP_ENDPOINT") == NODE_LOCAL_OTLP,
+          "the derived endpoint is namespace-INDEPENDENT now: $(HOST_IP) is the pod's node, so "
+          "the old 'needs an override in a non-default namespace' caveat is gone entirely")
     crb = [o for o in objs if o["kind"] == "ClusterRoleBinding"][0]
     check("H other-namespace", crb["subjects"][0]["namespace"] == "krateo",
           "the binding subject tracks .Release.Namespace")

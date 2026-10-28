@@ -153,7 +153,7 @@
         },
         "endpoint": {
           "type": "string",
-          "description": "OTEL_EXPORTER_OTLP_ENDPOINT. Empty resolves to the node-local daemonset OTLP collector in this release's namespace, which is the only collector with an OTLP receiver. There is no `protocol` key: telemetry.go builds the HTTP exporters directly and they ignore OTEL_EXPORTER_OTLP_PROTOCOL."
+          "description": "OTEL_EXPORTER_OTLP_ENDPOINT. Empty resolves to http://$(HOST_IP):4318 \u2014 the collector on this pod's own node, via a HOST_IP env projected from status.hostIP. The previous default used the collector Service's DNS name, which is HEADLESS and therefore resolves to every collector pod, so it was not node-local despite the comment that said it was. Set this only for a collector that is not on the pod's node. There is no `protocol` key: telemetry.go builds the HTTP exporters directly and they ignore OTEL_EXPORTER_OTLP_PROTOCOL."
         }
       }
     },

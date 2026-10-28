@@ -70,16 +70,25 @@ otel:
   # `enabled`; set true/false only to diverge from it.
   tracing: null
   metrics: null
-  # OTEL_EXPORTER_OTLP_ENDPOINT. Empty resolves to the node-local daemonset OTLP agent in
-  # THIS release's namespace. That collector is the only one on the estate with an OTLP
-  # receiver (verified on krateo-057: its otlp receiver binds :4318 and feeds the `traces`
-  # and `metrics` pipelines into clickhouse); the gateway collector
-  # (`...-deployment-...`) declares port 4318 on its Service but runs only k8s_cluster and
-  # k8sobjects receivers, so it ACCEPTS THE CONNECTION AND DROPS EVERYTHING.
+  # OTEL_EXPORTER_OTLP_ENDPOINT. Empty resolves to `http://$(HOST_IP):4318` — the OTLP agent
+  # on THIS POD'S OWN NODE, via a HOST_IP env the Deployment projects from status.hostIP.
   #
-  # core-provider's chart hardcodes `krateo-system` here and documents that a non-default
-  # namespace needs an override; deriving it from .Release.Namespace removes that caveat and
-  # matches how this chart already defaults URL_AUTHN.
+  # IT USED TO RESOLVE TO THE COLLECTOR SERVICE'S DNS NAME AND THIS COMMENT CLAIMED THAT WAS
+  # NODE-LOCAL. It is not. That Service is headless (clusterIP: None), so its name resolves to
+  # every collector pod and the exporter picks one arbitrarily — measured on krateo-057: a pod
+  # on node …-s9a6, whose local collector is 10.40.3.2, resolved all four collector IPs.
+  # `internalTrafficPolicy: Local` is set on that Service but is inert on a headless one. Export
+  # still worked, because every collector instance has the same otlp receiver and the same
+  # clickhouse exporter, so the only costs were a cross-node hop per batch and the loss of node
+  # attribution — which is exactly why a wrong comment survived: nothing failed.
+  #
+  # The daemonset collector is the only one on the estate with an OTLP receiver (verified on
+  # krateo-057: its otlp receiver binds :4318 and feeds the `traces` and `metrics` pipelines into
+  # clickhouse); the gateway collector (`...-deployment-...`) declares port 4318 on its Service
+  # but runs only k8s_cluster and k8sobjects receivers, so it ACCEPTS THE CONNECTION AND DROPS
+  # EVERYTHING. $(HOST_IP) cannot reach it by accident, which the Service name could.
+  #
+  # Set this explicitly only for a collector that is NOT on the pod's node.
   endpoint: ""
   #
   # There is deliberately NO `protocol` key. telemetry.go constructs otlptracehttp /
