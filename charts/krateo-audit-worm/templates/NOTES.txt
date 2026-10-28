@@ -7,8 +7,8 @@ Tamper-evidence for the audit trail is now active:
   - verify every {{ .Values.verify.schedule }} (stale after {{ .Values.verify.staleAfterSeconds }}s)
 
 The verifier emits one OTel-shaped JSON line per run to stdout
-(event.name=krateo.audit.integrity, krateo.audit.status=ok|tampered|stale).
+(event.name=krateo.audit.integrity, krateo.audit.status=ok|tampered|unprotected|stale).
 Alert in HyperDX on status != ok, and on the ABSENCE of the line (a stopped verifier).
 
-Note: the WORM copy begins at install — rows written to {{ .Values.sourceTable }}
-before the materialized view existed are not sealed.
+Note: the seal CronJob creates the WORM objects on its first run (no Helm hook).
+Rows written to {{ .Values.sourceTable }} before that run are not sealed.

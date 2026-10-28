@@ -17,9 +17,24 @@ windows into a hash chain that a verifier recomputes.
 | object | purpose |
 |---|---|
 | `…-scripts` ConfigMap | the schema + seal + verify logic |
-| bootstrap `Job` (Helm hook) | creates the WORM table, the ingestion-stamping materialized view and the seal table (idempotent, `IF NOT EXISTS`) |
-| `…-seal` CronJob | every `seal.schedule`, seals the window `(prev, now()-lagSeconds]` and chains `seal_hash = SHA256(segment_hash ‖ prev_seal_hash)` |
-| `…-verify` CronJob | every `verify.schedule`, recomputes the chain and emits one OTel-shaped JSON line (`status` `ok`\|`tampered`\|`stale`); **exits non-zero** on a breach |
+| `…-seal` CronJob | every `seal.schedule`: applies the schema idempotently (WORM table, ingestion-stamping materialized view, seal table), then seals the window `(prev, now()-lagSeconds]` and chains `seal_hash = SHA256(segment_hash ‖ prev_seal_hash)` |
+| `…-verify` CronJob | every `verify.schedule`, recomputes the chain and emits one OTel-shaped JSON line (`status` `ok`\|`tampered`\|`unprotected`\|`stale`); **exits non-zero** unless `ok` |
+
+There is **no Helm hook**. The seal CronJob owns the schema, so the objects
+appear on the first run after install and are re-asserted every run. This keeps
+the chart identical under `helm template` and a live install, and avoids an
+immutable hook Job on upgrade. Until the collector has created `krateo_audit`,
+the seal Job fails with a clear message and the next run retries. The audit
+trail is mirrored from the first seal run onward.
+
+## When mirroring is switched off
+
+The materialized view is what copies each audit row into the WORM table. If it
+is dropped after install:
+- the verifier reports `unprotected` (ERROR) while it is missing;
+- the next seal run restores it, still seals, then emits `mirroring_restored`
+  (ERROR) and **fails the Job** — audit rows written while it was missing were
+  never mirrored, so the chain cannot vouch for them.
 
 ## Why sealing runs on ingestion time, not event time
 
@@ -38,6 +53,30 @@ chain `stale` if the newest seal is older than `verify.staleAfterSeconds`, and i
 **fails the Job** (so a reconciled deployment surfaces it as not-Ready) rather
 than exiting 0. Alert in HyperDX on `krateo.audit.status != ok` **and** on the
 absence of the verifier's line.
+
+## When the seal chain is dropped
+
+If the seal table is dropped or truncated while the WORM table still holds rows,
+the next seal run does **not** restart from the canonical genesis. It starts a
+new chain from a marked *reset* genesis, emits `chain_reset` (ERROR) and fails
+the Job. Because the new chain never links to the canonical genesis, the
+verifier reports `tampered` (`1:linkage`) on every run from then on: the lost
+history can never verify green again.
+
+## Limits (read before relying on it)
+
+This is tamper-**evidence** held in the same ClickHouse it protects, not
+tamper-resistance:
+- **Rows written while the MV is missing are never mirrored.** The gap is
+  reported (`unprotected`, then `mirroring_restored`), but those rows are not in
+  the chain.
+- **A user who drops all three objects (WORM table, MV, seal table) resets to a
+  fresh install.** A chain cannot detect its own complete erasure. Every verifier
+  line carries `krateo.audit.head_seal_seq` / `head_seal_hash`, so this shows up
+  as the head going backwards in the integrity-line history. Alert on that in
+  HyperDX, together with ClickHouse's own query log of who ran the `DROP`.
+- Physical prevention needs an external WORM anchor (object-lock storage), which
+  the platform does not hold today.
 
 ## Values
 
