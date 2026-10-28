@@ -1,0 +1,55 @@
+{{/*
+Schema bootstrap: create the WORM table, the ingestion-stamping MV and the seal
+table. A Helm hook so it runs on every install/upgrade BEFORE the CronJobs, and
+idempotent (CREATE ... IF NOT EXISTS) so re-runs are safe. The CronJobs do not
+depend on it having run — but it closes the window between install and the first
+seal in which audit rows would otherwise not yet be mirrored to the WORM table.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "krateo-audit-worm.fullname" . }}-bootstrap
+  labels:
+    {{- include "krateo-audit-worm.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: {{ .Values.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "krateo-audit-worm.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: bootstrap
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - clickhouse-client --host "$CH_HOST" --port "$CH_PORT" --user "$CH_USER" --password "$CH_PASSWORD" --database "$CH_DB" --history_file=/dev/null --multiquery < /scripts/schema.sql
+          env:
+            {{- include "krateo-audit-worm.chEnv" . | nindent 12 }}
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- with .Values.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: scripts
+          configMap:
+            name: {{ include "krateo-audit-worm.fullname" . }}-scripts
+            defaultMode: 0555

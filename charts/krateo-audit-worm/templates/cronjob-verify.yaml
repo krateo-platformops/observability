@@ -1,0 +1,50 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "krateo-audit-worm.fullname" . }}-verify
+  labels:
+    {{- include "krateo-audit-worm.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.verify.schedule | quote }}
+  concurrencyPolicy: {{ .Values.concurrencyPolicy }}
+  successfulJobsHistoryLimit: {{ .Values.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      # The job FAILS (exit 1) when the chain is tampered/stale, so a breach also
+      # surfaces as a failed Job, not only as the stdout alert line.
+      backoffLimit: 0
+      activeDeadlineSeconds: {{ .Values.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            app: {{ include "krateo-audit-worm.fullname" . }}-verify
+            {{- include "krateo-audit-worm.labels" . | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          {{- with .Values.podSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          containers:
+            - name: verify
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: [sh, /scripts/verify.sh]
+              env:
+                {{- include "krateo-audit-worm.chEnv" . | nindent 16 }}
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+              resources:
+                {{- toYaml .Values.resources | nindent 16 }}
+              {{- with .Values.containerSecurityContext }}
+              securityContext:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+          volumes:
+            - name: scripts
+              configMap:
+                name: {{ include "krateo-audit-worm.fullname" . }}-scripts
+                defaultMode: 0555

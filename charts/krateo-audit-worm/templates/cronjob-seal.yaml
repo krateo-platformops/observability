@@ -1,0 +1,50 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "krateo-audit-worm.fullname" . }}-seal
+  labels:
+    {{- include "krateo-audit-worm.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.seal.schedule | quote }}
+  concurrencyPolicy: {{ .Values.concurrencyPolicy }}
+  successfulJobsHistoryLimit: {{ .Values.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: {{ .Values.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            app: {{ include "krateo-audit-worm.fullname" . }}-seal
+            {{- include "krateo-audit-worm.labels" . | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          {{- with .Values.podSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          containers:
+            - name: seal
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: [sh, /scripts/seal.sh]
+              env:
+                - name: LAG_SECONDS
+                  value: {{ .Values.seal.lagSeconds | quote }}
+                {{- include "krateo-audit-worm.chEnv" . | nindent 16 }}
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+              resources:
+                {{- toYaml .Values.resources | nindent 16 }}
+              {{- with .Values.containerSecurityContext }}
+              securityContext:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+          volumes:
+            - name: scripts
+              configMap:
+                name: {{ include "krateo-audit-worm.fullname" . }}-scripts
+                defaultMode: 0555
