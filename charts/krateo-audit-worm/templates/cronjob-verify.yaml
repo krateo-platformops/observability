@@ -2,6 +2,7 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: {{ include "krateo-audit-worm.fullname" . }}-verify
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "krateo-audit-worm.labels" . | nindent 4 }}
 spec:
