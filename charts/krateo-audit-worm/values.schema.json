@@ -4,6 +4,14 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "global": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Values the Krateo installer injects into every component chart (composition identity, imageRegistry). Accepted and unused here; declared so the closed root still validates.",
+      "properties": {
+        "imageRegistry": { "type": "string", "description": "Optional registry host override (injected; unused here)." }
+      }
+    },
     "clickhouse": {
       "type": "object",
       "additionalProperties": false,

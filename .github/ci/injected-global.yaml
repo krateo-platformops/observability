@@ -1,0 +1,18 @@
+# The `global` block the Krateo composition-dynamic-controller injects into every component
+# chart it installs (plumbing InjectGlobalValues; keys as declared by the installer's
+# values.schema.json `global`). Rendering each chart with it proves its values.schema.json
+# accepts the injection: a closed root (`additionalProperties: false`) that does not declare
+# `global` renders fine on its own but can never install through the platform
+# (krateo-audit-worm 0.1.1 on krateo-057, 2026-10-29).
+global:
+  compositionName: ci
+  compositionNamespace: krateo-system
+  compositionId: 00000000-0000-0000-0000-000000000000
+  compositionApiVersion: composition.krateo.io/v0-0-0
+  compositionGroup: composition.krateo.io
+  compositionKind: CI
+  compositionResource: cis
+  compositionInstalledVersion: v0-0-0
+  gracefullyPaused: false
+  krateoNamespace: krateo-system
+  imageRegistry: ""
