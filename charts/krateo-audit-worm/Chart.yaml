@@ -9,7 +9,7 @@ type: application
 # No appVersion: this chart ships no first-party image. The seal/verify logic
 # lives in the chart's own ConfigMap and runs on the upstream ClickHouse client
 # image, so the chart version IS the logic version.
-version: 0.1.2
+version: 0.1.3
 keywords:
   - audit
   - worm

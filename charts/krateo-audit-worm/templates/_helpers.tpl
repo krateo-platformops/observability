@@ -38,3 +38,13 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version }}
       name: {{ .Values.clickhouse.credentialsSecret.name | quote }}
       key: {{ .Values.clickhouse.credentialsSecret.passwordKey | quote }}
 {{- end -}}
+
+{{/*
+The row hash: SHA256 over every immutable field of an audit row (maps mapSort'd, so it
+is key-order independent). ONE definition, used by the mirroring MV (the ingest-time
+witness stored in row_hash) and by the verifier (which recomputes it from the row's
+content). Changing it changes every hash: existing deployments keep the MV they have.
+*/}}
+{{- define "krateo-audit-worm.rowHash" -}}
+lower(hex(SHA256(concat(toString(Timestamp), '|', TraceId, '|', SpanId, '|', toString(SeverityText), '|', toString(ServiceName), '|', Body, '|', toString(mapSort(ResourceAttributes)), '|', toString(mapSort(LogAttributes))))))
+{{- end -}}

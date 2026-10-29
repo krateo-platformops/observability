@@ -36,11 +36,7 @@ data:
         now64(9) AS ingested_at,
         Timestamp, TraceId, SpanId, SeverityText, ServiceName, Body,
         ResourceAttributes, LogAttributes,
-        lower(hex(SHA256(concat(
-            toString(Timestamp), '|', TraceId, '|', SpanId, '|',
-            toString(SeverityText), '|', toString(ServiceName), '|', Body, '|',
-            toString(mapSort(ResourceAttributes)), '|', toString(mapSort(LogAttributes))
-        )))) AS row_hash
+        {{ include "krateo-audit-worm.rowHash" . }} AS row_hash
     FROM {{ .Values.sourceTable }};
 
     -- The hash-chain: one row per sealed window, chained to the previous.
@@ -162,6 +158,7 @@ data:
     AGE=0
     HEAD_SEQ=0
     HEAD_HASH=""
+    LAST_END="1970-01-01 00:00:00"
     SEALS=""
     if [ "$HAS_WORM" = "1" ] && [ "$HAS_SEAL" = "1" ]; then
       SEALS=$(CHQ -q "SELECT seal_seq, toString(window_start), toString(window_end), segment_hash, prev_seal_hash, seal_hash FROM {{ .Values.sealTable }} ORDER BY seal_seq FORMAT TSV")
@@ -180,19 +177,40 @@ data:
         EXPECTED_PREV="$SSEAL"
         HEAD_SEQ="$SEQ"
         HEAD_HASH="$SSEAL"
+        LAST_END="$WEND"
       done <<SEALSEOF
     $SEALS
     SEALSEOF
       IFS="$OLDIFS"
     fi
 
+    # Every WORM row must still hash to the row_hash stamped at ingestion. The segment
+    # check above only re-hashes the stored row_hash values, so without this an edit to
+    # a row's content (leaving row_hash alone) would verify clean.
+    MISMATCHED=0
+    if [ "$HAS_WORM" = "1" ]; then
+      MISMATCHED=$(CHQ -q "SELECT countIf(row_hash != {{ include "krateo-audit-worm.rowHash" . }}) FROM {{ .Values.wormTable }}")
+      [ "$MISMATCHED" != "0" ] && PROBLEMS="$PROBLEMS rows:$MISMATCHED"
+    fi
+
     STALE=$([ "$AGE" -gt {{ .Values.verify.staleAfterSeconds }} ] && echo 1 || echo 0)
 
-    # Precedence: tampered > unprotected > stale > ok.
+    # Rows past the last sealed window that are older than staleAfterSeconds should
+    # have been sealed by now. Any such row means sealing stopped or seals were
+    # removed: deleting every seal row (tables kept) or the newest seals would
+    # otherwise verify as "ok" or merely "stale". A fresh install has no such rows.
+    UNSEALED=0
+    if [ "$HAS_WORM" = "1" ]; then
+      UNSEALED=$(CHQ -q "SELECT count() FROM {{ .Values.wormTable }} WHERE ingested_at > '$LAST_END' AND ingested_at < now64(9) - INTERVAL {{ .Values.verify.staleAfterSeconds }} SECOND")
+    fi
+
+    # Precedence: tampered > unprotected > unsealed > stale > ok.
     if [ -n "$PROBLEMS" ]; then
       STATUS=tampered; SEV_TEXT=ERROR; SEV_NUM=17
     elif [ "$HAS_MV" != "1" ]; then
       STATUS=unprotected; SEV_TEXT=ERROR; SEV_NUM=17   # mirroring is off: new audit rows are not being sealed
+    elif [ "$UNSEALED" != "0" ]; then
+      STATUS=unsealed; SEV_TEXT=ERROR; SEV_NUM=17      # old rows outside every seal: sealing stopped or seals were removed
     elif [ "$CHECKED" = "0" ]; then
       STATUS=ok; SEV_TEXT=INFO; SEV_NUM=9               # schema exists, first seal not yet written
     elif [ "$STALE" = "1" ]; then
@@ -204,6 +222,6 @@ data:
 
     # head_seal_seq/head_seal_hash put the chain head into the log stream on every
     # run: an out-of-band trail in which a full wipe shows as the head going back.
-    emit krateo-audit-verifier "$STATUS" "$SEV_TEXT" "$SEV_NUM" "audit seal chain $STATUS" ",'krateo.audit.checked_seals','$CHECKED','krateo.audit.problem_seals','$PROBLEMS_TRIM','krateo.audit.newest_seal_age_seconds','$AGE','krateo.audit.head_seal_seq','$HEAD_SEQ','krateo.audit.head_seal_hash','$HEAD_HASH'"
+    emit krateo-audit-verifier "$STATUS" "$SEV_TEXT" "$SEV_NUM" "audit seal chain $STATUS" ",'krateo.audit.checked_seals','$CHECKED','krateo.audit.problem_seals','$PROBLEMS_TRIM','krateo.audit.newest_seal_age_seconds','$AGE','krateo.audit.head_seal_seq','$HEAD_SEQ','krateo.audit.head_seal_hash','$HEAD_HASH','krateo.audit.unsealed_rows','$UNSEALED','krateo.audit.mismatched_rows','$MISMATCHED'"
 
     [ "$STATUS" = "ok" ] || exit 1
