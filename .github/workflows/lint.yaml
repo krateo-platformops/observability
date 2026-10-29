@@ -49,6 +49,9 @@ jobs:
             fi
             helm lint "${dir}" || fail=1
             helm template smoke "${dir}" >/dev/null || fail=1
+            # As a platform component: with the global block the composition controller injects.
+            helm template smoke "${dir}" -f .github/ci/injected-global.yaml >/dev/null \
+              || { echo "::error::${dir}: values.schema.json rejects the injected 'global' (declare it, or open the root)"; fail=1; }
             echo "::endgroup::"
           done
           exit $fail
