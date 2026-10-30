@@ -18,7 +18,7 @@ windows into a hash chain that a verifier recomputes.
 |---|---|
 | `…-scripts` ConfigMap | the schema + seal + verify logic |
 | `…-seal` CronJob | every `seal.schedule`: applies the schema idempotently (WORM table, ingestion-stamping materialized view, seal table), then seals the window `(prev, now()-lagSeconds]` and chains `seal_hash = SHA256(segment_hash ‖ prev_seal_hash)` |
-| `…-verify` CronJob | every `verify.schedule`, recomputes the chain and emits one OTel-shaped JSON line (`status` `ok`\|`tampered`\|`unprotected`\|`stale`); **exits non-zero** unless `ok` |
+| `…-verify` CronJob | every `verify.schedule`, recomputes the chain and emits one OTel-shaped JSON line (`status` `ok`\|`tampered`\|`unprotected`\|`unsealed`\|`stale`); **exits non-zero** unless `ok` |
 
 There is **no Helm hook**. The seal CronJob owns the schema, so the objects
 appear on the first run after install and are re-asserted every run. This keeps
@@ -51,7 +51,14 @@ A sealing job that silently stops leaves rows unsealed — invisible in exactly 
 dimension the mechanism protects. The verifier guards this two ways: it marks the
 chain `stale` if the newest seal is older than `verify.staleAfterSeconds`, and it
 **fails the Job** (so a reconciled deployment surfaces it as not-Ready) rather
-than exiting 0. Alert in HyperDX on `krateo.audit.status != ok` **and** on the
+than exiting 0.
+
+It also reports `unsealed` (ERROR, Job fails) when WORM rows lie past the last
+sealed window **and** are older than `verify.staleAfterSeconds`: rows that should
+have been sealed by now. That covers a sealer stopped before it ever sealed, and
+seal rows deleted while the sealer is also stopped. An empty chain alone would
+otherwise verify `ok`, because it looks like a fresh install. The count is
+emitted as `krateo.audit.unsealed_rows`. Alert in HyperDX on `krateo.audit.status != ok` **and** on the
 absence of the verifier's line.
 
 ## When the seal chain is dropped
@@ -62,6 +69,21 @@ new chain from a marked *reset* genesis, emits `chain_reset` (ERROR) and fails
 the Job. Because the new chain never links to the canonical genesis, the
 verifier reports `tampered` (`1:linkage`) on every run from then on: the lost
 history can never verify green again.
+
+## Proof
+
+`tests/e2e-kind.sh` (manual) runs the chart's real `seal.sh` and `verify.sh` against a real
+ClickHouse on kind, with the CronJob schedules suspended and every run triggered by hand.
+It checks:
+- **A.** A fresh install verifies `ok`.
+- **B.** Rows are mirrored and sealed, and verify passes over a non-empty chain
+  (`checked_seals` 2).
+- **C.** An edited WORM row is `tampered`. The verifier re-hashes every row from its
+  content and compares it with the `row_hash` stamped at ingestion.
+- **D.** Seals deleted while the sealer is stopped verify `ok` while the rows are still
+  younger than `verify.staleAfterSeconds`, then `unsealed` once they're older.
+
+0.1.2 fails C and D: it reported `ok` for both.
 
 ## Limits (read before relying on it)
 
