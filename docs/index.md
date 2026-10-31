@@ -36,6 +36,9 @@ repos `krateo-platformops/otel-collector` and `krateo-platformops/sse-proxy`.
 - [examples](./examples.md) — the runnable examples under `examples/`.
 - [release](./release.md) — how a release ships (semver tag → all first-class charts to GHCR).
 - [log](./log.md) — curated history (incidents, renames, version-bump lessons).
+- [clickhouse-disk-full](./clickhouse-disk-full.md) — runbook for #80: a log flood fills the
+  ClickHouse volume and TTL cannot reclaim at zero free. Says which steps work with the shipped
+  credentials and which need an ops principal first.
 - [llms.txt](./llms.txt) — the version-pinned agent index of this bundle.
 
 ## Deep corpus (code-adjacent, kept in place)
