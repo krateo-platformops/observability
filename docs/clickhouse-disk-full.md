@@ -1,3 +1,19 @@
+---
+type: Runbook
+title: observability — recovery when the ClickHouse disk is full
+description: >-
+  Recovery for issue #80: a log flood fills the ClickHouse data volume and TTL cannot reclaim at
+  zero free space, because ttl_only_drop_parts drops whole parts only once every row in them has
+  expired and the merge that would consolidate them needs free space to write its output. States
+  which steps work with the shipped otelcollector credentials and which require a separate ops
+  principal first — otelcollector is granted only ON default.* and gets ACCESS_DENIED on both
+  system.disks and system.parts, while system.tables succeeds, so a probe touching only
+  system.tables reports healthy credentials that cannot see the disk or choose a partition to drop.
+resource: oci://ghcr.io/krateo-platformops/charts/krateo-observability
+tags: [runbook, clickhouse, disk, retention, ttl, rbac, grants, sre, observability]
+timestamp: 2026-10-31T00:00:00Z
+---
+
 # Runbook: ClickHouse disk full
 
 For the failure in [#80](https://github.com/krateo-platformops/observability/issues/80): a log flood
