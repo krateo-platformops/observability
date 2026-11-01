@@ -209,7 +209,7 @@ Wraps the same upstream chart in `daemonset` mode, stock
   the portal bell. A single hub eliminates the split; the poller resumes from `lastSeenUnix`
   on restart. (To scale >1: gate readiness on poller health + add session affinity, or move
   to a shared event store.)
-- `image`: `registry: ghcr.io` + `repository: krateo-platformops/sse-proxy` + `tag: "1.1.2"`
+- `image`: `registry: ghcr.io` + `repository: krateo-platformops/sse-proxy` + `tag: "1.3.0"`
   (registry split out so a mirror relocation only swaps the host);
   `global.imageRegistry` overrides the registry host for mirror/air-gapped installs.
 - `service.type: ClusterIP`, `service.port: 8080`; container port 8080, `/health`
@@ -222,6 +222,20 @@ Wraps the same upstream chart in `daemonset` mode, stock
   chart's own Service) — snowplow RESTActions reference it by that exact name; don't rename.
 - `resources`: limits `cpu 200m / memory 128Mi`, requests `cpu 50m / memory 32Mi`. Hardened
   securityContext (`runAsNonRoot`, `readOnlyRootFilesystem`, drop ALL caps).
+- **`rbacScoping.enabled` (default false)** turns on per-caller namespace scoping and creates the
+  ClusterRole and binding the proxy needs in this same chart — the flag without the grants makes
+  every `/notifications` request answer 500. `verb`/`resource`/`apiGroup`/`cacheTTL` default to the
+  binary's (`list events`, core group, 60s).
+- **`auditScoping.{verb,resource,apiGroup}` (sse-proxy 1.3.0)** gives `/audit` its OWN
+  SubjectAccessReview, so an audit-read capability is distinguishable from events access. Rendered
+  **only when `rbacScoping.enabled` is true**: with scoping off the binary refuses `/audit` outright
+  (503 `RBACScopingDisabled`) rather than serving every namespace's records, so env that cannot take
+  effect is not emitted. Leave them unset and `/audit` shares the events permission — the same
+  SubjectAccessReview and the same cache. The resource may be **virtual**: RBAC permits rules on
+  resources with no CRD and SubjectAccessReview evaluates them, so `get auditrecords.audit.krateo.io`
+  works as a capability marker. Bind it per namespace with a RoleBinding for tenants; a cluster-wide
+  grant resolves to `allowAll` and the caller sees every namespace's rows plus the cluster-scoped
+  ones.
 
 ## Dependencies (what must exist around the stack)
 

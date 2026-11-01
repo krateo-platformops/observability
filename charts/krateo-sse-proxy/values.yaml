@@ -19,7 +19,7 @@ image:
   # repository so a mirror/air-gap relocation only swaps the host and preserves the repo path.
   registry: ghcr.io
   repository: krateo-platformops/sse-proxy
-  tag: "1.2.0"
+  tag: "1.3.0"
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
@@ -114,6 +114,26 @@ rbacScoping:
   apiGroup: null
   cacheTTL: null
 
+# /audit resolves the caller's scope with its OWN SubjectAccessReview, so an audit-read capability
+# is distinguishable from events access (sse-proxy 1.3.0, AUDIT_SCOPING_*).
+#
+# THESE ONLY APPLY WHEN rbacScoping.enabled IS TRUE, and they are rendered inside that guard: with
+# scoping off there is no scope to narrow, the binary refuses /audit outright (503
+# RBACScopingDisabled), and env vars that cannot take effect would only mislead whoever reads the
+# pod.
+#
+# LEAVE THEM UNSET AND /audit SHARES THE EVENTS PERMISSION — the same SubjectAccessReview, the same
+# cache. Set any one of them and /audit gets its own; the others inherit from rbacScoping rather
+# than resetting to a built-in default.
+#
+# The resource may be VIRTUAL: RBAC permits rules on resources with no CRD behind them and
+# SubjectAccessReview evaluates them, so `get auditrecords.audit.krateo.io` works as a capability
+# marker. Bind it per namespace with a RoleBinding for tenants — a cluster-wide grant resolves to
+# allowAll and the caller sees every namespace's rows plus the cluster-scoped ones.
+auditScoping:
+  verb: null
+  resource: null
+  apiGroup: null
 resources:
   limits:
     cpu: 200m
