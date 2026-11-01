@@ -57,6 +57,11 @@ this pipeline's own noise keeps feeding itself. The log alerts exclude `incident
 
 "Minutes ALERT" counts the minutes whose trailing 15 minutes held at least the threshold.
 
+The controller is being renamed `incident-provider`, and its OTel `service.name` changes with it.
+Until no cluster runs a build that logs as `incident-controller`, either name can be writing these
+lines, so every list excludes both, `'incident-controller', 'incident-provider'`. Dropping the old
+name is a separate change, made once the rename has rolled out everywhere.
+
 ## Event alerts skip DELETED records
 
 The collector's `k8sobjects` receiver watches Events, so it writes one row per change to an
