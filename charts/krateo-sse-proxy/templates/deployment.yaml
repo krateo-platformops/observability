@@ -115,6 +115,21 @@ spec:
             - name: RBAC_SCOPING_CACHE_TTL
               value: {{ .Values.rbacScoping.cacheTTL | quote }}
             {{- end }}
+            {{- /* /audit's own SubjectAccessReview. Inside this guard deliberately: with scoping
+                   off the binary refuses /audit (503 RBACScopingDisabled), so these would be env
+                   that cannot take effect. Unset means /audit shares the events permission. */}}
+            {{- if not (kindIs "invalid" .Values.auditScoping.verb) }}
+            - name: AUDIT_SCOPING_VERB
+              value: {{ .Values.auditScoping.verb | quote }}
+            {{- end }}
+            {{- if not (kindIs "invalid" .Values.auditScoping.resource) }}
+            - name: AUDIT_SCOPING_RESOURCE
+              value: {{ .Values.auditScoping.resource | quote }}
+            {{- end }}
+            {{- if not (kindIs "invalid" .Values.auditScoping.apiGroup) }}
+            - name: AUDIT_SCOPING_APIGROUP
+              value: {{ .Values.auditScoping.apiGroup | quote }}
+            {{- end }}
           {{- end }}
           # Lenient liveness tolerance (org standard): the Kubernetes defaults
           # (timeoutSeconds: 1, failureThreshold: 3) kill HEALTHY pods under CPU
