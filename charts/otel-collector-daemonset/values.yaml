@@ -183,12 +183,17 @@ opentelemetry-collector:
           log_record:
             - 'attributes["event.name"] == "audit"'
       # SLO SPAN METRICS (D5): the spans the performance SLOs are computed from, and nothing else.
-      # DROPS what matches, so a span survives only if it is a snowplow SERVER span (the API SLI)
-      # or a krateo-frontend RUM span re-exported by snowplow's rum-ingest (the UI SLIs). Anything
-      # else -- every other service, snowplow's client/internal spans -- never reaches the
-      # connector, which is what keeps the metric series bounded. /refreshes and
-      # /telemetry/v1/traces are deliberately NOT excluded here: the SLO's Metric CR excludes them
-      # declaratively downstream, so the decision stays visible where the objective is defined.
+      # DROPS what matches (conditions are ORed). The first keeps only snowplow SERVER spans (the
+      # API SLI) and krateo-frontend RUM spans re-exported by snowplow's rum-ingest (the UI SLIs);
+      # every other service and snowplow's client/internal spans never reach the connector, which
+      # is what keeps the metric series bounded.
+      # The second: SSE stream and the RUM ingest itself, excluded from the SLIs per X5 (acmp).
+      # Done HERE rather than in the alert because alert-provider labels match data-point
+      # Attributes by exact value only, so a Metric CR cannot say "route is NOT x". The strings
+      # are snowplow's templates exactly: the path half of mux patterns "GET /refreshes" /
+      # "POST /refreshes" (main.go) and rum.Path "/telemetry/v1/traces" (rum/handler.go).
+      # snowplow gives the ingest route no Server span today (tracing/server.go unspannedRoutes),
+      # so that half is a guard: it also covers a RUM krateo.widget.fetch naming it.
       # error_mode ignore: these conditions only compare fields and cannot error in practice; if one
       # ever did, the span would be KEPT, and the connector's aggregation_cardinality_limit below
       # still caps what that can cost.
@@ -200,6 +205,7 @@ opentelemetry-collector:
               not ((resource.attributes["service.name"] == "snowplow" and kind == SPAN_KIND_SERVER)
               or (resource.attributes["service.name"] == "krateo-frontend"
               and instrumentation_scope.name == "snowplow/rum-ingest"))
+            - 'attributes["http.route"] == "/refreshes" or attributes["http.route"] == "/telemetry/v1/traces"'
       # Resource attributes are copied onto every span_metrics output by default in contrib
       # 0.158.0 (the connector.spanmetrics.excludeResourceMetrics gate is alpha, i.e. off), and the
       # connector also KEYS its aggregation on the full resource. Left alone, every pod restart and
@@ -213,6 +219,35 @@ opentelemetry-collector:
           - context: resource
             statements:
               - 'keep_keys(attributes, ["service.name"])'
+      # krateo.sli.error, the SLI's error flag, as an EXACT-VALUE attribute ("true"/"false") because
+      # alert-provider labels cannot express a numeric range (>= 500). The rule (D3: 4xx is NOT an
+      # error):
+      #   "true"  when http.response.status_code >= 500;
+      #   "true"  when the span has NO http.response.status_code and its status is ERROR (no
+      #           response at all: abort, network failure, CORS);
+      #   "false" otherwise, a 4xx included. This matters for RUM: the browser's fetch
+      #           instrumentation sets status ERROR at >= 400, so status.code alone would count a
+      #           404 as an error.
+      # Only http.response.status_code is read, and that was VERIFIED, not assumed: snowplow's
+      # otelhttp v0.69.0 uses semconv v1.41.0 and has no old-semconv (OTEL_SEMCONV_STABILITY_OPT_IN)
+      # path, and snowplow's rum allowlist forwards only http.response.status_code. Nothing in scope
+      # emits the old http.status_code. Every source sends it as an INT (otelhttp, snowplow's panic
+      # handler, the rum rebuild); Int() also accepts a numeric string, and Int() of anything
+      # unparseable is nil, whose comparison is false, so such a span reads "false" if it has a code.
+      transform/slo-error:
+        error_mode: ignore
+        trace_statements:
+          - context: span
+            statements:
+              - 'set(attributes["krateo.sli.error"], "false")'
+              - >-
+                set(attributes["krateo.sli.error"], "true")
+                where attributes["http.response.status_code"] != nil
+                and Int(attributes["http.response.status_code"]) >= 500
+              - >-
+                set(attributes["krateo.sli.error"], "true")
+                where attributes["http.response.status_code"] == nil
+                and status.code == STATUS_CODE_ERROR
       batch:
         send_batch_size: 10000
         timeout: 5s
@@ -291,7 +326,7 @@ opentelemetry-collector:
       # Exact names as they land, for whoever writes the Metric CRs (also in docs/configuration.md):
       #   MetricName traces.span.metrics.calls    -> otel_metrics_sum       (monotonic counter)
       #   MetricName traces.span.metrics.duration -> otel_metrics_histogram (unit ms)
-      #   Attributes: service.name, span.name, status.code, plus http.route and
+      #   Attributes: service.name, span.name, status.code, krateo.sli.error, plus http.route and
       #   http.response.status_code when the span carries them. ResourceAttributes: service.name.
       span_metrics:
         # Pinned to its default so a future default (or the legacyMetricNames gate, which only acts
@@ -311,9 +346,9 @@ opentelemetry-collector:
         # because under DELTA it only splits one aggregate into one row per node agent and per agent
         # restart. status.code (STATUS_CODE_UNSET / _OK / _ERROR) is KEPT.
         exclude_dimensions: [span.kind, collector.instance.id]
-        # Raw values, no bucketing: a 4xx stays a 4xx and is not an error here. The error ratio is a
-        # downstream decision. Neither key has a default, so a span without one (a snowplow 404 no
-        # route serves, a RUM page.load) simply has no such attribute rather than an invented value.
+        # Raw values, no bucketing: a 4xx stays a 4xx. Whether a span is an error is krateo.sli.error
+        # (transform/slo-error). Neither http.* key has a default, so a span without one (a snowplow
+        # 404 no route serves) simply has no such attribute rather than an invented value.
         # On RUM spans both are browser-supplied but allowlisted by snowplow's rum-ingest: the route
         # on krateo.widget.fetch must be one snowplow serves, the page-level routes are only
         # shape-checked, and the status code is 100-599. The cap below is what bounds a hostile
@@ -321,6 +356,8 @@ opentelemetry-collector:
         dimensions:
           - name: http.route
           - name: http.response.status_code
+          # Set on every span by transform/slo-error, so present on every row.
+          - name: krateo.sli.error
         histogram:
           unit: ms
           # Fixed for a p95 that may sit anywhere from 50 ms to 10 s; NOT tuned to any target (the
@@ -328,10 +365,10 @@ opentelemetry-collector:
           # ExplicitBounds as [25, 50, ..., 10000] (ms), plus the implicit +Inf bucket.
           explicit:
             buckets: [25ms, 50ms, 100ms, 250ms, 500ms, 750ms, 1s, 1500ms, 2500ms, 5s, 10s]
-        # Circuit breaker per service per agent per interval. The expected set is far below this
-        # (see docs/configuration.md); past it, new combinations fold into one series marked
+        # Circuit breaker per service per agent per interval, set above the loose bound in
+        # docs/SLO.md (~1,400 for snowplow); past it, new combinations fold into one series marked
         # otel.metric.overflow=true instead of growing the table.
-        aggregation_cardinality_limit: 1000
+        aggregation_cardinality_limit: 2000
 
     service:
       pipelines:
@@ -416,11 +453,12 @@ opentelemetry-collector:
         # every pipeline that names it, each getting its own copy, so the `traces` pipeline above is
         # byte-identical and every span still reaches otel_traces. This one keeps only the SLO spans
         # (filter first, so everything after it sees a handful of spans), redacts like `traces` does
-        # (a token in http.route would otherwise reach a metric attribute), trims the resource, and
-        # hands the spans to the connector. No k8sattributes: no dimension needs pod metadata.
+        # (a token in http.route would otherwise reach a metric attribute), trims the resource, sets
+        # krateo.sli.error, and hands the spans to the connector. No k8sattributes: no dimension
+        # needs pod metadata.
         traces/slo:
           receivers: [otlp]
-          processors: [memory_limiter, filter/slo-spans, transform, transform/slo-resource]
+          processors: [memory_limiter, filter/slo-spans, transform, transform/slo-resource, transform/slo-error]
           exporters: [span_metrics]
         # The connector's output, through the same exporter (and so the same otel_metrics_* tables
         # and 168h TTL) as the `metrics` pipeline. Its own pipeline rather than a receiver on

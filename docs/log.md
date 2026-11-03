@@ -17,8 +17,11 @@ blocks carry the per-bump rationale.
   `traces/slo` pipeline that keeps only `snowplow` SERVER spans and `krateo-frontend`
   `snowplow/rum-ingest` spans, and a `metrics/slo` pipeline that writes
   `traces.span.metrics.calls` and `traces.span.metrics.duration` (ms, buckets 25 … 10000) to
-  `otel_metrics_sum` / `otel_metrics_histogram` through the existing exporter. DELTA temporality,
-  because the connector runs once per node. The `traces` pipeline is unchanged. Names and
+  `otel_metrics_sum` / `otel_metrics_histogram` through the existing exporter. `/refreshes` and
+  `/telemetry/v1/traces` are dropped from the SLI spans, and `krateo.sli.error` (`true` for 5xx
+  or no response, `false` for 4xx) is a dimension, because alert-provider labels can only match
+  exact values. DELTA temporality, because the connector runs once per node. The `traces`
+  pipeline is unchanged. The chart's `appVersion` is now `0.158.0`, the collector it renders. Names and
   attribute keys for `Metric` CRs: [SLO → span metrics](SLO.md#span-metrics-the-inputs-for-performance-alerts).
 
 - **2026-11-02 — chart `sources` name this repo by its current name.** The four charts that

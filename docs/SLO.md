@@ -40,8 +40,10 @@ is described in [configuration](./configuration.md#chartsotel-collector-daemonse
 | `snowplow` | SpanKind `SERVER` | API |
 | `krateo-frontend` | instrumentation ScopeName `snowplow/rum-ingest` | UI (`krateo.page.load`, `krateo.composition.open`, `krateo.form.submit`, `krateo.page.publish`, `krateo.widget.fetch`) |
 
-`/refreshes` and `/telemetry/v1/traces` are **in** the metrics on purpose. Exclude them in the
-`Metric` CR (`http.route`), where the decision sits next to the objective it shapes.
+Spans whose `http.route` is `/refreshes` (the SSE stream) or `/telemetry/v1/traces` (the RUM
+ingest itself) are **dropped** before the connector (X5, acmp). They are excluded here rather than
+in the `Metric` CR because alert-provider labels match `Attributes` by exact value only, so a CR
+cannot say "route is not x". They are still in `otel_traces`.
 
 **Metrics, exactly as they land:**
 
@@ -61,6 +63,7 @@ is described in [configuration](./configuration.md#chartsotel-collector-daemonse
   | `service.name` | `snowplow`, `krateo-frontend` | every row but the overflow row |
   | `span.name` | e.g. `GET /call`, `krateo.page.load` | every row but the overflow row |
   | `status.code` | `STATUS_CODE_UNSET`, `STATUS_CODE_OK`, `STATUS_CODE_ERROR` | every row but the overflow row |
+  | `krateo.sli.error` | `true`, `false` | every row but the overflow row |
   | `http.route` | a route template, e.g. `/call` (snowplow's own; on RUM spans, a snowplow route or the portal's) | spans that carry it |
   | `http.response.status_code` | the raw code, e.g. `200`, `404`, `500` | spans that carry it |
   | `otel.metric.overflow` | `true` | only the overflow row, if the cardinality cap is ever hit; it carries no other key |
@@ -70,9 +73,17 @@ is described in [configuration](./configuration.md#chartsotel-collector-daemonse
   matters. `span.kind` and `collector.instance.id`, which the connector adds by default, are
   turned off (see configuration).
 - **`ScopeName`**: `spanmetricsconnector`.
-- **4xx is not an error here.** `http.response.status_code` keeps the raw code and `status.code`
-  is the span's own status (snowplow sets `ERROR` for 5xx). The error ratio is the `Metric` CR's
-  decision.
+- **`krateo.sli.error` is the SLI's error flag; 4xx is not an error (D3).** It is set before the
+  connector:
+  - `true` when `http.response.status_code >= 500`;
+  - `true` when the span has **no** `http.response.status_code` and its status is `ERROR` (no
+    response at all: abort, network failure, CORS);
+  - `false` otherwise, 4xx included.
+
+  Use it, not `status.code`, for availability: the browser's fetch instrumentation sets status
+  `ERROR` at `>= 400`, so `status.code` would count a RUM 404 as an error. Only
+  `http.response.status_code` is read; every source in scope emits that key (as an int), and none
+  emits the old `http.status_code`. `http.response.status_code` keeps the raw code.
 - **Temporality: DELTA** (`AggregationTemporality = 1`). Each row is the count for its own
   interval (`StartTimeUnix` → `TimeUnix`, flushed every 60 s); an interval with no spans writes no
   row. A window's total is a plain `sum` over rows, across nodes and collector restarts, with no
@@ -88,28 +99,38 @@ is described in [configuration](./configuration.md#chartsotel-collector-daemonse
   (`OTEL_EXPORTER_OTLP_ENDPOINT=http://$(HOST_IP):4318`, the agent's hostPort) and forwards the
   browser's RUM spans to the same endpoint after rebuilding them from an allowlist (five span
   names; `http.route`, `http.request.method`, `http.response.status_code`; resource reduced to
-  `service.name=krateo-frontend`; scope `snowplow/rum-ingest`). The frontend's RUM is **off by
-  default**: it starts only when the frontend's `OTEL_TRACES_ENDPOINT` (or `OTEL_COLLECTOR_URL`)
-  points at snowplow's `/telemetry/v1/traces`. Until then the `krateo-frontend` rows are absent.
+  `service.name=krateo-frontend`; scope `snowplow/rum-ingest`).
+- **UI caveat: today the `krateo-frontend` rows are absent, and when RUM is on only one UI SLI has
+  data.**
+  - The frontend's RUM is **off by default**. It starts only when the frontend's
+    `OTEL_COLLECTOR_URL` is set (to `<SNOWPLOW_API_BASE_URL>/telemetry/v1/traces`): the frontend
+    chart ships it empty, the installer sets no value, and `ui/src/index.tsx` gates on that key
+    alone (`OTEL_TRACES_ENDPOINT` by itself does not start tracing).
+  - When on, the frontend emits only **`krateo.widget.fetch`** (kind `CLIENT`). Nothing emits
+    `krateo.page.load`, `krateo.composition.open`, `krateo.form.submit` or
+    `krateo.page.publish` yet (`ui/src/otel/spanContract.ts`: "NOTHING EMITS THIS YET"). Alerts
+    on those four names have no data until the frontend ships them.
 
 ### Cardinality
 
 Rows per flush (60 s) per node agent, per metric:
 
-- **snowplow:** one row per (`span.name`, `http.route`, `http.response.status_code`).
-  `span.name` is `<METHOD> <route>`, so it does not multiply `http.route`; `status.code` follows
-  the code (`ERROR` exactly for 5xx and panics), so it does not multiply either. snowplow
-  registers about 40 method+route patterns; a request no pattern serves has no route and is
-  named `<METHOD>`. With the ~15 status codes an HTTP API realistically returns, the ceiling is
-  about (40 + 7) × 15 ≈ 700 combinations.
+- **snowplow:** one row per (`span.name`, `http.route`, `http.response.status_code`,
+  `krateo.sli.error`). `span.name` is `<METHOD> <route>`, so it does not multiply `http.route`.
+  snowplow registers about 40 method+route patterns; a request no pattern serves has no route and
+  is named `<METHOD>`. With the ~15 status codes an HTTP API realistically returns, that is about
+  (40 + 7) × 15 ≈ 700. `status.code` and `krateo.sli.error` both follow the code (`ERROR` and
+  `true` exactly for 5xx and panics), so in practice neither multiplies. The **loose bound**
+  counts `krateo.sli.error` as an independent ×2: **≈ 1,400**.
 - **krateo-frontend:** 5 span names × `http.route` × `http.response.status_code` ×
-  `status.code`. On `krateo.widget.fetch` the route must be one snowplow serves (checked against
+  `status.code` × `krateo.sli.error` (×2). On `krateo.widget.fetch` the route must be one snowplow serves (checked against
   its live mux). On the four page-level spans it is the portal router's pattern, which snowplow
   can only shape-check, so it is client-supplied.
-- **Hard cap:** `aggregation_cardinality_limit: 1000` per service per agent per flush. Under
-  DELTA the connector's state is cleared at every flush, so the cap holds per interval: at most
-  1001 rows (the extra one is `otel.metric.overflow=true`) per service per metric per agent per
-  minute, whatever a client sends. Quiet intervals write nothing.
+- **Hard cap:** `aggregation_cardinality_limit: 2000` per service per agent per flush, above
+  snowplow's loose bound. Under DELTA the connector's state is cleared at every flush, so the cap
+  holds per interval: at most 2001 rows (the extra one is `otel.metric.overflow=true`) per
+  service per metric per agent per minute, whatever a client sends. Quiet intervals write
+  nothing.
 
 ## SLOs (default targets)
 

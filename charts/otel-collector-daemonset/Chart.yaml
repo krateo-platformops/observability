@@ -88,8 +88,18 @@ type: application
 # `otelcol-contrib components` on that exact image, and the rendered config passes
 # `otelcol-contrib validate` -- because helm template cannot catch a missing component (0.3.9 of
 # the deployment chart). Dimensions, buckets and the series bound: docs/SLO.md.
+# Also in 0.1.15: the SLI pipeline drops /refreshes and /telemetry/v1/traces and adds the
+# krateo.sli.error dimension ("true" for >= 500 or no code with status ERROR; 4xx is "false"),
+# because alert-provider labels match exact Attribute values and cannot say NOT or >= (acmp).
+# appVersion "0.1.0" -> "0.158.0". For a wrapper chart appVersion names the app it deploys (as
+# krateo-observability's 3.2.0 names ClickStack), and "0.1.0" matched neither our tags nor the
+# image. 0.158.0 is the collector this chart RENDERS: the wrapper sets only image.repository, and
+# the upstream opentelemetry-collector 0.170.0 template takes `image.tag | default .Chart.AppVersion`
+# from ITS OWN Chart.yaml (appVersion 0.158.0) -> otel/opentelemetry-collector-contrib:0.158.0.
+# Metadata only: the wrapper's appVersion does not feed that template, so the image is unchanged.
+# Keep the two equal when the dependency is bumped.
 version: 0.1.15
-appVersion: "0.1.0"
+appVersion: "0.158.0"
 dependencies:
   - name: opentelemetry-collector
     version: 0.170.0
