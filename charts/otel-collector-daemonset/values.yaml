@@ -182,6 +182,37 @@ opentelemetry-collector:
         logs:
           log_record:
             - 'attributes["event.name"] == "audit"'
+      # SLO SPAN METRICS (D5): the spans the performance SLOs are computed from, and nothing else.
+      # DROPS what matches, so a span survives only if it is a snowplow SERVER span (the API SLI)
+      # or a krateo-frontend RUM span re-exported by snowplow's rum-ingest (the UI SLIs). Anything
+      # else -- every other service, snowplow's client/internal spans -- never reaches the
+      # connector, which is what keeps the metric series bounded. /refreshes and
+      # /telemetry/v1/traces are deliberately NOT excluded here: the SLO's Metric CR excludes them
+      # declaratively downstream, so the decision stays visible where the objective is defined.
+      # error_mode ignore: these conditions only compare fields and cannot error in practice; if one
+      # ever did, the span would be KEPT, and the connector's aggregation_cardinality_limit below
+      # still caps what that can cost.
+      filter/slo-spans:
+        error_mode: ignore
+        traces:
+          span:
+            - >-
+              not ((resource.attributes["service.name"] == "snowplow" and kind == SPAN_KIND_SERVER)
+              or (resource.attributes["service.name"] == "krateo-frontend"
+              and instrumentation_scope.name == "snowplow/rum-ingest"))
+      # Resource attributes are copied onto every span_metrics output by default in contrib
+      # 0.158.0 (the connector.spanmetrics.excludeResourceMetrics gate is alpha, i.e. off), and the
+      # connector also KEYS its aggregation on the full resource. Left alone, every pod restart and
+      # every SDK resource detail would start new rows. Keeping only service.name collapses that:
+      # one aggregate per service per node agent, and ServiceName still lands in its own column.
+      # Safe because the temporality is DELTA (see span_metrics), where summing rows is correct
+      # without any per-producer identity.
+      transform/slo-resource:
+        error_mode: ignore
+        trace_statements:
+          - context: resource
+            statements:
+              - 'keep_keys(attributes, ["service.name"])'
       batch:
         send_batch_size: 10000
         timeout: 5s
@@ -250,6 +281,57 @@ opentelemetry-collector:
           initial_interval: 5s
           max_interval: 30s
           max_elapsed_time: 300s
+
+    connectors:
+      # SLO SPAN METRICS (D5). Turns the spans kept by filter/slo-spans into a call counter and a
+      # duration histogram, written by the SAME `clickhouse` exporter as every other metric, so they
+      # land in otel_metrics_sum / otel_metrics_histogram. `span_metrics` is the name otelcol-contrib
+      # 0.158.0 registers (`spanmetrics` survives only as a deprecated alias) -- read from
+      # `otelcol-contrib components` on this exact image, not assumed.
+      # Exact names as they land, for whoever writes the Metric CRs (also in docs/configuration.md):
+      #   MetricName traces.span.metrics.calls    -> otel_metrics_sum       (monotonic counter)
+      #   MetricName traces.span.metrics.duration -> otel_metrics_histogram (unit ms)
+      #   Attributes: service.name, span.name, status.code, plus http.route and
+      #   http.response.status_code when the span carries them. ResourceAttributes: service.name.
+      span_metrics:
+        # Pinned to its default so a future default (or the legacyMetricNames gate, which only acts
+        # on the default namespace) cannot silently rename the metrics the Metric CRs query.
+        namespace: traces.span.metrics
+        # DELTA, not the cumulative default. This connector runs once PER NODE: with cumulative
+        # counters every agent's series would have to stay distinct (collector.instance.id) and every
+        # query would need per-series diffs with reset handling across agent restarts. Delta rows
+        # are the count for their own interval, so a window's total is a plain sum across rows and
+        # agents, and a restart loses at most one unflushed interval instead of breaking a series.
+        aggregation_temporality: AGGREGATION_TEMPORALITY_DELTA
+        metrics_flush_interval: 60s
+        # The four built-in dimensions are service.name, span.name, span.kind and status.code, and
+        # 0.158.0 adds collector.instance.id by default (the includeCollectorInstanceID gate is beta).
+        # span.kind is excluded because the filter already fixes it per service (SERVER for
+        # snowplow), so it adds a column and no information. collector.instance.id is excluded
+        # because under DELTA it only splits one aggregate into one row per node agent and per agent
+        # restart. status.code (STATUS_CODE_UNSET / _OK / _ERROR) is KEPT.
+        exclude_dimensions: [span.kind, collector.instance.id]
+        # Raw values, no bucketing: a 4xx stays a 4xx and is not an error here. The error ratio is a
+        # downstream decision. Neither key has a default, so a span without one (a snowplow 404 no
+        # route serves, a RUM page.load) simply has no such attribute rather than an invented value.
+        # On RUM spans both are browser-supplied but allowlisted by snowplow's rum-ingest: the route
+        # on krateo.widget.fetch must be one snowplow serves, the page-level routes are only
+        # shape-checked, and the status code is 100-599. The cap below is what bounds a hostile
+        # client.
+        dimensions:
+          - name: http.route
+          - name: http.response.status_code
+        histogram:
+          unit: ms
+          # Fixed for a p95 that may sit anywhere from 50 ms to 10 s; NOT tuned to any target (the
+          # targets are set at deploy time and never committed). The bucket bounds land in
+          # ExplicitBounds as [25, 50, ..., 10000] (ms), plus the implicit +Inf bucket.
+          explicit:
+            buckets: [25ms, 50ms, 100ms, 250ms, 500ms, 750ms, 1s, 1500ms, 2500ms, 5s, 10s]
+        # Circuit breaker per service per agent per interval. The expected set is far below this
+        # (see docs/configuration.md); past it, new combinations fold into one series marked
+        # otel.metric.overflow=true instead of growing the table.
+        aggregation_cardinality_limit: 1000
 
     service:
       pipelines:
@@ -329,6 +411,23 @@ opentelemetry-collector:
           # `transform` runs the trace_statements above (drop Authorization header + redact JWTs) BEFORE
           # batch/export, so no caller JWT reaches otel_traces (#122).
           processors: [memory_limiter, k8sattributes, transform, batch]
+          exporters: [clickhouse]
+        # SLO SPAN METRICS (D5): a SECOND consumer of the same otlp receiver. A receiver fans out to
+        # every pipeline that names it, each getting its own copy, so the `traces` pipeline above is
+        # byte-identical and every span still reaches otel_traces. This one keeps only the SLO spans
+        # (filter first, so everything after it sees a handful of spans), redacts like `traces` does
+        # (a token in http.route would otherwise reach a metric attribute), trims the resource, and
+        # hands the spans to the connector. No k8sattributes: no dimension needs pod metadata.
+        traces/slo:
+          receivers: [otlp]
+          processors: [memory_limiter, filter/slo-spans, transform, transform/slo-resource]
+          exporters: [span_metrics]
+        # The connector's output, through the same exporter (and so the same otel_metrics_* tables
+        # and 168h TTL) as the `metrics` pipeline. Its own pipeline rather than a receiver on
+        # `metrics`, which would run k8sattributes over these and change a pipeline that works.
+        metrics/slo:
+          receivers: [span_metrics]
+          processors: [memory_limiter, batch]
           exporters: [clickhouse]
 
   extraEnvs:

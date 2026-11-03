@@ -73,7 +73,19 @@ type: application
 #   BACKSTOP, not a fix: the root cause is installer#395, the events bell putting the bearer token
 #   in the URL because EventSource cannot set headers. This stops the token reaching ClickHouse; it
 #   does not stop the browser sending it in a URL, where any proxy or access log can still record it.
-version: 0.1.13
+# 0.1.14: SLO span metrics (D5). Performance alerts are built from the span_metrics connector, so
+# this agent gains a SECOND consumer of its otlp receiver: `traces/slo` keeps only snowplow SERVER
+# spans and krateo-frontend spans from the `snowplow/rum-ingest` scope, and feeds them to
+# `span_metrics`, whose output (`metrics/slo`) goes out through the existing `clickhouse` exporter
+# as traces.span.metrics.calls (otel_metrics_sum) and traces.span.metrics.duration
+# (otel_metrics_histogram, ms, explicit buckets 25ms..10s). The `traces` pipeline is BYTE-IDENTICAL
+# -- the receiver fans out, nothing is diverted. DELTA temporality, because the connector runs once
+# per node and delta rows sum across agents and restarts with no per-series reset logic.
+# span_metrics and filter are both compiled into otelcol-contrib 0.158.0 -- read from
+# `otelcol-contrib components` on that exact image, and the rendered config passes
+# `otelcol-contrib validate` -- because helm template cannot catch a missing component (0.3.9 of
+# the deployment chart). Dimensions, buckets and the series bound: docs/SLO.md.
+version: 0.1.14
 appVersion: "0.1.0"
 dependencies:
   - name: opentelemetry-collector

@@ -12,6 +12,15 @@ timestamp: 2026-08-07T00:00:00Z
 Curated, newest first. Release notes live in GitHub Releases; the `Chart.yaml` comment
 blocks carry the per-bump rationale.
 
+- **2026-11-03 — SLO span metrics (otel-collector-daemonset 0.1.14).** Performance alerts are
+  built from the `span_metrics` connector (decision D5). The node-local agent gains a
+  `traces/slo` pipeline that keeps only `snowplow` SERVER spans and `krateo-frontend`
+  `snowplow/rum-ingest` spans, and a `metrics/slo` pipeline that writes
+  `traces.span.metrics.calls` and `traces.span.metrics.duration` (ms, buckets 25 … 10000) to
+  `otel_metrics_sum` / `otel_metrics_histogram` through the existing exporter. DELTA temporality,
+  because the connector runs once per node. The `traces` pipeline is unchanged. Names and
+  attribute keys for `Metric` CRs: [SLO → span metrics](SLO.md#span-metrics-the-inputs-for-performance-alerts).
+
 - **2026-11-01 — the incident pipeline's exclusion covers its new name (0.1.24).** The
   log-scoped alerts exclude ServiceName `incident-provider` next to `incident-controller`, ahead
   of the controller's rename, so the 0.1.20 loop stays closed whichever name a cluster's build
