@@ -194,6 +194,16 @@ opentelemetry-collector:
       # "POST /refreshes" (main.go) and rum.Path "/telemetry/v1/traces" (rum/handler.go).
       # snowplow gives the ingest route no Server span today (tracing/server.go unspannedRoutes),
       # so that half is a guard: it also covers a RUM krateo.widget.fetch naming it.
+      # The third: abandoned interactions are EXCLUDED from the SLIs per acmp's X5 span contract,
+      # not counted as errors. They stay in otel_traces (this pipeline gets its own copy of each
+      # span). acmp's abandoned_flag_selfcheck watches the abandoned share against its 7-day
+      # baseline, so a frontend bug that marks real slowness as abandoned cannot silently improve
+      # p95. SNOWPLOW DEPENDENCY: snowplow PR #1061 (Fixes #1060, in review, expected in snowplow
+      # 1.12.65) forwards the key only as a typed bool `true` (AnyValue_BoolValue), and only on
+      # krateo.composition.open, krateo.form.submit and krateo.page.publish; it drops false,
+      # strings, numbers and arrays. The comparison is against the BOOL true, so it matches exactly
+      # what snowplow forwards. Until that release no span carries the key and this rule matches
+      # nothing, which is harmless.
       # error_mode ignore: these conditions only compare fields and cannot error in practice; if one
       # ever did, the span would be KEPT, and the connector's aggregation_cardinality_limit below
       # still caps what that can cost.
@@ -206,6 +216,7 @@ opentelemetry-collector:
               or (resource.attributes["service.name"] == "krateo-frontend"
               and instrumentation_scope.name == "snowplow/rum-ingest"))
             - 'attributes["http.route"] == "/refreshes" or attributes["http.route"] == "/telemetry/v1/traces"'
+            - 'attributes["krateo.interaction.abandoned"] == true'
       # Resource attributes are copied onto every span_metrics output by default in contrib
       # 0.158.0 (the connector.spanmetrics.excludeResourceMetrics gate is alpha, i.e. off), and the
       # connector also KEYS its aggregation on the full resource. Left alone, every pod restart and

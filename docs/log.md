@@ -12,6 +12,13 @@ timestamp: 2026-08-07T00:00:00Z
 Curated, newest first. Release notes live in GitHub Releases; the `Chart.yaml` comment
 blocks carry the per-bump rationale.
 
+- **2026-11-03 — abandoned interactions leave the SLIs (otel-collector-daemonset 0.1.16).**
+  `filter/slo-spans` drops spans with `krateo.interaction.abandoned == true` (bool), per acmp's
+  X5 span contract: excluded, not counted as errors, and still in `otel_traces`. acmp's
+  `abandoned_flag_selfcheck` guards against a frontend bug hiding real slowness this way. Inert
+  until snowplow #1061 (expected 1.12.65) forwards the flag. See
+  [SLO → span metrics](SLO.md#span-metrics-the-inputs-for-performance-alerts).
+
 - **2026-11-03 — SLO span metrics (otel-collector-daemonset 0.1.15).** Performance alerts are
   built from the `span_metrics` connector (decision D5). The node-local agent gains a
   `traces/slo` pipeline that keeps only `snowplow` SERVER spans and `krateo-frontend`

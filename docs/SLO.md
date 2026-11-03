@@ -45,6 +45,17 @@ ingest itself) are **dropped** before the connector (X5, acmp). They are exclude
 in the `Metric` CR because alert-provider labels match `Attributes` by exact value only, so a CR
 cannot say "route is not x". They are still in `otel_traces`.
 
+**Abandoned interactions are excluded, not counted as errors** (acmp's X5 span contract;
+otel-collector-daemonset ≥ 0.1.16). A span with `krateo.interaction.abandoned` equal to the
+**bool** `true` is dropped before the connector and stays in `otel_traces`. acmp's
+`abandoned_flag_selfcheck` watches the abandoned share against its 7-day baseline, so a frontend
+bug that marks real slowness as abandoned cannot silently improve p95. The flag comes from
+snowplow's rum-ingest, which forwards it only as a bool `true` and only on
+`krateo.composition.open`, `krateo.form.submit` and `krateo.page.publish` (snowplow #1061, Fixes
+#1060, expected in 1.12.65); it drops `false`, strings, numbers and arrays. Until that release
+no span carries the key and the rule matches nothing. A string `"true"` does **not** match the
+rule: the span is counted (snowplow never forwards one).
+
 **Metrics, exactly as they land:**
 
 | MetricName | Table | Type | Unit (`MetricUnit`) |

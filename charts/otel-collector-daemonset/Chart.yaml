@@ -98,7 +98,14 @@ type: application
 # from ITS OWN Chart.yaml (appVersion 0.158.0) -> otel/opentelemetry-collector-contrib:0.158.0.
 # Metadata only: the wrapper's appVersion does not feed that template, so the image is unchanged.
 # Keep the two equal when the dependency is bumped.
-version: 0.1.15
+# 0.1.16: the SLI pipeline also drops spans with krateo.interaction.abandoned == true (bool):
+# abandoned interactions are EXCLUDED from the SLIs per acmp's X5 span contract, not counted as
+# errors, and stay in otel_traces. acmp's abandoned_flag_selfcheck watches the abandoned share
+# against its 7-day baseline, so a frontend bug marking real slowness as abandoned cannot silently
+# improve p95. Depends on snowplow #1061 (Fixes #1060, expected in 1.12.65), which forwards the key
+# only as bool true on krateo.composition.open / form.submit / page.publish; until then it matches
+# nothing. The traces/logs/metrics pipelines are unchanged.
+version: 0.1.16
 appVersion: "0.158.0"
 dependencies:
   - name: opentelemetry-collector
