@@ -12,6 +12,17 @@ timestamp: 2026-08-07T00:00:00Z
 Curated, newest first. Release notes live in GitHub Releases; the `Chart.yaml` comment
 blocks carry the per-bump rationale.
 
+- **2026-11-02 — chart `sources` name this repo by its current name.** The four charts that
+  listed `github.com/krateo-platformops/clickstack-chart` (this repo's old name, which only
+  redirects) now list `github.com/krateo-platformops/observability`: wrapper `0.1.25`,
+  collectors `0.3.12`/`0.1.14`, sse-proxy `0.1.18`. Metadata only, no rendered change; bumped
+  anyway so the next tag does not overwrite a published version with different metadata.
+
+- **2026-11-01 — the incident pipeline's exclusion covers its new name (0.1.24).** The
+  log-scoped alerts exclude ServiceName `incident-provider` next to `incident-controller`, ahead
+  of the controller's rename, so the 0.1.20 loop stays closed whichever name a cluster's build
+  logs under. See [alerts.md](alerts.md#the-three-rules).
+
 - **2026-10-05 — the default alerts stop alerting on the incident pipeline (0.1.20).** The
   log-scoped alerts exclude ServiceName `incident-controller`, whose own `Reconciler error` lines
   kept `sre-krateo-composition-reconcile-error` firing every minute on krateo-057, and
