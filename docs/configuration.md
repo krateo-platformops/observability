@@ -203,7 +203,8 @@ Wraps the same upstream chart in `daemonset` mode, stock
   reaches `otel_traces`.
   - `traces/slo`: `otlp` → `memory_limiter`, `filter/slo-spans` (keeps only `snowplow` SERVER
     spans and `krateo-frontend` spans with ScopeName `snowplow/rum-ingest`, then drops
-    `http.route` `/refreshes` and `/telemetry/v1/traces`), `transform` (the same JWT redaction as
+    `http.route` `/refreshes` and `/telemetry/v1/traces` and, since 0.1.16, abandoned
+    interactions, `krateo.interaction.abandoned == true` as a bool), `transform` (the same JWT redaction as
     `traces`), `transform/slo-resource` (keeps only the `service.name` resource attribute),
     `transform/slo-error` (sets `krateo.sli.error`) → the `span_metrics` connector.
   - `metrics/slo`: `span_metrics` → `memory_limiter`, `batch` → the existing `clickhouse`
