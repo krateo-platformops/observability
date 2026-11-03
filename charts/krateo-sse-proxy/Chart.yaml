@@ -33,7 +33,10 @@ type: application
 #   730 -> 4; devday-milan 528 -> 86.
 #   Result equivalence was checked on 057 with pinned samples (count + cityHash64 match).
 #   Independent gate: reviewer-small PASS, from pushed SHA f61dd601.
-version: 0.1.17
+# 0.1.18: metadata only -- `sources` names this repo by its current name, krateo-platformops/observability
+# (was the old clickstack-chart, which only redirects). Bumped so the next tag does not overwrite
+# 0.1.17 with different metadata: consumers cache by version (see krateo-observability 0.1.3).
+version: 0.1.18
 appVersion: "1.2.0"
 home: https://krateo.io
 icon: https://github.com/krateoplatformops/krateo/blob/main/docs/media/logo.svg
@@ -43,5 +46,5 @@ keywords:
   - sse
   - observability
 sources:
-  - https://github.com/krateo-platformops/clickstack-chart
+  - https://github.com/krateo-platformops/observability
   - https://github.com/krateo-platformops/sse-proxy

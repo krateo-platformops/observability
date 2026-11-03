@@ -198,7 +198,7 @@ Wraps the same upstream chart in `daemonset` mode, stock
 - Pipelines: `logs` (filelog), `metrics` (`hostmetrics, kubeletstats, otlp`), `traces`
   (`otlp`) — the `otlp` entries are how engine/cdc/app OTLP metrics and traces reach
   ClickHouse (KOS-1 #112).
-- **SLO span metrics** (0.1.14, decision D5): two more pipelines, added next to `traces` without
+- **SLO span metrics** (0.1.15, decision D5): two more pipelines, added next to `traces` without
   changing it. The `otlp` receiver fans out to every pipeline that names it, so every span still
   reaches `otel_traces`.
   - `traces/slo`: `otlp` → `memory_limiter`, `filter/slo-spans` (keeps only `snowplow` SERVER

@@ -28,7 +28,7 @@ and structured logs.
 ## Span metrics (the inputs for performance alerts)
 
 Performance (SLO) alerts are built from metrics, not from scans of `otel_traces`: the node-local
-collector (`charts/otel-collector-daemonset` ≥ 0.1.14) runs the `span_metrics` connector over a
+collector (`charts/otel-collector-daemonset` ≥ 0.1.15) runs the `span_metrics` connector over a
 fixed set of spans and writes a call counter and a duration histogram to ClickHouse next to every
 other metric. An alert-provider `Metric` CR references them by the names below. The pipeline itself
 is described in [configuration](./configuration.md#chartsotel-collector-daemonset--node-level-collector).

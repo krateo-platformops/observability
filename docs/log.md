@@ -12,7 +12,7 @@ timestamp: 2026-08-07T00:00:00Z
 Curated, newest first. Release notes live in GitHub Releases; the `Chart.yaml` comment
 blocks carry the per-bump rationale.
 
-- **2026-11-03 — SLO span metrics (otel-collector-daemonset 0.1.14).** Performance alerts are
+- **2026-11-03 — SLO span metrics (otel-collector-daemonset 0.1.15).** Performance alerts are
   built from the `span_metrics` connector (decision D5). The node-local agent gains a
   `traces/slo` pipeline that keeps only `snowplow` SERVER spans and `krateo-frontend`
   `snowplow/rum-ingest` spans, and a `metrics/slo` pipeline that writes
@@ -20,6 +20,12 @@ blocks carry the per-bump rationale.
   `otel_metrics_sum` / `otel_metrics_histogram` through the existing exporter. DELTA temporality,
   because the connector runs once per node. The `traces` pipeline is unchanged. Names and
   attribute keys for `Metric` CRs: [SLO → span metrics](SLO.md#span-metrics-the-inputs-for-performance-alerts).
+
+- **2026-11-02 — chart `sources` name this repo by its current name.** The four charts that
+  listed `github.com/krateo-platformops/clickstack-chart` (this repo's old name, which only
+  redirects) now list `github.com/krateo-platformops/observability`: wrapper `0.1.25`,
+  collectors `0.3.12`/`0.1.14`, sse-proxy `0.1.18`. Metadata only, no rendered change; bumped
+  anyway so the next tag does not overwrite a published version with different metadata.
 
 - **2026-11-01 — the incident pipeline's exclusion covers its new name (0.1.24).** The
   log-scoped alerts exclude ServiceName `incident-provider` next to `incident-controller`, ahead
