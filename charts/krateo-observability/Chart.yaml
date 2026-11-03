@@ -72,7 +72,10 @@ type: application
 # 0.1.24: the log-scoped default alerts also exclude ServiceName 'incident-provider', the name
 # incident-controller is being renamed to. Both names stay excluded while either can be logging,
 # so the 0.1.20 feedback loop (its own "Reconciler error" lines re-firing the alerts) stays closed.
-version: 0.1.24
+# 0.1.25: metadata only -- `sources` names this repo by its current name, krateo-platformops/observability
+# (was the old clickstack-chart, which only redirects). Bumped so the next tag does not overwrite
+# 0.1.24 with different metadata: consumers cache by version (see krateo-observability 0.1.3).
+version: 0.1.25
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack
@@ -92,4 +95,4 @@ annotations:
   krateo.io/maturity: beta
   krateoSupportedVersion: ">= 2.5.1"
 sources:
-  - https://github.com/krateo-platformops/clickstack-chart
+  - https://github.com/krateo-platformops/observability
