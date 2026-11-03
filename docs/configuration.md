@@ -198,6 +198,26 @@ Wraps the same upstream chart in `daemonset` mode, stock
 - Pipelines: `logs` (filelog), `metrics` (`hostmetrics, kubeletstats, otlp`), `traces`
   (`otlp`) — the `otlp` entries are how engine/cdc/app OTLP metrics and traces reach
   ClickHouse (KOS-1 #112).
+- **SLO span metrics** (0.1.15, decision D5): two more pipelines, added next to `traces` without
+  changing it. The `otlp` receiver fans out to every pipeline that names it, so every span still
+  reaches `otel_traces`.
+  - `traces/slo`: `otlp` → `memory_limiter`, `filter/slo-spans` (keeps only `snowplow` SERVER
+    spans and `krateo-frontend` spans with ScopeName `snowplow/rum-ingest`, then drops
+    `http.route` `/refreshes` and `/telemetry/v1/traces`), `transform` (the same JWT redaction as
+    `traces`), `transform/slo-resource` (keeps only the `service.name` resource attribute),
+    `transform/slo-error` (sets `krateo.sli.error`) → the `span_metrics` connector.
+  - `metrics/slo`: `span_metrics` → `memory_limiter`, `batch` → the existing `clickhouse`
+    exporter, so the output lands in `otel_metrics_sum` / `otel_metrics_histogram` with the
+    same 7-day TTL.
+  - `span_metrics`: DELTA temporality, flushed every 60 s; extra dimensions `http.route`,
+    `http.response.status_code` and `krateo.sli.error`; built-in `span.kind` and
+    `collector.instance.id` excluded (`service.name`, `span.name`, `status.code` kept); explicit
+    ms buckets 25 … 10000; `aggregation_cardinality_limit: 2000`.
+  - Metric names, attribute keys and how to query them: [SLO → span metrics](./SLO.md#span-metrics-the-inputs-for-performance-alerts).
+  - `span_metrics`, `filter` and `transform` are compiled into `otelcol-contrib` 0.158.0 (checked with
+    `otelcol-contrib components` on that image). If the image changes, check again: `helm
+    template` renders an unknown component without complaint and the collector only rejects
+    it at startup.
 - Same `extraEnvs` Secret wiring and resources as the deployment chart.
 
 ## `charts/krateo-sse-proxy`
