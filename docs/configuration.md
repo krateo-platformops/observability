@@ -144,8 +144,8 @@ top-level `global` propagates into clickstack and all its subcharts
 All under `opentelemetry-collector:` (the upstream dep):
 
 - `mode: deployment`, `replicaCount: 1`, image
-  `ghcr.io/krateo-platformops/otel-collector:1.0.2` (`1.0.2` = clickhouse-exporter
-  schema-recreate-on-reconnect; `1.0.1` = patched k8sobjects receiver), `command.name:
+  `ghcr.io/krateo-platformops/otel-collector:1.0.5` (`1.0.5` = adds `transform`; `1.0.2` =
+  clickhouse-exporter schema-recreate-on-reconnect; `1.0.1` = patched k8sobjects receiver), `command.name:
   otelcol-krateo` (the binary kept its name when the image repo was renamed).
 - `clusterRole.create: true` with read rules on core/apps/batch/autoscaling resources plus
   `get` on the Krateo CR groups (`composition.krateo.io`, `templates.krateo.io`,
@@ -171,6 +171,9 @@ All under `opentelemetry-collector:` (the upstream dep):
   remove), retry-on-failure enabled.
 - Pipelines: `logs` (k8sobjects → … → clickhouse), `metrics` (k8s_cluster → memory_limiter,
   batch → clickhouse), `traces: null`.
+- `config.processors.transform` (0.3.13): redacts JWTs on `logs`. It targets `body.string` because
+  `k8sobjects` bodies are nested maps, which `replace_pattern(body, ...)` leaves untouched. A record
+  is converted to a string only when the pattern matches, so clean records stay maps.
 - `extraEnvs`: `CH_USERNAME`/`CH_PASSWORD` from the `otel-clickhouse-credentials` Secret.
 - `resources`: limits `cpu 500m / memory 512Mi`, requests `cpu 100m / memory 256Mi`.
 

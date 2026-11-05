@@ -195,8 +195,11 @@ opentelemetry-collector:
             statements:
               - 'replace_pattern(body, "\\x1b\\[[0-9;]*[mGKHFABCDsu]", "")'
               # The container parser puts the whole pod log line in body as a string, so body is
-              # the sink for every token an agent prints to stdout.
-              - 'replace_pattern(body, "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>")'
+              # the sink for every token an agent prints to stdout. body.string, not body, because
+              # this also runs on the OTLP arms, where a producer may send a map body, and
+              # replace_pattern(body, ...) leaves a map untouched. It converts a record only when the
+              # pattern matches, so a clean record stays as sent, and a string body behaves the same.
+              - 'replace_pattern(body.string, "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>")'
               # body was the only sink redacted until 0.1.12, which left log ATTRIBUTES unredacted.
               # replace_all_patterns sweeps every attribute VALUE, so a token in any key -- present
               # or added later -- is caught without enumerating the key. Enumerating is what let
