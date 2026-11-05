@@ -12,6 +12,12 @@ timestamp: 2026-08-07T00:00:00Z
 Curated, newest first. Release notes live in GitHub Releases; the `Chart.yaml` comment
 blocks carry the per-bump rationale.
 
+- **2026-11-05 — JWT redaction on `k8sobjects` (otel-collector-deployment 0.3.13).** Closes the last
+  unredacted log stream (installer#394). Image 1.0.5 adds `transformprocessor`. The 0.3.9 statements
+  are not restored, because they would not have worked: `k8sobjects` bodies are nested maps, which
+  `replace_pattern(body, ...)` leaves untouched. This targets `body.string` instead, and clean
+  records stay maps.
+
 - **2026-11-05 — the JWT detector sees `k8s-events` (krateo-observability 0.1.26).**
   `sre-jwt-in-telemetry` was scoped to `telemetry.source = ''`, which excluded the one stream
   without redaction, so a leak there could not fire it. No leak occurred: 0 JWT-shaped values in

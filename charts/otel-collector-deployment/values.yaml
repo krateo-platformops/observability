@@ -45,6 +45,8 @@ opentelemetry-collector:
     # Renamed otelcol-krateo -> krateo-otel-collector when the custom collector was split
     # into its own single-image repo (krateo-platformops/otel-collector) on the canonical CI.
     repository: ghcr.io/krateo-platformops/otel-collector
+    # 1.0.5: adds transformprocessor, so this chart can redact JWTs on the k8sobjects logs
+    #        pipeline (otel-collector#29).
     # 1.0.4: compositionresolver invalidates the RESTMapper on a NO-MATCH, so a composition
     #        group/version minted after the pod started is learned instead of going unlabelled
     #        for the life of the process (otel-collector#22/#24).
@@ -54,7 +56,7 @@ opentelemetry-collector:
     # 1.0.2: + patched clickhouseexporter — recreate the otel_* schema and retry on UNKNOWN_TABLE
     #        (ClickHouse re-provisioned with a fresh DB) instead of dropping data until a restart.
     # 1.0.1: patched k8sobjectsreceiver (recycle timer + restart-on-close) — KOS-1 #112 bug #2
-    tag: "1.0.4"
+    tag: "1.0.5"
     pullPolicy: IfNotPresent
 
   # The container binary is still named otelcol-krateo (OTel builder dist.name / Dockerfile
@@ -185,11 +187,10 @@ opentelemetry-collector:
         # reference the ReplicaSet *resource*, not these gauges.
         #
         # Done at the RECEIVER, not with a filter processor, deliberately: the deployment
-        # collector runs ghcr.io/krateo-platformops/otel-collector, whose builder-config.yaml
-        # ships only [batch memory_limiter k8sattributes resource compositionresolver]. A
-        # filter/ or transform/ processor here would fail at STARTUP, and `helm template`
-        # cannot catch it -- only the collector validates its own component set. Disabling
-        # at the receiver also means the metrics are never generated at all.
+        # collector runs ghcr.io/krateo-platformops/otel-collector, whose builder-config.yaml has
+        # no filter processor. Adding one here would fail at STARTUP, and `helm template` cannot
+        # catch it -- only the collector validates its own component set. Disabling at the
+        # receiver also means the metrics are never generated at all.
         metrics:
           k8s.replicaset.available:
             enabled: false
@@ -197,6 +198,23 @@ opentelemetry-collector:
             enabled: false
 
     processors:
+      # JWT redaction (installer#394). This pipeline carries Kubernetes Events, whose free-text
+      # message can quote a failing command line, token included.
+      #
+      # body.string, not body: k8sobjects bodies are nested maps, and replace_pattern(body, ...)
+      # leaves a map untouched, so the token stays. Tested on the v0.118.0 processor. body.string
+      # converts a record to a string only when the pattern matches, so clean records stay maps,
+      # and the ClickHouse exporter writes Body().AsString() either way.
+      #
+      # error_mode: ignore skips a failing statement silently, so sre-jwt-in-telemetry in
+      # krateo-observability is what catches a miss.
+      transform:
+        error_mode: ignore
+        log_statements:
+          - context: log
+            statements:
+              - 'replace_pattern(body.string, "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>")'
+              - 'replace_all_patterns(attributes, "value", "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>")'
       batch:
         send_batch_size: 10000
         timeout: 5s
@@ -273,17 +291,9 @@ opentelemetry-collector:
       pipelines:
         logs:
           receivers: [k8sobjects]
-          # NO `transform` here, and it is not an omission: this collector runs the CUSTOM image
-          # ghcr.io/krateo-platformops/otel-collector, whose component set is exactly
-          # [memory_limiter k8sattributes resource compositionresolver batch]. Adding transform in
-          # 0.3.9 crash-looped it on 057 with
-          #   error decoding 'processors': unknown type: "transform" for id: "transform"
-          # `helm template` cannot catch this -- only the collector validates its own component set
-          # at startup -- so a config referencing a processor the BUILD lacks renders clean and then
-          # fails closed in the cluster. Redacting k8sobjects logs needs `transform` added to the
-          # custom image's builder manifest first (krateo-platformops/otel-collector), tracked as a
-          # follow-up; until then this pipeline is unredacted and installer#394 stays open for it.
-          processors: [memory_limiter, k8sattributes, resource, compositionresolver, batch]
+          # transform runs after compositionresolver, which reads the map body, and last before
+          # batch so anything an earlier processor added is swept too.
+          processors: [memory_limiter, k8sattributes, resource, compositionresolver, transform, batch]
           exporters: [clickhouse]
         # To enable the Prometheus -> OTLP bridge: restore the prometheus receiver (nulled by
         # default under config.receivers — requires a prometheus-capable collector image) and
