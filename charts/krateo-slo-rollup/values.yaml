@@ -1,0 +1,78 @@
+# krateo-slo-rollup: a daily rollup of the SLI span metrics, for a rolling 28-day SLO.
+#
+# The otel_* tables keep 7 days, so nothing can answer a 28-day question. This chart keeps per-day
+# totals of traces.span.metrics.calls and .duration in one small table with its own retention.
+# It adds nothing to the insert path: see "Why a refreshable view" in the README.
+
+# ClickHouse connection (native protocol). Credentials are read from a Secret, the same one the
+# OTel collectors use, never inlined.
+clickhouse:
+  host: krateo-clickstack-clickhouse-clickhouse-headless.krateo-system.svc
+  port: 9000
+  # The database the collector's clickhouse exporter writes. The rollup is created here too.
+  database: default
+  credentialsSecret:
+    name: otel-clickhouse-credentials
+    usernameKey: username
+    passwordKey: password
+
+# Table names. The two source tables are created by the collector's exporter (create_schema),
+# rollupTable by this chart, with its view next to it as <rollupTable>_mv.
+sumTable: otel_metrics_sum
+histogramTable: otel_metrics_histogram
+rollupTable: krateo_slo_daily
+
+rollup:
+  # Days a rollup row is kept. Must exceed the SLO window: 40 is a rolling 28 days plus a margin
+  # (a late look at the previous window, and a TTL that only fires on merge). Changing it after
+  # install needs ALTER TTL: see "Retention" in the README.
+  ttlDays: 40
+  # How often the view recomputes, in ClickHouse's REFRESH syntax. Applied at view creation only.
+  refreshEvery: "1 HOUR"
+  # Whole UTC days each refresh recomputes, today included, from the source tables. MUST stay
+  # below the sources' retention: a day that is partly expired there would overwrite its complete
+  # total here. 6 is the most a 7-day TTL allows, and lets the refresh stop for 5 days without
+  # losing one. Applied at view creation only.
+  recomputeDays: 6
+
+image:
+  repository: clickhouse/clickhouse-server
+  # The client matches the server the platform runs (krateo-observability's 26.8).
+  tag: "26.8-alpine"
+  pullPolicy: IfNotPresent
+
+# The apply CronJob: creates the objects if they are missing, applies a TTL change, and fails the
+# Job when the view has stopped working. It does not compute anything: ClickHouse's refresh does.
+apply:
+  schedule: "*/15 * * * *"
+  # Fail if a source row this old was written after the newest refresh. Keep it above
+  # rollup.refreshEvery, and below 1 day: the check only looks at the last day of source rows.
+  staleAfterSeconds: 7200
+
+# A failed run should surface as the workload being unhealthy, not vanish silently.
+concurrencyPolicy: Forbid
+activeDeadlineSeconds: 120
+successfulJobsHistoryLimit: 1
+failedJobsHistoryLimit: 3
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 20m
+    memory: 64Mi
+
+# Hardened by default (same as krateo-audit-worm).
+podSecurityContext:
+  runAsNonRoot: true
+containerSecurityContext:
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 65534
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+
+nameOverride: ""
+fullnameOverride: ""

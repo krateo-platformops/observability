@@ -1,0 +1,62 @@
+suite: rollup DDL and apply script
+templates:
+  - configmap-scripts.yaml
+  - cronjob-apply.yaml
+tests:
+  - it: is the refreshable view, append-only into the rollup, with no insert-triggered view
+    template: configmap-scripts.yaml
+    asserts:
+      - matchRegex:
+          path: data["schema.sql"]
+          pattern: CREATE MATERIALIZED VIEW IF NOT EXISTS krateo_slo_daily_mv\s+REFRESH EVERY 1 HOUR APPEND TO krateo_slo_daily
+      - matchRegex:
+          path: data["schema.sql"]
+          pattern: ENGINE = ReplacingMergeTree\(computed_at\)
+      - notMatchRegex:
+          path: data["schema.sql"]
+          pattern: MATERIALIZED VIEW IF NOT EXISTS \S+ TO
+  - it: keeps both delta filters and both metric names
+    template: configmap-scripts.yaml
+    asserts:
+      - matchRegex:
+          path: data["schema.sql"]
+          pattern: MetricName = 'traces\.span\.metrics\.calls'\s+AND AggregationTemporality = 1
+      - matchRegex:
+          path: data["schema.sql"]
+          pattern: MetricName = 'traces\.span\.metrics\.duration'\s+AND AggregationTemporality = 1
+  - it: stamps the TTL into both the table and the apply step
+    template: configmap-scripts.yaml
+    set:
+      rollup.ttlDays: 45
+    asserts:
+      - matchRegex:
+          path: data["schema.sql"]
+          pattern: TTL day \+ toIntervalDay\(45\)
+      - matchRegex:
+          path: data["apply.sh"]
+          pattern: WANT=45
+  - it: recomputes recomputeDays whole days, today included
+    template: configmap-scripts.yaml
+    set:
+      rollup.recomputeDays: 3
+    asserts:
+      - matchRegex:
+          path: data["schema.sql"]
+          pattern: toStartOfDay\(now\(\), 'UTC'\) - toIntervalDay\(2\)
+  - it: reads the credentials from the Secret and inlines none
+    template: cronjob-apply.yaml
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: CH_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: otel-clickhouse-credentials
+                key: password
+  - it: refuses a TTL that does not cover the 28-day window
+    template: configmap-scripts.yaml
+    set:
+      rollup.ttlDays: 28
+    asserts:
+      - failedTemplate: {}

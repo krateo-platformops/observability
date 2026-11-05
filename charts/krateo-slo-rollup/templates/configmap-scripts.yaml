@@ -1,0 +1,116 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "krateo-slo-rollup.fullname" . }}-scripts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "krateo-slo-rollup.labels" . | nindent 4 }}
+data:
+  schema.sql: |
+    -- One row per (UTC day, service, span name, route, error flag, bucket bounds): that day's
+    -- total, recomputed whole by each refresh, so the newest computed_at wins. Read it with FINAL.
+    -- A row is either a call count (bounds empty) or a duration histogram (bounds set), because the
+    -- two metrics live in two source tables. Bounds are in the key so that buckets from two bucket
+    -- layouts never land in one row: they can only be summed when their bounds are identical.
+    CREATE TABLE IF NOT EXISTS {{ .Values.rollupTable }}
+    (
+        day           Date,
+        service       LowCardinality(String),
+        span_name     LowCardinality(String),
+        route         LowCardinality(String),
+        sli_error     Bool,
+        bounds        Array(Float64),
+        calls         UInt64,
+        bucket_counts Array(UInt64),
+        computed_at   DateTime
+    )
+    ENGINE = ReplacingMergeTree(computed_at)
+    PARTITION BY toYYYYMM(day)
+    ORDER BY (day, service, span_name, route, sli_error, bounds)
+    TTL day + toIntervalDay({{ .Values.rollup.ttlDays }});
+
+    -- Refreshable, not insert-triggered: it runs on ClickHouse's scheduler and is not part of any
+    -- INSERT into the source tables, so its failure cannot fail the exporter's insert. Rows are
+    -- deltas (AggregationTemporality = 1), each the count for its own interval, so a day is their
+    -- sum; a cumulative row would be a running total, and is left out rather than summed.
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {{ .Values.rollupTable }}_mv
+    REFRESH EVERY {{ .Values.rollup.refreshEvery }} APPEND TO {{ .Values.rollupTable }}
+    AS
+    SELECT day, service, span_name, route, sli_error, bounds, calls, bucket_counts, now() AS computed_at
+    FROM
+    (
+        SELECT
+            toDate(TimeUnix, 'UTC')                                 AS day,
+            ServiceName                                             AS service,
+            Attributes['span.name']                                 AS span_name,
+            Attributes['http.route']                                AS route,
+            Attributes['krateo.sli.error'] = 'true'                 AS sli_error,
+            CAST([], 'Array(Float64)')                              AS bounds,
+            toUInt64(round(sum(Value)))                             AS calls,
+            CAST([], 'Array(UInt64)')                               AS bucket_counts
+        FROM {{ .Values.sumTable }}
+        WHERE MetricName = 'traces.span.metrics.calls'
+          AND AggregationTemporality = 1
+          AND TimeUnix >= toStartOfDay(now(), 'UTC') - toIntervalDay({{ sub (int .Values.rollup.recomputeDays) 1 }})
+        GROUP BY day, service, span_name, route, sli_error
+        UNION ALL
+        SELECT
+            toDate(TimeUnix, 'UTC')                                 AS day,
+            ServiceName                                             AS service,
+            Attributes['span.name']                                 AS span_name,
+            Attributes['http.route']                                AS route,
+            Attributes['krateo.sli.error'] = 'true'                 AS sli_error,
+            ExplicitBounds                                          AS bounds,
+            toUInt64(0)                                             AS calls,
+            sumForEach(BucketCounts)                                AS bucket_counts
+        FROM {{ .Values.histogramTable }}
+        WHERE MetricName = 'traces.span.metrics.duration'
+          AND AggregationTemporality = 1
+          AND TimeUnix >= toStartOfDay(now(), 'UTC') - toIntervalDay({{ sub (int .Values.rollup.recomputeDays) 1 }})
+        GROUP BY day, service, span_name, route, sli_error, bounds
+    );
+
+  apply.sh: |
+    #!/bin/sh
+    # Owns the schema: there is no Helm hook. Every run re-asserts it idempotently, brings the TTL
+    # to the configured value, and checks that the view is still refreshing.
+    set -eu
+    CHQ() { clickhouse-client --host "$CH_HOST" --port "$CH_PORT" --user "$CH_USER" --password "$CH_PASSWORD" --database "$CH_DB" --history_file=/dev/null "$@"; }
+    # has NAME -> 1 if a table or view NAME exists in CH_DB.
+    has() { CHQ -q "SELECT count() FROM system.tables WHERE database = currentDatabase() AND name = '$1'"; }
+
+    for t in {{ .Values.sumTable }} {{ .Values.histogramTable }}; do
+      if [ "$(has "$t")" != "1" ]; then
+        echo "source table $t does not exist yet: the collector's clickhouse exporter creates it on start; retrying next run" >&2
+        exit 1
+      fi
+    done
+
+    HAD_MV=$(has {{ .Values.rollupTable }}_mv)
+    CHQ --multiquery < /scripts/schema.sql
+    FAIL=0
+
+    # CREATE IF NOT EXISTS leaves an existing table's TTL alone, so a changed ttlDays lands here.
+    # Compared first: ALTER MODIFY TTL queues a mutation, which a run with nothing to do must not.
+    WANT={{ .Values.rollup.ttlDays }}
+    HAVE=$(CHQ -q "SELECT extract(engine_full, 'TTL day [+] (?:toIntervalDay[(]|INTERVAL )([0-9]+)') FROM system.tables WHERE database = currentDatabase() AND name = '{{ .Values.rollupTable }}'")
+    if [ "$HAVE" != "$WANT" ]; then
+      if CHQ -q "ALTER TABLE {{ .Values.rollupTable }} MODIFY TTL day + toIntervalDay($WANT)"; then
+        echo "ttl changed: $HAVE -> $WANT days"
+      else
+        echo "ttl not changed: the table keeps $HAVE days, rollup.ttlDays says $WANT. This user needs ALTER TTL ON {{ .Values.clickhouse.database }}.{{ .Values.rollupTable }}, or run with an ops principal: ALTER TABLE {{ .Values.clickhouse.database }}.{{ .Values.rollupTable }} MODIFY TTL day + toIntervalDay($WANT)" >&2
+        FAIL=1
+      fi
+    fi
+
+    # A source row older than staleAfterSeconds, written after the newest refresh, should have been
+    # picked up by now: the view has stopped. A quiet cluster has no such row, and a fresh view
+    # (first refresh still running) is skipped. computed_at is what a refresh that found rows writes.
+    if [ "$HAD_MV" = "1" ]; then
+      STALE=$(CHQ -q "SELECT count() FROM {{ .Values.sumTable }} WHERE MetricName = 'traces.span.metrics.calls' AND TimeUnix >= now() - INTERVAL 1 DAY AND TimeUnix < now() - INTERVAL {{ .Values.apply.staleAfterSeconds }} SECOND AND TimeUnix > (SELECT max(computed_at) FROM {{ .Values.rollupTable }})")
+      if [ "$STALE" != "0" ]; then
+        echo "stale: $STALE source rows older than {{ .Values.apply.staleAfterSeconds }}s are newer than the last refresh of {{ .Values.rollupTable }}_mv (see system.view_refreshes)" >&2
+        FAIL=1
+      fi
+    fi
+    exit $FAIL

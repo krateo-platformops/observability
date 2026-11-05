@@ -105,7 +105,8 @@ rule: the span is counted (snowplow never forwards one).
   5000, 10000]`, so `BucketCounts` has 12 entries; the last is `> 10000`. Bucket *i* counts
   durations `≤ ExplicitBounds[i]` and `> ExplicitBounds[i-1]`. These resolve a p95 anywhere from
   50 ms to 10 s and are not tuned to any target; the targets are deploy-time configuration.
-- **Retention:** the same 7-day TTL as every `otel_metrics_*` table.
+- **Retention:** the same 7-day TTL as every `otel_metrics_*` table. For the 28-day window, see
+  [the daily rollup](#28-day-rollup).
 - **Where the spans come from.** snowplow exports its own spans to the node-local agent
   (`OTEL_EXPORTER_OTLP_ENDPOINT=http://$(HOST_IP):4318`, the agent's hostPort) and forwards the
   browser's RUM spans to the same endpoint after rebuilding them from an allowlist (five span
@@ -142,6 +143,28 @@ Rows per flush (60 s) per node agent, per metric:
   holds per interval: at most 2001 rows (the extra one is `otel.metric.overflow=true`) per
   service per metric per agent per minute, whatever a client sends. Quiet intervals write
   nothing.
+
+## 28-day rollup
+
+The `otel_*` tables keep 7 days, so a rolling 28-day objective reads
+[`charts/krateo-slo-rollup`](../charts/krateo-slo-rollup/README.md): one table, `krateo_slo_daily`,
+kept for 40 days by default and refreshed hourly from the two metrics above.
+
+- **What it holds.** One row per UTC day, `ServiceName`, `span.name`, `http.route`,
+  `krateo.sli.error` and bucket layout: the day's call count, or its bucket counts summed element
+  by element. Delta rows only. The error count is the calls of the `krateo.sli.error` rows. Read it
+  with `FINAL`: a refresh writes each recent day again.
+- **Counts are of sampled spans.** snowplow head-samples its SERVER spans at about 5%
+  (`traceidratio` 0.05, not parent-based, errors not preferentially kept), so `calls` is about 5%
+  of real traffic. Nothing in the rollup scales it. Error ratios and quantiles are estimates from a
+  random sample, weaker on routes and days with little traffic.
+- **Quantiles are approximate.** A p95 from summed buckets is only known to lie inside its bucket,
+  and interpolation assumes durations are evenly spread across it. A p95 past the last bound
+  (10 s) reads as that bound.
+- **Coverage starts at install**, plus up to 6 days of backfill. A window reaching further back is
+  incomplete, and has to be reported as such.
+- **It cannot affect ingestion.** The view is refreshable, not insert-triggered. The README has
+  what was measured, and why `materialized_views_ignore_errors` would not do.
 
 ## SLOs (default targets)
 
