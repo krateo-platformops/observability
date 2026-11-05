@@ -1,0 +1,8 @@
+krateo-slo-rollup {{ .Chart.Version }} installed as {{ include "krateo-slo-rollup.fullname" . }}.
+
+The rollup appears on the first apply run ({{ .Values.apply.schedule }}), not at install:
+  - table : {{ .Values.clickhouse.database }}.{{ .Values.rollupTable }} (TTL {{ .Values.rollup.ttlDays }} days)
+  - view  : {{ .Values.clickhouse.database }}.{{ .Values.rollupTable }}_mv (refreshes every {{ .Values.rollup.refreshEvery }}, recomputes the last {{ .Values.rollup.recomputeDays }} days)
+
+Until the collector has created {{ .Values.sumTable }} and {{ .Values.histogramTable }} the apply Job fails with a clear message and the next run retries.
+Read the table with FINAL. Counts are of sampled spans: see the README.

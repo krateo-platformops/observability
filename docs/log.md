@@ -12,6 +12,13 @@ timestamp: 2026-08-07T00:00:00Z
 Curated, newest first. Release notes live in GitHub Releases; the `Chart.yaml` comment
 blocks carry the per-bump rationale.
 
+- **2026-11-05 — daily SLO rollup (krateo-slo-rollup 0.1.0).** Every `otel_*` table keeps 7 days,
+  so the 28-day objective had nothing to read. `krateo_slo_daily` keeps per-day call counts and
+  duration buckets for 40 days. The view is **refreshable**, not insert-triggered: measured on
+  26.8, an ordinary view's failure fails the exporter's insert, and
+  `materialized_views_ignore_errors` is only honoured in the writer's session, not in the view.
+  See [SLO → 28-day rollup](SLO.md#28-day-rollup).
+
 - **2026-11-03 — abandoned interactions leave the SLIs (otel-collector-daemonset 0.1.16).**
   `filter/slo-spans` drops spans with `krateo.interaction.abandoned == true` (bool), per acmp's
   X5 span contract: excluded, not counted as errors, and still in `otel_traces`. acmp's

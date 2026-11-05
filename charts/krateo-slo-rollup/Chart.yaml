@@ -1,0 +1,18 @@
+apiVersion: v2
+name: krateo-slo-rollup
+description: >-
+  Daily rollup of the SLI span metrics into ClickHouse (krateo_slo_daily), so a rolling 28-day SLO
+  can be computed although every otel_* table keeps 7 days. Adds no ingest path and nothing to the
+  insert path of the otel_metrics tables.
+type: application
+# No appVersion: this chart ships no first-party image. The DDL and the apply logic live in the
+# chart's own ConfigMap and run on the upstream ClickHouse client image, so the chart version IS the
+# logic version.
+version: 0.1.0
+keywords:
+  - slo
+  - rollup
+  - clickhouse
+  - observability
+sources:
+  - https://github.com/krateo-platformops/observability

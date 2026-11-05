@@ -1,0 +1,49 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "krateo-slo-rollup.fullname" . }}-apply
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "krateo-slo-rollup.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.apply.schedule | quote }}
+  concurrencyPolicy: {{ .Values.concurrencyPolicy }}
+  successfulJobsHistoryLimit: {{ .Values.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: {{ .Values.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            app: {{ include "krateo-slo-rollup.fullname" . }}-apply
+            {{- include "krateo-slo-rollup.labels" . | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          {{- with .Values.podSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          containers:
+            - name: apply
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: [sh, /scripts/apply.sh]
+              env:
+                {{- include "krateo-slo-rollup.chEnv" . | nindent 16 }}
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+              resources:
+                {{- toYaml .Values.resources | nindent 16 }}
+              {{- with .Values.containerSecurityContext }}
+              securityContext:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+          volumes:
+            - name: scripts
+              configMap:
+                name: {{ include "krateo-slo-rollup.fullname" . }}-scripts
+                defaultMode: 0555
