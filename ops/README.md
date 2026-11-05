@@ -6,7 +6,6 @@ in from the former `krateo-clickstack` code repo when its two images were split 
 [`krateo-otel-collector`](https://github.com/krateo-platformops/otel-collector).
 
 - `clickhouse-config/` — ClickHouse configmaps/secrets/HTTP handlers
-- `otel-collectors/` — reference OTel collector manifests (the live charts are under `charts/`)
 - `ha/` — network policies, pod-disruption-budgets, canary heartbeat
 - `pod-restart-alert/` — alert bootstrap scripts
 - `clickstack/` — clickstack values reference
