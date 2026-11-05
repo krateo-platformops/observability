@@ -75,7 +75,10 @@ type: application
 # 0.1.25: metadata only -- `sources` names this repo by its current name, krateo-platformops/observability
 # (was the old clickstack-chart, which only redirects). Bumped so the next tag does not overwrite
 # 0.1.24 with different metadata: consumers cache by version (see krateo-observability 0.1.3).
-version: 0.1.25
+# 0.1.26: sre-jwt-in-telemetry also watches k8s-events. Its telemetry.source = '' scope hid that
+# stream, the one path without redaction since otel-collector-deployment 0.3.10, so the detector
+# could not see a leak there. The comment on severity filters is updated for daemonset 0.1.17.
+version: 0.1.26
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack

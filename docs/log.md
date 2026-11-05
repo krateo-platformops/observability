@@ -12,6 +12,12 @@ timestamp: 2026-08-07T00:00:00Z
 Curated, newest first. Release notes live in GitHub Releases; the `Chart.yaml` comment
 blocks carry the per-bump rationale.
 
+- **2026-11-05 — the JWT detector sees `k8s-events` (krateo-observability 0.1.26).**
+  `sre-jwt-in-telemetry` was scoped to `telemetry.source = ''`, which excluded the one stream
+  without redaction, so a leak there could not fire it. No leak occurred: 0 JWT-shaped values in
+  about 26.5M rows over 7 days. Removing the scope catches both body and attribute cases on
+  synthetic rows, and still ignores redacted rows and the observability stack.
+
 - **2026-11-05 — severity and trace context from JSON logs (otel-collector-daemonset 0.1.17).**
   `SeverityText` was empty on every filelog row, and `TraceId` could not be set, because the
   pipeline never parsed JSON (#54). Guarded operators now promote `level` or `severity_text`,
