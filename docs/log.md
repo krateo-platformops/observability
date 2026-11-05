@@ -14,10 +14,11 @@ blocks carry the per-bump rationale.
 
 - **2026-11-05 — severity and trace context from JSON logs (otel-collector-daemonset 0.1.17).**
   `SeverityText` was empty on every filelog row, and `TraceId` could not be set, because the
-  pipeline never parsed JSON (#54). Five guarded operators now promote `level`, `trace_id` and
-  `span_id`. `Body` stays raw because alerts, the portal and nightly-review read it, and the parsed
-  copy is removed in the receiver so storage stays flat. Case is normalised in the operators and not
-  in `transform`, which also runs on `logs/audit`, and `krateo-audit-worm` hashes `SeverityText`.
+  pipeline never parsed JSON (#54). Guarded operators now promote `level` or `severity_text`,
+  `trace_id` and `span_id`. `Body` stays raw because alerts, the portal and nightly-review read it,
+  and the parsed copy is removed in the receiver so storage stays flat. Case is normalised in the
+  operators and not in `transform`, which also runs on `logs/audit`, and `krateo-audit-worm` hashes
+  `SeverityText`. The `ops/` error queries move to `SeverityNumber >= 17`, so a panic counts.
   Correlation for snowplow also needs snowplow#1184: 0 of 96,315 of its rows carried `trace_id`.
 
 - **2026-11-05 — daily SLO rollup (krateo-slo-rollup 0.1.0).** Every `otel_*` table keeps 7 days,

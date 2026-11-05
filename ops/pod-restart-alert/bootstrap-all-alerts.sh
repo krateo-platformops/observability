@@ -170,7 +170,7 @@ fi
 # ---------------------------------------------------------------------------
 log ""
 log "=== Alert 3: Application Error Rate ==="
-ERROR_QUERY="SeverityText IN ('ERROR', 'FATAL') AND ResourceAttributes['telemetry.source'] != 'k8s-events'"
+ERROR_QUERY="SeverityNumber >= 17 AND ResourceAttributes['telemetry.source'] != 'k8s-events'"
 
 ERROR_SS_ID=$(create_saved_search "Application Errors" "$ERROR_QUERY")
 if [ -n "$ERROR_SS_ID" ]; then
@@ -185,7 +185,7 @@ fi
 # ---------------------------------------------------------------------------
 log ""
 log "=== Alert 4: Agent MCP Errors ==="
-AGENT_QUERY="ResourceAttributes['k8s.container.name'] LIKE '%kagent%' AND SeverityText = 'ERROR' AND Body LIKE '%mcp%'"
+AGENT_QUERY="ResourceAttributes['k8s.container.name'] LIKE '%kagent%' AND SeverityNumber >= 17 AND Body LIKE '%mcp%'"
 
 AGENT_SS_ID=$(create_saved_search "Agent MCP Errors" "$AGENT_QUERY")
 if [ -n "$AGENT_SS_ID" ]; then

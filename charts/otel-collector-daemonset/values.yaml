@@ -61,44 +61,52 @@ opentelemetry-collector:
             max_unmatched_batch_size: 100
             overwrite_with: oldest
           # #54: promote severity and trace context out of JSON log lines. Without these, SeverityText
-          # and TraceId stay empty on every filelog row. Five operators, not one json_parser with
-          # severity/trace blocks, because inside json_parser a line with no `level` makes the
-          # collector log an error with a stack trace, once per line, and krateo-clickstack-mongodb
-          # logs JSON without `level` (measured on krateo-057: 45,203 of 450,493 JSON rows in 6h).
+          # and TraceId stay empty on every filelog row. Separate operators, not one json_parser with
+          # severity/trace blocks, because inside json_parser a line with no level makes the collector
+          # log an error with a stack trace, once per line, and krateo-clickstack-mongodb logs JSON
+          # without one (measured on krateo-057: 45,203 of 450,493 JSON rows in 6h).
           #
           # Body stays the raw line: the default alerts, the portal and nightly-review all read
           # fields out of Body. `krateo.parsed` is scratch space and json-cleanup removes it, so
           # LogAttributes do not grow a second copy of every line.
           #
           # on_error is send_quiet throughout: a line that does not parse is still a log line, and
-          # must reach ClickHouse unchanged. Only top-level `trace_id`/`span_id` map to TraceId and
-          # SpanId. camelCase `traceId` is plumbing's 9-character shortid and is not joinable.
+          # must reach ClickHouse unchanged.
+          #
+          # KNOWN LIMITS, each measured at 0 rows on krateo-057 over 24h. These operators run after
+          # recombine and before `transform`, so a JSON line with stack-trace continuation lines, or
+          # with ANSI colour around it, does not parse and keeps empty fields. Fix the emitter or
+          # revisit this if either shape appears.
           - id: json-body
             type: json_parser
             if: 'body matches "^\\s*\\{"'
             parse_from: body
             parse_to: attributes["krateo.parsed"]
             on_error: send_quiet
-          # Components emit both "ERROR" and "error" (93 of 259 error rows in 6h were lowercase), and
-          # severity_parser keeps the text as written, so SeverityText IN ('ERROR', 'FATAL') would miss
-          # them. This belongs here and not in `transform`: that processor also runs on logs/audit, and
-          # krateo-audit-worm hashes SeverityText, so audit records must stay as they were written.
-          - id: json-level-upper
+          # Reads `level` (slog, zap) or `severity_text` (the OTel shape krateo-audit-worm and the
+          # budget evaluator emit). Upper-casing keeps SeverityText to one spelling per level: both
+          # "ERROR" and "error" are live, 93 of 259 error rows in 6h being lowercase. It belongs here
+          # and not in `transform`, which also runs on logs/audit, because krateo-audit-worm hashes
+          # SeverityText and audit records must stay as written. Numeric levels are skipped: they
+          # would become SeverityText "30" with SeverityNumber 0.
+          - id: json-severity-text
             type: add
-            if: 'type(attributes["krateo.parsed"]?.level) == "string"'
-            field: attributes["krateo.parsed"].level
-            value: 'EXPR(upper(attributes["krateo.parsed"].level))'
+            if: 'type(attributes["krateo.parsed"]?.level) == "string" or type(attributes["krateo.parsed"]?.severity_text) == "string"'
+            field: attributes["krateo.parsed"]._severity
+            value: 'EXPR(upper(type(attributes["krateo.parsed"].level) == "string" ? attributes["krateo.parsed"].level : attributes["krateo.parsed"].severity_text))'
             on_error: send_quiet
-          # String levels only: a numeric level would otherwise become SeverityText "30" with
-          # SeverityNumber 0. The mapping covers slog's offset levels, which the default mapping leaves
-          # at SeverityNumber 0. oasgen-provider logs DEBUG+3 (92,926 rows in 6h). CRITICAL and PANIC are
-          # also missing from the default mapping, which would rank them below every other level.
+          # SeverityText is the level as emitted, so filter on SeverityNumber, not text: PANIC and
+          # ERROR+1 are errors whose text is not "ERROR". The mapping adds what the default mapping
+          # leaves at SeverityNumber 0: slog's +1 to +3 offsets (oasgen-provider logs DEBUG+3, 92,926
+          # rows in 6h), ERROR+4 and DEBUG-4 (how slog prints custom FATAL and TRACE levels), and
+          # CRITICAL/PANIC. Any other level, such as NOTICE, keeps its text with SeverityNumber 0.
           - id: json-severity
             type: severity_parser
-            if: 'type(attributes["krateo.parsed"]?.level) == "string"'
-            parse_from: attributes["krateo.parsed"].level
+            if: 'attributes["krateo.parsed"]?._severity != nil'
+            parse_from: attributes["krateo.parsed"]._severity
             on_error: send_quiet
             mapping:
+              trace: DEBUG-4
               debug2: DEBUG+1
               debug3: DEBUG+2
               debug4: DEBUG+3
@@ -111,10 +119,14 @@ opentelemetry-collector:
               error2: ERROR+1
               error3: ERROR+2
               error4: ERROR+3
+              fatal: ERROR+4
               fatal2: [CRITICAL, PANIC, DPANIC]
+          # A W3C trace id only: trace_parser pads or truncates other lengths into an id that joins to
+          # nothing. camelCase `traceId` is plumbing's 9-character shortid and is deliberately not
+          # read. SpanId is set only together with a valid trace_id.
           - id: json-trace
             type: trace_parser
-            if: 'attributes["krateo.parsed"]?.trace_id != nil'
+            if: 'type(attributes["krateo.parsed"]?.trace_id) == "string" and attributes["krateo.parsed"].trace_id matches "^[0-9a-fA-F]{32}$"'
             on_error: send_quiet
             trace_id:
               parse_from: attributes["krateo.parsed"].trace_id
@@ -124,6 +136,7 @@ opentelemetry-collector:
             type: remove
             if: 'attributes["krateo.parsed"] != nil'
             field: attributes["krateo.parsed"]
+            on_error: send_quiet
 
       hostmetrics:
         collection_interval: 60s

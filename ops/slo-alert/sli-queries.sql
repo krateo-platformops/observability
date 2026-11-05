@@ -64,7 +64,7 @@ ORDER BY within_target_pct ASC;
 SELECT
     toStartOfFiveMinutes(Timestamp)                       AS bucket,
     ResourceAttributes['k8s.namespace.name']              AS namespace,
-    countIf(SeverityText IN ('ERROR', 'FATAL'))           AS errors,
+    countIf(SeverityNumber >= 17)                         AS errors,
     count()                                               AS total_lines
 FROM otel_logs
 WHERE ResourceAttributes['telemetry.source'] != 'k8s-events'

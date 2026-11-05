@@ -162,7 +162,7 @@ fi
 # ---------------------------------------------------------------------------
 log ""
 log "=== Alert 3: Error-Rate SLO ==="
-ERROR_QUERY="SeverityText IN ('ERROR', 'FATAL') AND ResourceAttributes['telemetry.source'] != 'k8s-events'"
+ERROR_QUERY="SeverityNumber >= 17 AND ResourceAttributes['telemetry.source'] != 'k8s-events'"
 
 ERROR_SS_ID=$(create_saved_search "SLO Error Rate" "$ERROR_QUERY")
 if [ -n "$ERROR_SS_ID" ]; then
