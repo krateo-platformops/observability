@@ -45,8 +45,12 @@ type: application
 # a gate: nothing here compares a PR's chart version against what is already published.
 # 0.1.20: bump the sse-proxy image to 1.3.1: grpc and the OTel Go SDK updated, built with Go 1.26, and
 # a LICENSE added. No behaviour change. Smoke-tested locally only, not yet on a cluster.
-version: 0.1.20
-appVersion: "1.3.1"
+# 0.1.21: bump the sse-proxy image to 1.4.0. BREAKING for any client still sending a token in the query
+# string: it gets 401, even with valid credentials (sse-proxy#40). Every cluster running this proxy has
+# a frontend past that, 1.8.13 or later. Also answers CORS preflights itself, so a portal on another
+# origin connects without a gateway answering them; a0-openstack-d3's bell needs this.
+version: 0.1.21
+appVersion: "1.4.0"
 home: https://krateo.io
 icon: https://github.com/krateoplatformops/krateo/blob/main/docs/media/logo.svg
 keywords:
