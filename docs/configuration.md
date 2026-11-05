@@ -189,6 +189,12 @@ Wraps the same upstream chart in `daemonset` mode, stock
 - `config.receivers`: `filelog` with a container parser + multiline recombine;
   `hostmetrics`/`kubeletstats` at 60s (kubeletstats adds pod/container cpu+memory
   limit/request utilization and uptime metrics).
+- **JSON log lines** (0.1.17, #54): `filelog` promotes a string `level` to `SeverityText`
+  (upper case) and `SeverityNumber`, and top-level `trace_id`/`span_id` to `TraceId`/`SpanId`.
+  `Body` stays the raw line and `LogAttributes` are unchanged. Non-JSON lines, and JSON lines
+  without `level`, keep an empty `SeverityText`. slog offset levels such as `DEBUG+3` keep their
+  text and get the matching `SeverityNumber`, so prefer `SeverityNumber` for range filters.
+  camelCase `traceId` is plumbing's shortid and is deliberately not mapped.
 - `config.processors.transform`: strips ANSI escapes from log bodies and copies the pod
   label `krateo.io/composition-id` into the log attributes (label-based attribution —
   the daemonset does not run `compositionresolver`).
