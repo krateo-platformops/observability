@@ -45,6 +45,8 @@ opentelemetry-collector:
     # Renamed otelcol-krateo -> krateo-otel-collector when the custom collector was split
     # into its own single-image repo (krateo-platformops/otel-collector) on the canonical CI.
     repository: ghcr.io/krateo-platformops/otel-collector
+    # 1.0.6: same code as 1.0.5, tagged from the first commit whose CI ran the Go tests. The
+    #        installer's pin gate refuses a tag no test ran against.
     # 1.0.5: adds transformprocessor, so this chart can redact JWTs on the k8sobjects logs
     #        pipeline (otel-collector#29).
     # 1.0.4: compositionresolver invalidates the RESTMapper on a NO-MATCH, so a composition
@@ -56,7 +58,7 @@ opentelemetry-collector:
     # 1.0.2: + patched clickhouseexporter — recreate the otel_* schema and retry on UNKNOWN_TABLE
     #        (ClickHouse re-provisioned with a fresh DB) instead of dropping data until a restart.
     # 1.0.1: patched k8sobjectsreceiver (recycle timer + restart-on-close) — KOS-1 #112 bug #2
-    tag: "1.0.5"
+    tag: "1.0.6"
     pullPolicy: IfNotPresent
 
   # The container binary is still named otelcol-krateo (OTel builder dist.name / Dockerfile
