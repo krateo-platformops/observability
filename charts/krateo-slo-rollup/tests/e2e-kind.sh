@@ -53,9 +53,10 @@ install() { # install <chart-dir> [helm args]
   # Every run below is triggered by hand: a schedule firing on its own would change the state between steps.
   k patch cronjob "$REL-apply" -p '{"spec":{"suspend":true}}' >/dev/null
 }
-JOBN=0
 run() { # run : trigger apply, wait, print Complete|Failed; the log is left in $W/job.log
-  JOBN=$((JOBN+1)); local j="apply-$JOBN" c=""
+  # Callers use $(run), a subshell, so a shell counter would never advance: the Job count lives in a file.
+  local n; n=$(( $(cat "$W/jobn" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$W/jobn"
+  local j="apply-$n" c=""
   k create job "$j" --from="cronjob/$REL-apply" >/dev/null
   for _ in $(seq 1 90); do
     c=$(k get job "$j" -o jsonpath='{range .status.conditions[?(@.status=="True")]}{.type}{"\n"}{end}' 2>/dev/null | grep -E '^(Complete|Failed)$' | head -1)
