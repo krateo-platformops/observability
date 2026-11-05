@@ -190,8 +190,8 @@ Wraps the same upstream chart in `daemonset` mode, stock
   `hostmetrics`/`kubeletstats` at 60s (kubeletstats adds pod/container cpu+memory
   limit/request utilization and uptime metrics).
 - **JSON log lines** (0.1.17, #54): `filelog` promotes a string `level` or `severity_text` to
-  `SeverityText` (upper case) and `SeverityNumber`, and a 32-hex `trace_id` to `TraceId`, with
-  `span_id` to `SpanId` alongside it. `Body` stays the raw line and `LogAttributes` are unchanged.
+  `SeverityText` (upper case) and `SeverityNumber`, and a 32-hex `trace_id` to `TraceId`, with a
+  16-hex `span_id` to `SpanId` alongside it. `Body` stays the raw line and `LogAttributes` are unchanged.
   Non-JSON lines, and JSON lines with neither key, keep an empty `SeverityText`. Filter on
   `SeverityNumber >= 17` for errors, because `SeverityText` is the level as emitted: `PANIC` and
   `ERROR+1` are errors too. Unknown levels keep their text with `SeverityNumber` 0. camelCase

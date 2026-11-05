@@ -176,7 +176,7 @@ Defaults:
 | Availability | ≥ 99.9 % | 30-day rolling |
 | API request latency | p95 ≤ 500 ms | 5-minute buckets |
 | UI interaction latency | p95 ≤ 2 s | 5-minute buckets |
-| Error-rate | ≤ 10 ERROR/FATAL lines / 5 m / namespace | 5-minute buckets |
+| Error-rate | ≤ 10 lines at `SeverityNumber >= 17` / 5 m / namespace, excluding the observability stack and `krateo-budget-evaluator` | 5-minute buckets |
 
 **Error budget:** at 99.9 % availability the monthly budget is ~43 minutes of
 failed requests. The burn-rate query in `sli-queries.sql` reports consumption;
