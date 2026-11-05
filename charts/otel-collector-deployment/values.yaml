@@ -292,7 +292,11 @@ opentelemetry-collector:
         logs:
           receivers: [k8sobjects]
           # transform runs after compositionresolver, which reads the map body, and last before
-          # batch so anything an earlier processor added is swept too.
+          # batch so it sweeps log attributes added by earlier processors. It does not touch
+          # resource attributes: 0 JWT-shaped values in them on krateo-057 over 7 days.
+          #
+          # This collector needs an image with transform, 1.0.5 or later. Older images crash-loop
+          # at startup with: unknown type: "transform".
           processors: [memory_limiter, k8sattributes, resource, compositionresolver, transform, batch]
           exporters: [clickhouse]
         # To enable the Prometheus -> OTLP bridge: restore the prometheus receiver (nulled by

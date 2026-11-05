@@ -201,6 +201,18 @@
               "type": "object",
               "additionalProperties": true,
               "properties": {
+                "transform": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "error_mode": {
+                      "type": "string"
+                    },
+                    "log_statements": {
+                      "type": "array"
+                    }
+                  }
+                },
                 "batch": {
                   "type": "object",
                   "additionalProperties": true,

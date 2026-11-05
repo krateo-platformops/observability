@@ -111,7 +111,10 @@ type: application
 # SeverityText is upper-cased in the filelog operators, not in `transform`, so logs/audit is untouched.
 # Non-JSON lines are unchanged. TraceId stays empty for snowplow until snowplow#1184 moves its
 # request-path WARN/ERROR sites to the *Context calls that stamp trace_id.
-version: 0.1.17
+# 0.1.18: JWT redaction on log bodies targets body.string, so it also covers a map body on the OTLP
+# arms, logs/audit included. Every OTLP body on krateo-057 is a string today, so nothing leaked and
+# no record changes until one matches.
+version: 0.1.18
 appVersion: "0.158.0"
 dependencies:
   - name: opentelemetry-collector

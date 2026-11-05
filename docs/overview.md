@@ -36,8 +36,8 @@ a `values.schema.json` per chart so `core-provider` can generate typed compositi
 | `charts/clickhouse-operator` | `clickhouse-operator` | `oci://ghcr.io/krateo-platformops/charts/clickhouse-operator` | `0.1.0`, wraps `clickhouse-operator-helm 0.0.5` |
 | `charts/mongodb-operator` | `mongodb-operator` | `oci://ghcr.io/krateo-platformops/charts/mongodb-operator` | `0.1.0`, wraps `community-operator 0.13.0` |
 | `charts/krateo-observability` | `krateo-observability` | `oci://ghcr.io/krateo-platformops/charts/krateo-observability` | `0.1.11`, `appVersion 3.0.2` |
-| `charts/otel-collector-deployment` | `otel-collector-deployment` | `oci://ghcr.io/krateo-platformops/charts/otel-collector-deployment` | `0.3.3`, image `otel-collector:1.0.2` |
-| `charts/otel-collector-daemonset` | `otel-collector-daemonset` | `oci://ghcr.io/krateo-platformops/charts/otel-collector-daemonset` | `0.1.5` |
+| `charts/otel-collector-deployment` | `otel-collector-deployment` | `oci://ghcr.io/krateo-platformops/charts/otel-collector-deployment` | `0.3.13`, image `otel-collector:1.0.5` |
+| `charts/otel-collector-daemonset` | `otel-collector-daemonset` | `oci://ghcr.io/krateo-platformops/charts/otel-collector-daemonset` | `0.1.18` |
 | `charts/krateo-sse-proxy` | `krateo-sse-proxy` | `oci://ghcr.io/krateo-platformops/charts/krateo-sse-proxy` | `0.1.6`, image `sse-proxy:1.1.2` |
 
 All six versions are **literally pinned** in each `Chart.yaml` (no `CHART_VERSION`
