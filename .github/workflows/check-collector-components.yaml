@@ -1,0 +1,38 @@
+# Gate: a collector chart must not configure a component its pinned image lacks.
+#
+# lint.yaml renders each chart but never runs the image, and a config naming a missing component
+# renders cleanly. Only the collector validates its own component set, at startup, so without this
+# the failure lands on a cluster, which is how otel-collector-deployment 0.3.9 crash-looped.
+#
+# It is a separate workflow on purpose. lint.yaml is the org-wide canonical chart-repo lint,
+# identical across every krateo-* chart repo.
+
+name: check-collector-components
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  components:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Add the dependency repository
+        run: helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+      - name: Assert every configured component exists in the pinned image
+        run: python3 hack/check-collector-components.py .
