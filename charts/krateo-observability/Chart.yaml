@@ -82,7 +82,10 @@ type: application
 # `krateo-autopilot`, which matched 0 of 26.74M rows over 7 days on krateo-057. sre-jwt-in-telemetry
 # drops its ServiceName exclusion altogether, because it hid the services most likely to leak a token,
 # kagent among them, and this regex cannot match its own query. No default alert's count changes.
-version: 0.1.27
+# 0.1.28: HyperDX's own traces and metrics go to the node-local agent (G13). The upstream default named
+# the disabled collector subchart, so none arrived. Logs stay off OTLP, because filelog has them, and
+# traces are sampled at 5%. The endpoint must stay set: without one the SDK defaults to HyperDX's cloud.
+version: 0.1.28
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack
