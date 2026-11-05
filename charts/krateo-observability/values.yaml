@@ -289,13 +289,15 @@ defaultAlerts:
     # a redaction bug into a telemetry outage, so the detector is the only thing that survives a
     # skipped statement. Matches the JWT SHAPE, not the string 'eyJ': a redacted row carries
     # <REDACTED-JWT> and must not match, which is the control measured below.
-    # Unlike the other log alerts this one is NOT scoped to telemetry.source = '': that would hide
-    # k8s-events, the stream from the deployment collector, and a token there must fire too. The
-    # ServiceName exclusion still applies; those rows have an empty ServiceName, so they pass it.
+    # Unlike the other log alerts this one has neither telemetry.source = '' nor a ServiceName
+    # exclusion, deliberately. Rule 3's exclusion stops an alert matching its own query text echoed
+    # into logs, and this regex cannot match itself. The excluded services are the ones most likely
+    # to leak: agents pass `--token eyJ...` on every kubectl call, and a token in HyperDX's own logs
+    # is still a token in the store. Measured with no exclusions: 0 rows over 7 days on krateo-057.
     - name: sre-jwt-in-telemetry
       tier: core
       displayName: JWT leaked into telemetry
-      where: 'ServiceName NOT IN (''krateo-observability'', ''krateo-alert-troubleshooter'', ''krateo-alert-provider'', ''incident-controller'', ''incident-provider'', ''krateo-clickstack'', ''krateo-clickstack-clickhouse-clickhouse'', ''krateo-clickstack-keeper-keeper'', ''krateo-clickstack-mongodb'', ''clickhouse-mcp-server'', ''clickhouse-operator'', ''incident-agent'', ''autopilot'', ''kagent'', ''repo-mcp-server'') AND (match(Body, ''eyJ[A-Za-z0-9._-]{20,}'') OR match(toString(mapValues(LogAttributes)), ''eyJ[A-Za-z0-9._-]{20,}''))'
+      where: '(match(Body, ''eyJ[A-Za-z0-9._-]{20,}'') OR match(toString(mapValues(LogAttributes)), ''eyJ[A-Za-z0-9._-]{20,}''))'
       threshold: 1
       thresholdType: above
       interval: 15m

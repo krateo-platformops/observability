@@ -133,9 +133,11 @@ about whether your cluster has that problem.
 
 ### `sre-jwt-in-telemetry`: a zero that is not vacuous
 
-Unlike the other log alerts, this one is not scoped to `telemetry.source = ''`, so it also reads
-`k8s-events` (chart 0.1.26). That scope would hide the stream from the deployment collector, and a
-token there has to fire too. Its `ServiceName` exclusion still applies.
+Unlike the other log alerts, this one has neither `telemetry.source = ''` nor a `ServiceName`
+exclusion. The first would hide `k8s-events` (chart 0.1.26). The second (chart 0.1.27) exists to stop
+an alert matching its own query text, and this regex cannot match itself, while the excluded services
+are the likeliest to leak: agents pass `--token eyJ...` on every kubectl call. This is the one
+deliberate exception to rule 3.
 
 This one's 7-day count is **0**, and by the rule above a zero normally establishes nothing about
 whether the clause evaluates. It is established here by a **control arm** measured in the same
