@@ -1,7 +1,7 @@
 ---
 type: Configuration
 title: observability — the default alert set
-description: The 26 Alert CRs the chart seeds, the measured evidence behind every filter and threshold, and the three rules that decide whether an Alert can fire at all — `where` is ClickHouse SQL and not the Lucene the CRD advertises, SeverityText is empty on every row, and log alerts must exclude the observability stack or they diagnose themselves. Event alerts skip the DELETED copy of an expired Event.
+description: The 26 Alert CRs the chart seeds, the measured evidence behind every filter and threshold, and the three rules that decide whether an Alert can fire at all — `where` is ClickHouse SQL and not the Lucene the CRD advertises, severity needs `otel-collector-daemonset` ≥ 0.1.17 and JSON logs, and log alerts must exclude the observability stack or they diagnose themselves. Event alerts skip the DELETED copy of an expired Event.
 resource: oci://ghcr.io/krateo-platformops/charts/krateo-observability
 tags: [alerting, alerts, observability, clickhouse, hyperdx, sre, runbook]
 timestamp: 2026-09-18T00:00:00Z
@@ -32,8 +32,12 @@ WHERE (Body:"MemoryPressure" OR Body:"DiskPressure")
 -> Code: 62. DB::Exception: Syntax error: failed at position 110 (Body) ... (SYNTAX_ERROR)
 ```
 
-**2. Never filter on `SeverityText`** — this OTel pipeline leaves it empty on every row.
-Measured over 24h: **0 non-empty of 8,140,061**. Any severity predicate counts zero forever.
+**2. Filter on `SeverityNumber`, and only with `otel-collector-daemonset` ≥ 0.1.17 live.** Before
+0.1.17 the pipeline left severity empty on every row (measured over 24h: **0 non-empty of
+8,140,061**), so a severity predicate counts zero forever, and that still applies to any cluster on
+an older chart. From 0.1.17, JSON log lines carry it, but non-JSON lines stay empty, so an alert on a
+component that doesn't log JSON must still filter on `Body`. Use `SeverityNumber >= 17`, not
+`SeverityText`: the text is the level as emitted, so `PANIC` and `ERROR+1` don't match `'ERROR'`.
 
 **3. Log alerts must exclude the observability stack; event alerts need not.** HyperDX writes
 the query it is running into its own container logs, so a log alert searching for a word finds

@@ -105,7 +105,13 @@ type: application
 # improve p95. Depends on snowplow #1061 (Fixes #1060, expected in 1.12.65), which forwards the key
 # only as bool true on krateo.composition.open / form.submit / page.publish; until then it matches
 # nothing. The traces/logs/metrics pipelines are unchanged.
-version: 0.1.16
+# 0.1.17: #54 — filelog promotes `level` or `severity_text`, and a W3C `trace_id` with `span_id`, from
+# JSON log lines into SeverityText, SeverityNumber, TraceId and SpanId. Body stays the raw line and
+# LogAttributes are unchanged, because the parsed copy is scratch space removed in the receiver.
+# SeverityText is upper-cased in the filelog operators, not in `transform`, so logs/audit is untouched.
+# Non-JSON lines are unchanged. TraceId stays empty for snowplow until snowplow#1184 moves its
+# request-path WARN/ERROR sites to the *Context calls that stamp trace_id.
+version: 0.1.17
 appVersion: "0.158.0"
 dependencies:
   - name: opentelemetry-collector

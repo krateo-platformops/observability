@@ -60,14 +60,16 @@ GROUP BY service
 ORDER BY within_target_pct ASC;
 
 -- === SLI 3: Error-rate (per namespace, 5m buckets) =========================
--- Application ERROR/FATAL log lines (excludes k8s events).
+-- Application log lines at ERROR or above. Excludes k8s events, the observability stack (rule 3 in
+-- docs/alerts.md) and krateo-budget-evaluator, whose ERROR lines are breached budgets.
 SELECT
     toStartOfFiveMinutes(Timestamp)                       AS bucket,
     ResourceAttributes['k8s.namespace.name']              AS namespace,
-    countIf(SeverityText IN ('ERROR', 'FATAL'))           AS errors,
+    countIf(SeverityNumber >= 17)                         AS errors,
     count()                                               AS total_lines
 FROM otel_logs
 WHERE ResourceAttributes['telemetry.source'] != 'k8s-events'
+  AND ServiceName NOT IN ('krateo-observability', 'krateo-alert-troubleshooter', 'krateo-alert-provider', 'incident-controller', 'incident-provider', 'krateo-clickstack', 'krateo-clickstack-clickhouse-clickhouse', 'krateo-clickstack-keeper-keeper', 'krateo-clickstack-mongodb', 'clickhouse-mcp-server', 'clickhouse-operator', 'incident-agent', 'krateo-autopilot', 'kagent', 'repo-mcp-server', 'krateo-budget-evaluator')
   AND Timestamp >= now() - INTERVAL 24 HOUR
 GROUP BY bucket, namespace
 ORDER BY bucket, namespace;
