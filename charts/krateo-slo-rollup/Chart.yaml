@@ -8,7 +8,8 @@ type: application
 # No appVersion: this chart ships no first-party image. The DDL and the apply logic live in the
 # chart's own ConfigMap and run on the upstream ClickHouse client image, so the chart version IS the
 # logic version.
-version: 0.1.0
+# 0.1.1: the client image is pinned by digest.
+version: 0.1.1
 keywords:
   - slo
   - rollup

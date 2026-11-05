@@ -37,8 +37,10 @@ rollup:
 
 image:
   repository: clickhouse/clickhouse-server
-  # The client matches the server the platform runs (krateo-observability's 26.8).
-  tag: "26.8-alpine"
+  # The client matches the server the platform runs (krateo-observability's 26.8). Pinned by digest
+  # (the multi-arch index): the upstream tag moves, and with IfNotPresent two nodes could otherwise
+  # run different builds of the same tag. Move tag and digest together.
+  tag: "26.8-alpine@sha256:f5443f9ffa48f0154cdd50cab39fed732201762574a27f04f1f564bbba81832d"
   pullPolicy: IfNotPresent
 
 # The apply CronJob: creates the objects if they are missing, applies a TTL change, and fails the
