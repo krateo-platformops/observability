@@ -78,7 +78,10 @@ type: application
 # 0.1.26: sre-jwt-in-telemetry also watches k8s-events. Its telemetry.source = '' scope hid that
 # stream, the one path without redaction since otel-collector-deployment 0.3.10, so the detector
 # could not see a leak there. The comment on severity filters is updated for daemonset 0.1.17.
-version: 0.1.26
+# 0.1.27: the alert exclusions name the orchestrator `autopilot`, its real ServiceName. They said
+# `krateo-autopilot`, which matched 0 of 26.74M rows over 7 days on krateo-057, so the agent was never
+# excluded. No alert count changes today, because none of the 7 filters matches its rows.
+version: 0.1.27
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack
