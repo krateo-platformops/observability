@@ -62,9 +62,9 @@ opentelemetry-collector:
             overwrite_with: oldest
           # #54: promote severity and trace context out of JSON log lines. Without these, SeverityText
           # and TraceId stay empty on every filelog row. Five operators, not one json_parser with
-          # severity/trace blocks, because inside json_parser a line with no `level` raises an error
-          # that also abandons its trace parsing, and krateo-clickstack-mongodb logs JSON without
-          # `level` (measured on krateo-057: 45,203 of 450,493 JSON rows in 6h).
+          # severity/trace blocks, because inside json_parser a line with no `level` makes the
+          # collector log an error with a stack trace, once per line, and krateo-clickstack-mongodb
+          # logs JSON without `level` (measured on krateo-057: 45,203 of 450,493 JSON rows in 6h).
           #
           # Body stays the raw line: the default alerts, the portal and nightly-review all read
           # fields out of Body. `krateo.parsed` is scratch space and json-cleanup removes it, so
