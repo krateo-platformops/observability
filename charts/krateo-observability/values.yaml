@@ -608,6 +608,37 @@ clickstack:
         requests:
           cpu: 100m
           memory: 512Mi
+      # HyperDX's own telemetry goes to the node-local agent, the same way sse-proxy and snowplow send
+      # theirs. Upstream's default endpoint names the bundled collector subchart, which this chart
+      # disables, so nothing arrived: 0 spans from HyperDX in 7 days on krateo-057.
+      #
+      # DO NOT REMOVE OTEL_EXPORTER_OTLP_ENDPOINT to turn this off. With no endpoint the SDK defaults
+      # to https://in-otel.hyperdx.io, and HYPERDX_API_KEY is set. To stop exporting, set the
+      # OTEL_*_EXPORTER variables to none and keep the endpoint.
+      #
+      # env wins over the envFrom ConfigMap that carries upstream's defaults.
+      env:
+        # $(HOST_IP) is expanded by the kubelet, so HOST_IP must stay above its first use.
+        - name: HOST_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: http://$(HOST_IP):4318
+        # The same name its pod logs get, so the alert exclusions cover this telemetry too.
+        - name: OTEL_SERVICE_NAME
+          value: krateo-observability
+        # filelog already collects these logs. Exporting them as well would store every line twice.
+        # none also stops the pino transport that HYPERDX_API_KEY enables.
+        - name: OTEL_LOGS_EXPORTER
+          value: none
+        - name: HDX_NODE_CONSOLE_CAPTURE
+          value: "false"
+        # Unsampled, every request is about 15 spans, against 9k spans a day for the whole platform.
+        - name: OTEL_TRACES_SAMPLER
+          value: traceidratio
+        - name: OTEL_TRACES_SAMPLER_ARG
+          value: "0.05"
 
   mongodb:
     enabled: true

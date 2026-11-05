@@ -12,6 +12,13 @@ timestamp: 2026-08-07T00:00:00Z
 Curated, newest first. Release notes live in GitHub Releases; the `Chart.yaml` comment
 blocks carry the per-bump rationale.
 
+- **2026-11-05 — HyperDX self-telemetry reaches a real collector (krateo-observability 0.1.28).** Its
+  endpoint named the bundled collector subchart this chart disables, so 0 spans arrived in 7 days. It
+  now uses the node-local agent. Logs stay off OTLP because `filelog` already has them, and traces are
+  sampled at 5%. Run against HyperDX 2.35.0 locally: 0 OTLP logs, sampling honoured, service name
+  correct. Never unset the endpoint to disable this: the SDK then defaults to `in-otel.hyperdx.io`,
+  and `HYPERDX_API_KEY` is set.
+
 - **2026-11-05 — alert exclusions name the real agent (krateo-observability 0.1.27).** Six alert
   filters excluded `krateo-autopilot`, which matches no rows; the agent's `ServiceName` is `autopilot`.
   No default alert's count changes today, but the `ops/` error queries, which have no text filter,
