@@ -60,8 +60,10 @@ type: application
 # (otel-collector#29). This does NOT restore the 0.3.9 statements: k8sobjects bodies are nested maps,
 # which replace_pattern(body, ...) leaves untouched, so this targets body.string. Clean records stay
 # maps. Requires otel-collector 1.0.5, which this chart sets itself.
-version: 0.3.13
-appVersion: "1.0.5"
+# 0.3.14: image 1.0.6, the same code as 1.0.5. The installer's pin gate refused 1.0.5 because no CI
+# ran the Go tests at that tag. Requires 1.0.5 or later, for transform.
+version: 0.3.14
+appVersion: "1.0.6"
 dependencies:
   - name: opentelemetry-collector
     version: 0.170.0
