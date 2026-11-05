@@ -12,6 +12,13 @@ timestamp: 2026-08-07T00:00:00Z
 Curated, newest first. Release notes live in GitHub Releases; the `Chart.yaml` comment
 blocks carry the per-bump rationale.
 
+- **2026-11-05 — alert exclusions name the real agent (krateo-observability 0.1.27).** Six alert
+  filters excluded `krateo-autopilot`, which matches no rows; the agent's `ServiceName` is `autopilot`.
+  No default alert's count changes today, but the `ops/` error queries, which have no text filter,
+  stop counting its rows. `sre-jwt-in-telemetry` loses its `ServiceName` exclusion: it hid the services
+  most likely to leak a token, and its regex cannot match its own query. This ships separately from
+  the `agentiko` rename, and both names must stay listed across that roll.
+
 - **2026-11-05 — JWT redaction on `k8sobjects` (otel-collector-deployment 0.3.13, daemonset 0.1.18).**
   The `k8sobjects` stream was the one log pipeline without redaction (installer#394). Image 1.0.5
   adds `transformprocessor`, and installer-managed clusters get this through the pin bump. The 0.3.9

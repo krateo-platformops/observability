@@ -69,7 +69,7 @@ SELECT
     count()                                               AS total_lines
 FROM otel_logs
 WHERE ResourceAttributes['telemetry.source'] != 'k8s-events'
-  AND ServiceName NOT IN ('krateo-observability', 'krateo-alert-troubleshooter', 'krateo-alert-provider', 'incident-controller', 'incident-provider', 'krateo-clickstack', 'krateo-clickstack-clickhouse-clickhouse', 'krateo-clickstack-keeper-keeper', 'krateo-clickstack-mongodb', 'clickhouse-mcp-server', 'clickhouse-operator', 'incident-agent', 'krateo-autopilot', 'kagent', 'repo-mcp-server', 'krateo-budget-evaluator')
+  AND ServiceName NOT IN ('krateo-observability', 'krateo-alert-troubleshooter', 'krateo-alert-provider', 'incident-controller', 'incident-provider', 'krateo-clickstack', 'krateo-clickstack-clickhouse-clickhouse', 'krateo-clickstack-keeper-keeper', 'krateo-clickstack-mongodb', 'clickhouse-mcp-server', 'clickhouse-operator', 'incident-agent', 'autopilot', 'kagent', 'repo-mcp-server', 'krateo-budget-evaluator')
   AND Timestamp >= now() - INTERVAL 24 HOUR
 GROUP BY bucket, namespace
 ORDER BY bucket, namespace;
