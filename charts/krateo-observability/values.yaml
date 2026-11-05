@@ -96,9 +96,10 @@ defaultAlerts:
   #         WHERE (Body:"MemoryPressure" OR Body:"DiskPressure")
   #         -> Code: 62. DB::Exception: Syntax error ... (SYNTAX_ERROR)
   #     The alert then sits at OK forever, indistinguishable from a healthy cluster.
-  #  2. NEVER filter on SeverityText. This OTel pipeline leaves it empty on every row: measured
-  #     0 non-empty of 8,140,061 rows over 24h. Any severity predicate counts zero forever.
-  #     Filter on Body, or on the event's own JSON.
+  #  2. Do not filter on severity here. Before otel-collector-daemonset 0.1.17 it was empty on every
+  #     row (0 non-empty of 8,140,061 over 24h), and this chart can install alongside an older
+  #     collector, where a severity predicate counts zero forever. From 0.1.17 only JSON log lines
+  #     carry it. Filter on Body, or on the event's own JSON. Elsewhere, use SeverityNumber >= 17.
   #  3. A LOG alert must exclude the observability stack; an EVENT alert need not. HyperDX writes
   #     the query it is running into its own container logs, so a log alert searching for a word
   #     finds the line in which the platform echoed that very word and diagnoses itself. Container
@@ -287,10 +288,13 @@ defaultAlerts:
     # a redaction bug into a telemetry outage, so the detector is the only thing that survives a
     # skipped statement. Matches the JWT SHAPE, not the string 'eyJ': a redacted row carries
     # <REDACTED-JWT> and must not match, which is the control measured below.
+    # Unlike the other log alerts this one is NOT scoped to telemetry.source = '': that would hide
+    # k8s-events, the stream from the deployment collector, and a token there must fire too. The
+    # ServiceName exclusion still applies; those rows have an empty ServiceName, so they pass it.
     - name: sre-jwt-in-telemetry
       tier: core
       displayName: JWT leaked into telemetry
-      where: 'ResourceAttributes[''telemetry.source''] = '''' AND ServiceName NOT IN (''krateo-observability'', ''krateo-alert-troubleshooter'', ''krateo-alert-provider'', ''incident-controller'', ''incident-provider'', ''krateo-clickstack'', ''krateo-clickstack-clickhouse-clickhouse'', ''krateo-clickstack-keeper-keeper'', ''krateo-clickstack-mongodb'', ''clickhouse-mcp-server'', ''clickhouse-operator'', ''incident-agent'', ''krateo-autopilot'', ''kagent'', ''repo-mcp-server'') AND (match(Body, ''eyJ[A-Za-z0-9._-]{20,}'') OR match(toString(mapValues(LogAttributes)), ''eyJ[A-Za-z0-9._-]{20,}''))'
+      where: 'ServiceName NOT IN (''krateo-observability'', ''krateo-alert-troubleshooter'', ''krateo-alert-provider'', ''incident-controller'', ''incident-provider'', ''krateo-clickstack'', ''krateo-clickstack-clickhouse-clickhouse'', ''krateo-clickstack-keeper-keeper'', ''krateo-clickstack-mongodb'', ''clickhouse-mcp-server'', ''clickhouse-operator'', ''incident-agent'', ''krateo-autopilot'', ''kagent'', ''repo-mcp-server'') AND (match(Body, ''eyJ[A-Za-z0-9._-]{20,}'') OR match(toString(mapValues(LogAttributes)), ''eyJ[A-Za-z0-9._-]{20,}''))'
       threshold: 1
       thresholdType: above
       interval: 15m
