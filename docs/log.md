@@ -12,6 +12,11 @@ timestamp: 2026-08-07T00:00:00Z
 Curated, newest first. Release notes live in GitHub Releases; the `Chart.yaml` comment
 blocks carry the per-bump rationale.
 
+- **2026-11-05 — `sse-proxy` 1.4.0 (krateo-sse-proxy 0.1.21).** Refuses a token in the query string
+  on every path, even with valid credentials, and answers CORS preflights before authentication.
+  Without that, a portal on another origin can't connect unless a gateway answers them, which left the
+  bell down on a0-openstack-d3. See krateo-platformops/sse-proxy#40.
+
 - **2026-11-05 — HyperDX self-telemetry reaches a real collector (krateo-observability 0.1.28).** Its
   endpoint named the bundled collector subchart this chart disables, so 0 spans arrived in 7 days. It
   now uses the node-local agent. Logs stay off OTLP because `filelog` already has them, and traces are

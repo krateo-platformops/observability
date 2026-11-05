@@ -240,7 +240,7 @@ Wraps the same upstream chart in `daemonset` mode, stock
   the portal bell. A single hub eliminates the split; the poller resumes from `lastSeenUnix`
   on restart. (To scale >1: gate readiness on poller health + add session affinity, or move
   to a shared event store.)
-- `image`: `registry: ghcr.io` + `repository: krateo-platformops/sse-proxy` + `tag: "1.3.1"`
+- `image`: `registry: ghcr.io` + `repository: krateo-platformops/sse-proxy` + `tag: "1.4.0"`
   (registry split out so a mirror relocation only swaps the host);
   `global.imageRegistry` overrides the registry host for mirror/air-gapped installs.
 - `service.type: ClusterIP`, `service.port: 8080`; container port 8080, `/health`
