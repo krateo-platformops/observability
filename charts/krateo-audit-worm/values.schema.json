@@ -70,7 +70,7 @@
         "enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Render the Alerts on the verifier line. Needs the Alert CRD from clickstack-agent."
+          "description": "Render the Alerts on the verifier line. Needs the Alert CRD from alert-provider-crd."
         }
       }
     },

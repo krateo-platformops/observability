@@ -4,8 +4,8 @@
   the silent alert would fire forever on a cluster without a verifier.
 
   They match the verifier's JSON line and not SeverityNumber, which older daemonset charts leave
-  empty. REQUIRES the Alert CRD, so this chart must install after clickstack-agent, or set
-  alerts.enabled=false.
+  empty. REQUIRES the Alert CRD, which alert-provider-crd owns, so this chart must install after it, or
+  set alerts.enabled=false.
 */ -}}
 {{- if .Values.alerts.enabled }}
 {{- $verifier := printf "ServiceName = '%s' AND JSONExtractString(Body, 'attributes', 'service.name') = 'krateo-audit-verifier'" (include "krateo-audit-worm.name" .) }}
