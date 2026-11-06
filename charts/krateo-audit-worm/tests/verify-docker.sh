@@ -31,7 +31,7 @@ PY
 docker run -d --name "$NAME" -e CLICKHOUSE_USER=e2e -e CLICKHOUSE_PASSWORD=e2e -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 -v "$W/scripts:/scripts:ro" "$IMAGE" >/dev/null
 CH() { docker exec -i "$NAME" clickhouse-client --user e2e --password e2e "$@"; }
 for _ in $(seq 1 60); do CH -q "SELECT 1" >/dev/null 2>&1 && break; sleep 1; done
-script() { docker exec -e CH_HOST=127.0.0.1 -e CH_PORT=9000 -e CH_DB=default -e CH_USER=e2e -e CH_PASSWORD=e2e -e LAG_SECONDS=0 "$NAME" sh "/scripts/$1.sh" 2>&1; }
+script() { docker exec -e CH_HOST=127.0.0.1 -e CH_PORT=9000 -e CH_DB=default -e CH_USER=e2e -e CH_PASSWORD=e2e -e LAG_SECONDS="${LAG:-0}" "$NAME" sh "/scripts/$1.sh" 2>&1; }
 # verify -> "<exit> <status> <problem_seals>"
 verify() {
   local out rc; out=$(script verify); rc=$?
@@ -73,8 +73,33 @@ CH -q "ALTER TABLE krateo_audit_seal DELETE WHERE seal_seq = 2 SETTINGS mutation
 expect "$(verify | cut -d' ' -f1,2)" "1 tampered" "a middle seal deleted"
 restore
 mutate "window_end = window_start" "seal_seq = 2"
-expect "$(verify)" "1 tampered 2:segment 2:seal" "a window narrowed so its rows fall outside it"
+expect "$(verify)" "1 tampered 2:segment 2:seal 3:window" "a window narrowed so its rows fall outside it"
 restore
+END3="(SELECT window_end FROM good_seal WHERE seal_seq = 3)"
+END4="(SELECT window_end FROM good_seal WHERE seal_seq = 4)"
+mutate "window_end = $END3" "seal_seq = 2"
+expect "$(verify)" "1 tampered 3:window" "a window widened over the next, empty one"
+restore
+mutate "window_end = $END4" "seal_seq = 3"
+expect "$(verify)" "1 tampered 4:window" "an empty window widened over rows"
+restore
+mutate "window_start = toDateTime64(1, 9)" "seal_seq = 3"
+expect "$(verify)" "1 tampered 3:window" "an empty window's start moved back over rows"
+restore
+mutate "window_end = window_start" "seal_seq = 3"
+CH -q "INSERT INTO krateo_audit_worm SELECT $END3 - toIntervalMillisecond(1), Timestamp, TraceId, SpanId, SeverityText, ServiceName, Body, ResourceAttributes, LogAttributes, row_hash FROM krateo_audit_worm LIMIT 1"
+expect "$(verify)" "1 tampered 4:window" "a valid row forged into a narrowed window's gap"
+CH -q "ALTER TABLE krateo_audit_worm DELETE WHERE ingested_at = $END3 - toIntervalMillisecond(1) SETTINGS mutations_sync = 2"
+restore
+mutate "seal_hash = 'a|b'" "seal_seq = 4"
+expect "$(verify)" "1 tampered 4:hash 4:seal" "a head seal_hash holding the separator"
+restore
+mutate "seal_hash = concat('a', char(39), 'b')" "seal_seq = 4"
+expect "$(verify)" "1 tampered 4:hash 4:seal" "a head seal_hash holding a quote"
+restore
+LAG=100000 script seal >/dev/null
+expect "$(CH -q "SELECT count() FROM krateo_audit_seal")" "4" "seal.lagSeconds raised: no inverted window written"
+expect "$(verify)" "0 ok " "seal.lagSeconds raised: still ok"
 CH -q "INSERT INTO krateo_audit_seal SELECT * FROM good_seal WHERE seal_seq = 2"
 expect "$(verify | cut -d' ' -f1,2)" "1 tampered" "a seal duplicated"
 restore
@@ -103,6 +128,13 @@ S=$(date +%s); R=$(verify); E=$(( $(date +%s) - S ))
 expect "$R" "0 ok " "$LONG_CHAIN seals: ok"
 expect "$(attr checked_seals)" "$LONG_CHAIN" "all $LONG_CHAIN seals checked"
 [ "$E" -le "$LIMIT" ] && pass "$LONG_CHAIN seals in ${E}s (limit ${LIMIT}s)" || fail "$LONG_CHAIN seals took ${E}s (limit ${LIMIT}s)"
+
+echo "== every seal damaged: the line must stay one parseable line =="
+CH -q "ALTER TABLE krateo_audit_seal UPDATE seal_hash = '' WHERE 1 SETTINGS mutations_sync = 2"
+expect "$(verify | cut -d' ' -f1,2)" "1 tampered" "the status survives"
+OUT=$(script verify | grep '"krateo.audit.status"' | tail -1)
+[ "${#OUT}" -le 102400 ] && pass "line is ${#OUT} bytes, under the collector's max_log_size" || fail "line is ${#OUT} bytes"
+expect "$(attr problem_seal_count)" "$((LONG_CHAIN * 3 - 1))" "the count isn't capped"
 
 echo
 [ "$FAILS" -gt 0 ] && { echo "$FAILS check(s) failed"; exit 1; }

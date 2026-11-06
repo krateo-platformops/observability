@@ -60,6 +60,18 @@ seal rows deleted while the sealer is also stopped. An empty chain alone would
 otherwise verify `ok`, because it looks like a fresh install. The count is
 emitted as `krateo.audit.unsealed_rows`.
 
+`krateo.audit.problem_seals` names each problem as `<seal>:<kind>`, the first 50 of
+`krateo.audit.problem_seal_count`:
+
+| Kind | Means |
+|---|---|
+| `sequence` | Seal numbers aren't consecutive |
+| `window` | The window doesn't start where the previous one ended, or ends before it starts |
+| `hash` | `seal_hash` isn't 64 lowercase hex characters |
+| `segment` | The window's rows no longer hash to `segment_hash` |
+| `seal` | `segment_hash` and `prev_seal_hash` no longer hash to `seal_hash` |
+| `linkage` | `prev_seal_hash` isn't the previous seal's hash |
+
 ## Alerts
 
 From 0.1.4 the chart ships two, both on the verifier's line. Disable them with

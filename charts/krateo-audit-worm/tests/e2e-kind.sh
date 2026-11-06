@@ -78,7 +78,8 @@ CH "CREATE TABLE krateo_audit (Timestamp DateTime64(9), TraceId String, SpanId S
 
 step "1. The chart ($(grep '^version:' "$CHART/Chart.yaml" | awk '{print $2}')), short timings"
 helm upgrade --install $REL "$CHART" -n $NS --wait \
-  --set clickhouse.host=clickhouse.$NS.svc --set seal.lagSeconds=5 --set verify.staleAfterSeconds=$STALE >/dev/null 2>"$W/h.err" \
+  --set clickhouse.host=clickhouse.$NS.svc --set seal.lagSeconds=5 --set verify.staleAfterSeconds=$STALE \
+  --set alerts.enabled=false >/dev/null 2>"$W/h.err" \
   && pass "chart installed" || { fail "chart install"; cat "$W/h.err"; exit 1; }
 # Every run below is triggered by hand: suspend the schedules so a CronJob firing on its
 # own (*/15 seal, hourly verify) can never change the state between steps. In D this IS

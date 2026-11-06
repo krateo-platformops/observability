@@ -57,18 +57,27 @@ data:
   # The whole chain in one statement. It used to be two clickhouse-client processes per seal,
   # about 0.45s a seal at the Job's CPU limit, which passed activeDeadlineSeconds at 264 seals:
   # about 3 days of them. Every seal is still recomputed from the WORM table on every run.
-  # ASOF gives each row the seal whose window opens just before it, and the WHERE drops a row
-  # past that window's end. Seals with no rows hash the empty string, as seal.sh does. A row in
-  # no window is `unsealed`, reported further down verify.sh.
+  #
+  # seal.sh writes windows that partition time: each starts where the previous ended, from the
+  # epoch. `window` enforces that, and it is what makes ASOF safe: with no overlap, the seal whose
+  # window opens just before a row is the only one that can hold it, so a widened window can't go
+  # unnoticed. It also closes a gap a narrowed window would leave for forged rows. Seals with no
+  # rows hash the empty string, as seal.sh does.
+  #
+  # Output is one line split on |, so only values this statement builds are printed: seal_hash
+  # passes only if it is well formed. The problem list is capped, because one line carries it to
+  # the log; the count is not.
   verify-chain.sql: |
     WITH
         seals AS
         (
             SELECT
-                seal_seq, window_end, segment_hash, prev_seal_hash, seal_hash,
-                lagInFrame(seal_hash, 1, lower(hex(SHA256('krateo-audit-genesis'))))
-                    OVER (ORDER BY seal_seq ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS expected_prev
+                seal_seq, window_start, window_end, segment_hash, prev_seal_hash, seal_hash,
+                row_number() OVER w AS position,
+                lagInFrame(seal_hash, 1, lower(hex(SHA256('krateo-audit-genesis')))) OVER w AS expected_prev,
+                lagInFrame(window_end, 1, toDateTime64(0, 9)) OVER w AS expected_start
             FROM {{ .Values.sealTable }}
+            WINDOW w AS (ORDER BY seal_seq ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
         ),
         segments AS
         (
@@ -82,9 +91,13 @@ data:
         checked AS
         (
             SELECT
-                seal_seq, window_end, seal_hash,
+                seal_seq, window_end,
+                if(match(seal_hash, '^[0-9a-f]{64}$'), seal_hash, '') AS clean_hash,
                 lower(hex(SHA256(row_hashes))) AS segment,
                 arrayFilter(x -> x != '', [
+                    if(seal_seq != position, concat(toString(seal_seq), ':sequence'), ''),
+                    if(window_start != expected_start OR window_end < window_start, concat(toString(seal_seq), ':window'), ''),
+                    if(clean_hash = '', concat(toString(seal_seq), ':hash'), ''),
                     if(segment != segment_hash, concat(toString(seal_seq), ':segment'), ''),
                     if(lower(hex(SHA256(concat(segment, prev_seal_hash)))) != seal_hash, concat(toString(seal_seq), ':seal'), ''),
                     if(prev_seal_hash != expected_prev, concat(toString(seal_seq), ':linkage'), '')
@@ -95,9 +108,10 @@ data:
     SELECT concat(
         toString(count()), '|',
         toString(max(seal_seq)), '|',
-        argMax(seal_hash, seal_seq), '|',
+        argMax(clean_hash, seal_seq), '|',
         toString(argMax(window_end, seal_seq)), '|',
-        arrayStringConcat(arrayFlatten(groupArray(problems)), ' '))
+        toString(length(arrayFlatten(groupArray(problems)))), '|',
+        arrayStringConcat(arraySlice(arrayFlatten(groupArray(problems)), 1, 50), ' '))
     FROM checked
     FORMAT TSVRaw;
 
@@ -156,12 +170,19 @@ data:
       PREV_HASH=$(CHQ -q "SELECT seal_hash FROM {{ .Values.sealTable }} WHERE seal_seq=$PREV_SEQ")
     fi
     WM=$(CHQ -q "SELECT toString(now64(9) - toIntervalSecond(${LAG_SECONDS}))")
-    CNT=$(CHQ -q "SELECT count() FROM {{ .Values.wormTable }} WHERE ingested_at > '$PREV_END' AND ingested_at <= '$WM'")
-    SEG=$(CHQ -q "SELECT lower(hex(SHA256(arrayStringConcat(arraySort(groupArray(row_hash)), '')))) FROM {{ .Values.wormTable }} WHERE ingested_at > '$PREV_END' AND ingested_at <= '$WM'")
-    SEAL=$(CHQ -q "SELECT lower(hex(SHA256(concat('$SEG','$PREV_HASH'))))")
+    # Raising seal.lagSeconds moves the watermark back past the last seal. Sealing that would
+    # write a window that ends before it starts, which verify.sh treats as damage. Wait instead:
+    # the watermark catches up, and verify.sh reports stale if it never does.
     NEXT=$((PREV_SEQ + 1))
-    CHQ -q "INSERT INTO {{ .Values.sealTable }} (seal_seq,window_start,window_end,row_count,segment_hash,prev_seal_hash,seal_hash,sealed_at) VALUES ($NEXT,'$PREV_END','$WM',$CNT,'$SEG','$PREV_HASH','$SEAL',now64(9))"
-    echo "sealed seq=$NEXT rows=$CNT window_end=$WM"
+    if [ "$(CHQ -q "SELECT toDateTime64('$WM', 9) > toDateTime64('$PREV_END', 9)")" = "1" ]; then
+      CNT=$(CHQ -q "SELECT count() FROM {{ .Values.wormTable }} WHERE ingested_at > '$PREV_END' AND ingested_at <= '$WM'")
+      SEG=$(CHQ -q "SELECT lower(hex(SHA256(arrayStringConcat(arraySort(groupArray(row_hash)), '')))) FROM {{ .Values.wormTable }} WHERE ingested_at > '$PREV_END' AND ingested_at <= '$WM'")
+      SEAL=$(CHQ -q "SELECT lower(hex(SHA256(concat('$SEG','$PREV_HASH'))))")
+      CHQ -q "INSERT INTO {{ .Values.sealTable }} (seal_seq,window_start,window_end,row_count,segment_hash,prev_seal_hash,seal_hash,sealed_at) VALUES ($NEXT,'$PREV_END','$WM',$CNT,'$SEG','$PREV_HASH','$SEAL',now64(9))"
+      echo "sealed seq=$NEXT rows=$CNT window_end=$WM"
+    else
+      echo "not sealing: watermark $WM has not passed the last window_end $PREV_END"
+    fi
 
     FAIL=0
     if [ "$HAD_WORM" = "1" ] && [ "$HAD_MV" != "1" ]; then
@@ -200,6 +221,7 @@ data:
     [ "$HAS_SEAL" = "1" ] || PROBLEMS="$PROBLEMS seal_table:missing"
 
     CHECKED=0
+    CHAIN_PROBLEM_COUNT=0
     AGE=0
     HEAD_SEQ=0
     HEAD_HASH=""
@@ -209,10 +231,10 @@ data:
       # Assigned first: set -e can't see a failure inside the here-document, and a failed query
       # must fail the run, never report an empty chain as ok.
       CHAIN=$(CHQ --queries-file /scripts/verify-chain.sql)
-      IFS='|' read -r CHECKED HEAD_SEQ HEAD_HASH LAST_END CHAIN_PROBLEMS <<CHAINEOF
+      IFS='|' read -r CHECKED HEAD_SEQ HEAD_HASH LAST_END CHAIN_PROBLEM_COUNT CHAIN_PROBLEMS <<CHAINEOF
     $CHAIN
     CHAINEOF
-      [ -n "$CHAIN_PROBLEMS" ] && PROBLEMS="$PROBLEMS $CHAIN_PROBLEMS"
+      [ "$CHAIN_PROBLEM_COUNT" = "0" ] || PROBLEMS="$PROBLEMS $CHAIN_PROBLEMS"
     fi
 
     # Every WORM row must still hash to the row_hash stamped at ingestion. The segment
@@ -253,6 +275,6 @@ data:
 
     # head_seal_seq/head_seal_hash put the chain head into the log stream on every
     # run: an out-of-band trail in which a full wipe shows as the head going back.
-    emit krateo-audit-verifier "$STATUS" "$SEV_TEXT" "$SEV_NUM" "audit seal chain $STATUS" ",'krateo.audit.checked_seals','$CHECKED','krateo.audit.problem_seals','$PROBLEMS_TRIM','krateo.audit.newest_seal_age_seconds','$AGE','krateo.audit.head_seal_seq','$HEAD_SEQ','krateo.audit.head_seal_hash','$HEAD_HASH','krateo.audit.unsealed_rows','$UNSEALED','krateo.audit.mismatched_rows','$MISMATCHED'"
+    emit krateo-audit-verifier "$STATUS" "$SEV_TEXT" "$SEV_NUM" "audit seal chain $STATUS" ",'krateo.audit.checked_seals','$CHECKED','krateo.audit.problem_seals','$PROBLEMS_TRIM','krateo.audit.problem_seal_count','$CHAIN_PROBLEM_COUNT','krateo.audit.newest_seal_age_seconds','$AGE','krateo.audit.head_seal_seq','$HEAD_SEQ','krateo.audit.head_seal_hash','$HEAD_HASH','krateo.audit.unsealed_rows','$UNSEALED','krateo.audit.mismatched_rows','$MISMATCHED'"
 
     [ "$STATUS" = "ok" ] || exit 1

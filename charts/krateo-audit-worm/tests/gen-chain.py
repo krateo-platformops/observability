@@ -25,7 +25,7 @@ rows = client("-q", "SELECT toUnixTimestamp64Nano(ingested_at) / 1000000000, row
 
 lines = []
 prev_hash = sha("krateo-audit-genesis")
-prev_end = BASE - 1
+prev_end = 0
 for seq, row in enumerate(rows, 1):
     end, hashed = row.split("\t")
     end = int(float(end))
