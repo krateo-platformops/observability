@@ -58,8 +58,20 @@ sealed window **and** are older than `verify.staleAfterSeconds`: rows that shoul
 have been sealed by now. That covers a sealer stopped before it ever sealed, and
 seal rows deleted while the sealer is also stopped. An empty chain alone would
 otherwise verify `ok`, because it looks like a fresh install. The count is
-emitted as `krateo.audit.unsealed_rows`. Alert in HyperDX on `krateo.audit.status != ok` **and** on the
-absence of the verifier's line.
+emitted as `krateo.audit.unsealed_rows`.
+
+## Alerts
+
+From 0.1.4 the chart ships two, both on the verifier's line. Disable them with
+`alerts.enabled=false` if the Alert CRD isn't installed.
+
+| Alert | Fires when | Means |
+|---|---|---|
+| `krateo-audit-worm-chain-not-ok` | A run reports a status other than `ok` | The chain is damaged or sealing stopped |
+| `krateo-audit-worm-verifier-silent` | An hour has no `ok` line | **Unverified, not tampered.** The verifier stopped or timed out |
+
+Before 0.1.4 this README told you to create them by hand, and nobody had. On krateo-057 the verifier
+timed out from 2026-11-01 for 5 days with no signal.
 
 ## When the seal chain is dropped
 

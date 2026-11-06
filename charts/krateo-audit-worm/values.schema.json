@@ -63,6 +63,17 @@
         "staleAfterSeconds": { "type": "integer", "minimum": 1 }
       }
     },
+    "alerts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Render the Alerts on the verifier line. Needs the Alert CRD from clickstack-agent."
+        }
+      }
+    },
     "concurrencyPolicy": { "type": "string", "enum": ["Allow", "Forbid", "Replace"] },
     "activeDeadlineSeconds": { "type": "integer", "minimum": 1 },
     "successfulJobsHistoryLimit": { "type": "integer", "minimum": 0 },

@@ -54,6 +54,53 @@ data:
     ENGINE = MergeTree
     ORDER BY seal_seq;
 
+  # The whole chain in one statement. It used to be two clickhouse-client processes per seal,
+  # about 0.45s a seal at the Job's CPU limit, which passed activeDeadlineSeconds at 264 seals:
+  # about 3 days of them. Every seal is still recomputed from the WORM table on every run.
+  # ASOF gives each row the seal whose window opens just before it, and the WHERE drops a row
+  # past that window's end. Seals with no rows hash the empty string, as seal.sh does. A row in
+  # no window is `unsealed`, reported further down verify.sh.
+  verify-chain.sql: |
+    WITH
+        seals AS
+        (
+            SELECT
+                seal_seq, window_end, segment_hash, prev_seal_hash, seal_hash,
+                lagInFrame(seal_hash, 1, lower(hex(SHA256('krateo-audit-genesis'))))
+                    OVER (ORDER BY seal_seq ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS expected_prev
+            FROM {{ .Values.sealTable }}
+        ),
+        segments AS
+        (
+            SELECT s.seal_seq AS seal_seq, arrayStringConcat(arraySort(groupArray(w.row_hash)), '') AS row_hashes
+            FROM (SELECT 0 AS k, ingested_at, row_hash FROM {{ .Values.wormTable }}) AS w
+            ASOF INNER JOIN (SELECT 0 AS k, seal_seq, window_start, window_end FROM {{ .Values.sealTable }}) AS s
+                ON w.k = s.k AND w.ingested_at > s.window_start
+            WHERE w.ingested_at <= s.window_end
+            GROUP BY s.seal_seq
+        ),
+        checked AS
+        (
+            SELECT
+                seal_seq, window_end, seal_hash,
+                lower(hex(SHA256(row_hashes))) AS segment,
+                arrayFilter(x -> x != '', [
+                    if(segment != segment_hash, concat(toString(seal_seq), ':segment'), ''),
+                    if(lower(hex(SHA256(concat(segment, prev_seal_hash)))) != seal_hash, concat(toString(seal_seq), ':seal'), ''),
+                    if(prev_seal_hash != expected_prev, concat(toString(seal_seq), ':linkage'), '')
+                ]) AS problems
+            FROM seals LEFT JOIN segments USING (seal_seq)
+            ORDER BY seal_seq
+        )
+    SELECT concat(
+        toString(count()), '|',
+        toString(max(seal_seq)), '|',
+        argMax(seal_hash, seal_seq), '|',
+        toString(argMax(window_end, seal_seq)), '|',
+        arrayStringConcat(arrayFlatten(groupArray(problems)), ' '))
+    FROM checked
+    FORMAT TSVRaw;
+
   lib.sh: |
     # Shared by seal.sh and verify.sh.
     CHQ() { clickhouse-client --host "$CH_HOST" --port "$CH_PORT" --user "$CH_USER" --password "$CH_PASSWORD" --database "$CH_DB" --history_file=/dev/null "$@"; }
@@ -152,36 +199,20 @@ data:
     [ "$HAS_WORM" = "1" ] || PROBLEMS="$PROBLEMS worm_table:missing"
     [ "$HAS_SEAL" = "1" ] || PROBLEMS="$PROBLEMS seal_table:missing"
 
-    GENESIS=$(CHQ -q "SELECT lower(hex(SHA256('krateo-audit-genesis')))")
-    EXPECTED_PREV="$GENESIS"
     CHECKED=0
     AGE=0
     HEAD_SEQ=0
     HEAD_HASH=""
     LAST_END="1970-01-01 00:00:00"
-    SEALS=""
     if [ "$HAS_WORM" = "1" ] && [ "$HAS_SEAL" = "1" ]; then
-      SEALS=$(CHQ -q "SELECT seal_seq, toString(window_start), toString(window_end), segment_hash, prev_seal_hash, seal_hash FROM {{ .Values.sealTable }} ORDER BY seal_seq FORMAT TSV")
       AGE=$(CHQ -q "SELECT ifNull(toUInt64(dateDiff('second', max(sealed_at), now64(9))), 4294967295) FROM {{ .Values.sealTable }}")
-    fi
-    if [ -n "$SEALS" ]; then
-      OLDIFS="$IFS"
-      while IFS="$(printf '\t')" read -r SEQ WSTART WEND SSEG SPREV SSEAL; do
-        [ -z "$SEQ" ] && continue
-        CHECKED=$((CHECKED + 1))
-        RSEG=$(CHQ -q "SELECT lower(hex(SHA256(arrayStringConcat(arraySort(groupArray(row_hash)), '')))) FROM {{ .Values.wormTable }} WHERE ingested_at > '$WSTART' AND ingested_at <= '$WEND'")
-        RSEAL=$(CHQ -q "SELECT lower(hex(SHA256(concat('$RSEG','$SPREV'))))")
-        [ "$RSEG" != "$SSEG" ] && PROBLEMS="$PROBLEMS ${SEQ}:segment"
-        [ "$RSEAL" != "$SSEAL" ] && PROBLEMS="$PROBLEMS ${SEQ}:seal"
-        [ "$SPREV" != "$EXPECTED_PREV" ] && PROBLEMS="$PROBLEMS ${SEQ}:linkage"
-        EXPECTED_PREV="$SSEAL"
-        HEAD_SEQ="$SEQ"
-        HEAD_HASH="$SSEAL"
-        LAST_END="$WEND"
-      done <<SEALSEOF
-    $SEALS
-    SEALSEOF
-      IFS="$OLDIFS"
+      # Assigned first: set -e can't see a failure inside the here-document, and a failed query
+      # must fail the run, never report an empty chain as ok.
+      CHAIN=$(CHQ --queries-file /scripts/verify-chain.sql)
+      IFS='|' read -r CHECKED HEAD_SEQ HEAD_HASH LAST_END CHAIN_PROBLEMS <<CHAINEOF
+    $CHAIN
+    CHAINEOF
+      [ -n "$CHAIN_PROBLEMS" ] && PROBLEMS="$PROBLEMS $CHAIN_PROBLEMS"
     fi
 
     # Every WORM row must still hash to the row_hash stamped at ingestion. The segment

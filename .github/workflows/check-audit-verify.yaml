@@ -1,0 +1,43 @@
+# The audit verifier against a real ClickHouse.
+#
+# lint.yaml renders verify.sh but never runs it, and shellcheck can't see the SQL. Its failure on
+# krateo-057 was one only a long chain shows: the old script started two client processes per seal
+# and passed activeDeadlineSeconds at 264 seals, so verification stopped with no signal for 5 days.
+# This runs the rendered seal.sh and verify.sh through each kind of chain damage and times a chain
+# of 5,000 seals, about 52 days' worth.
+#
+# It is a separate workflow on purpose. lint.yaml is the org-wide canonical chart-repo lint,
+# identical across every krateo-* chart repo.
+
+name: check-audit-verify
+
+on:
+  pull_request:
+    paths:
+      - "charts/krateo-audit-worm/**"
+      - ".github/workflows/check-audit-verify.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "charts/krateo-audit-worm/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Run the verifier through each kind of damage
+        run: charts/krateo-audit-worm/tests/verify-docker.sh
