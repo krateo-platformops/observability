@@ -44,7 +44,7 @@ verify:
   staleAfterSeconds: 5400
 
 # One Alert on a status other than ok, and one on an hour with no ok, which covers a verifier that
-# stopped or timed out. Needs the Alert CRD from clickstack-agent, so install this chart after it.
+# stopped or timed out. Needs the Alert CRD from alert-provider-crd, so install this chart after it.
 alerts:
   enabled: true
 
