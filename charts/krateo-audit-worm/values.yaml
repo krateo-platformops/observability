@@ -35,13 +35,18 @@ seal:
   lagSeconds: 300
 
 # Verification: recompute the chain and emit an OTel-shaped JSON line to stdout
-# every run (status ok|tampered|stale). The line is collected into otel_logs and
-# HyperDX alerts on status!=ok AND on the line's ABSENCE (a stopped verifier).
+# every run (status ok|tampered|unprotected|unsealed|stale). The line is collected
+# into otel_logs, and the Alerts below read it.
 verify:
   schedule: "0 * * * *"
   # Flag the chain stale if the newest seal is older than this (a stopped or
   # erroring sealer leaves rows unsealed — invisible without this check).
   staleAfterSeconds: 5400
+
+# One Alert on a status other than ok, and one on an hour with no ok, which covers a verifier that
+# stopped or timed out. Needs the Alert CRD from clickstack-agent, so install this chart after it.
+alerts:
+  enabled: true
 
 # A failed seal/verify run should surface as the workload being unhealthy, so the
 # reconciler (installer pin) reports it — not vanish silently.

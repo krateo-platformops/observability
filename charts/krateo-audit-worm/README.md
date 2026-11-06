@@ -58,8 +58,32 @@ sealed window **and** are older than `verify.staleAfterSeconds`: rows that shoul
 have been sealed by now. That covers a sealer stopped before it ever sealed, and
 seal rows deleted while the sealer is also stopped. An empty chain alone would
 otherwise verify `ok`, because it looks like a fresh install. The count is
-emitted as `krateo.audit.unsealed_rows`. Alert in HyperDX on `krateo.audit.status != ok` **and** on the
-absence of the verifier's line.
+emitted as `krateo.audit.unsealed_rows`.
+
+`krateo.audit.problem_seals` names each problem as `<seal>:<kind>`, the first 50 of
+`krateo.audit.problem_seal_count`:
+
+| Kind | Means |
+|---|---|
+| `sequence` | Seal numbers aren't consecutive |
+| `window` | The window doesn't start where the previous one ended, or ends before it starts |
+| `hash` | `seal_hash` isn't 64 lowercase hex characters |
+| `segment` | The window's rows no longer hash to `segment_hash` |
+| `seal` | `segment_hash` and `prev_seal_hash` no longer hash to `seal_hash` |
+| `linkage` | `prev_seal_hash` isn't the previous seal's hash |
+
+## Alerts
+
+From 0.1.4 the chart ships two, both on the verifier's line. Disable them with
+`alerts.enabled=false` if the Alert CRD isn't installed.
+
+| Alert | Fires when | Means |
+|---|---|---|
+| `krateo-audit-worm-chain-not-ok` | A run reports a status other than `ok` | The chain is damaged or sealing stopped |
+| `krateo-audit-worm-verifier-silent` | An hour has no `ok` line | **Unverified, not tampered.** The verifier stopped or timed out |
+
+Before 0.1.4 this README told you to create them by hand, and nobody had. On krateo-057 the verifier
+timed out from 2026-11-01 for 5 days with no signal.
 
 ## When the seal chain is dropped
 
@@ -70,7 +94,18 @@ the Job. Because the new chain never links to the canonical genesis, the
 verifier reports `tampered` (`1:linkage`) on every run from then on: the lost
 history can never verify green again.
 
+## What it can't see
+
+Deleting the newest seal **and** every row in its window leaves a shorter chain that is still
+valid, so `verify.sh` reports `ok`. It takes delete rights on both tables, and the sealer then
+reuses the number. The only trace is `head_seal_seq` going backwards between runs in `otel_logs`,
+and no Alert watches that yet. See observability#42.
+
 ## Proof
+
+`tests/verify-docker.sh` runs in CI on one ClickHouse container, through each kind of chain
+damage and a 5,000-seal chain, on UTC and on a non-UTC server.
+
 
 `tests/e2e-kind.sh` (manual) runs the chart's real `seal.sh` and `verify.sh` against a real
 ClickHouse on kind, with the CronJob schedules suspended and every run triggered by hand.

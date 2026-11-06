@@ -1,0 +1,42 @@
+{{- /*
+  The two ways the chain stops being trustworthy. Alerts live here and not in
+  krateo-observability's defaults because they only make sense where this chart is installed:
+  the silent alert would fire forever on a cluster without a verifier.
+
+  They match the verifier's JSON line and not SeverityNumber, which older daemonset charts leave
+  empty. REQUIRES the Alert CRD, so this chart must install after clickstack-agent, or set
+  alerts.enabled=false.
+*/ -}}
+{{- if .Values.alerts.enabled }}
+{{- $verifier := printf "ServiceName = '%s' AND JSONExtractString(Body, 'attributes', 'service.name') = 'krateo-audit-verifier'" (include "krateo-audit-worm.name" .) }}
+---
+apiVersion: observability.krateo.io/v1alpha1
+kind: Alert
+metadata:
+  name: {{ include "krateo-audit-worm.fullname" . }}-chain-not-ok
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "krateo-audit-worm.labels" . | nindent 4 }}
+spec:
+  displayName: "Audit chain failed verification"
+  where: {{ printf "%s AND JSONExtractString(Body, 'attributes', 'krateo.audit.status') != 'ok'" $verifier | quote }}
+  threshold: 1
+  thresholdType: above
+  interval: 1h
+  message: "The audit verifier reported a status other than ok: tampered, unprotected, unsealed or stale. Read krateo.audit.problem_seals on the line. Don't repair the tables before capturing them, because the chain is the evidence."
+---
+apiVersion: observability.krateo.io/v1alpha1
+kind: Alert
+metadata:
+  name: {{ include "krateo-audit-worm.fullname" . }}-verifier-silent
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "krateo-audit-worm.labels" . | nindent 4 }}
+spec:
+  displayName: "Audit chain not verified this hour"
+  where: {{ printf "%s AND JSONExtractString(Body, 'attributes', 'krateo.audit.status') = 'ok'" $verifier | quote }}
+  threshold: 1
+  thresholdType: below
+  interval: 1h
+  message: "No successful audit verification in the last hour, so the chain has no verdict. Sealing can still be running. Check the {{ include "krateo-audit-worm.fullname" . }}-verify CronJob: a run past activeDeadlineSeconds prints nothing. This alert means unverified, not tampered."
+{{- end }}
