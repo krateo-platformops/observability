@@ -114,7 +114,10 @@ type: application
 # 0.1.18: JWT redaction on log bodies targets body.string, so it also covers a map body on the OTLP
 # arms, logs/audit included. Every OTLP body on krateo-057 is a string today, so nothing leaked and
 # no record changes until one matches.
-version: 0.1.18
+# 0.1.19: kubeletstats emits k8s.volume.available and k8s.volume.capacity for PersistentVolumeClaims,
+# which a storage headroom alert needs (installer#393). Other volume types are filtered out, and the
+# inode metrics stay off. Adds 2 series per claim, 14 on krateo-057. Every other metric is unchanged.
+version: 0.1.19
 appVersion: "0.158.0"
 dependencies:
   - name: opentelemetry-collector

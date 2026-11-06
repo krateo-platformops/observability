@@ -192,6 +192,10 @@ Wraps the same upstream chart in `daemonset` mode, stock
 - `config.receivers`: `filelog` with a container parser + multiline recombine;
   `hostmetrics`/`kubeletstats` at 60s (kubeletstats adds pod/container cpu+memory
   limit/request utilization and uptime metrics).
+- **Volume metrics** (0.1.19, installer#393): `kubeletstats` adds the `volume` group, keeping
+  `k8s.volume.available` and `k8s.volume.capacity` and turning the inode metrics off.
+  `filter/pvc-volumes` keeps only PersistentVolumeClaims, because most pod volumes are
+  configmaps, tokens and emptyDirs. Each point carries `k8s.persistentvolumeclaim.name`.
 - **JSON log lines** (0.1.17, #54): `filelog` promotes a string `level` or `severity_text` to
   `SeverityText` (upper case) and `SeverityNumber`, and a 32-hex `trace_id` to `TraceId`, with a
   16-hex `span_id` to `SpanId` alongside it. `Body` stays the raw line and `LogAttributes` are unchanged.

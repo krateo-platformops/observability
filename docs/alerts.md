@@ -213,9 +213,10 @@ the always-OK alerts rule 1 is about.
 (*Metric as a custom resource + metricRef on Alert*) is **CLOSED**, and the Alert CRD now carries
 `metricRef` and `labels`. So saturation is no longer blocked on a design — it needs a `Metric` CR
 per quantity, and there are **zero** `Metric` resources on krateo-057, so the metric path is
-unexercised rather than unavailable. A PV-headroom alert additionally needs `k8s.volume.*`, which
-kubeletstats does not emit under its default `metric_groups` (`container`, `pod`, `node`) — the
-`volume` group has to be enabled first. See installer#393.
+unexercised rather than unavailable. A PV-headroom alert also needs `k8s.volume.*`, which
+`otel-collector-daemonset` emits from 0.1.19 for PersistentVolumeClaims only. Install that chart
+first: HyperDX evaluates an empty window as 0, so a `below` alert on a metric that isn't arriving
+could fire on nothing. See installer#393.
 
 ## Cost
 

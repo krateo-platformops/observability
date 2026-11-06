@@ -153,7 +153,20 @@ opentelemetry-collector:
         auth_type: serviceAccount
         endpoint: "${env:K8S_NODE_NAME}:10250"
         insecure_skip_verify: true
+        # The volume group is for storage headroom (installer#393). extra_metadata_labels is what
+        # puts k8s.volume.type and k8s.persistentvolumeclaim.name on a volume's points: without it
+        # no point says which claim it belongs to, and filter/pvc-volumes below would drop them all.
+        metric_groups: [node, pod, container, volume]
+        extra_metadata_labels: [k8s.volume.type]
         metrics:
+          # Headroom needs available and capacity. An out-of-inodes volume is a real failure, but
+          # nothing alerts on it yet, so the three inode metrics aren't worth a series per volume.
+          k8s.volume.inodes:
+            enabled: false
+          k8s.volume.inodes.free:
+            enabled: false
+          k8s.volume.inodes.used:
+            enabled: false
           k8s.pod.cpu_limit_utilization:
             enabled: true
           k8s.pod.cpu_request_utilization:
@@ -269,6 +282,15 @@ opentelemetry-collector:
         logs:
           log_record:
             - 'attributes["event.name"] == "audit"'
+      # DROPS what matches. kubeletstats reports every pod volume, and nearly all of them are
+      # projected service-account tokens, configmaps and emptyDirs: 431 volumes on krateo-057, 7 of
+      # them claims. The rest would add series with no use, so only claims are kept. Other kubelet
+      # metrics have no k8s.volume.type, so the name test is what leaves them alone.
+      filter/pvc-volumes:
+        error_mode: ignore
+        metrics:
+          metric:
+            - 'IsMatch(name, "^k8s\\.volume\\.") and resource.attributes["k8s.volume.type"] != "persistentVolumeClaim"'
       # SLO SPAN METRICS (D5): the spans the performance SLOs are computed from, and nothing else.
       # DROPS what matches (conditions are ORed). The first keeps only snowplow SERVER spans (the
       # API SLI) and krateo-frontend RUM spans re-exported by snowplow's rum-ingest (the UI SLIs);
@@ -534,7 +556,7 @@ opentelemetry-collector:
         # this pipeline they had no consumer and never reached otel_metrics_*.
         metrics:
           receivers: [hostmetrics, kubeletstats, otlp]
-          processors: [memory_limiter, k8sattributes, batch]
+          processors: [memory_limiter, filter/pvc-volumes, k8sattributes, batch]
           exporters: [clickhouse]
         # KOS-1 #112 bug #1: wire OTLP traces -> ClickHouse. Apps/agents send OTLP spans to the
         # node-local agent (status.hostIP:4317 grpc / :4318 http, from chart-default otlp receiver);
