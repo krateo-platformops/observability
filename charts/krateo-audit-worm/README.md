@@ -94,7 +94,18 @@ the Job. Because the new chain never links to the canonical genesis, the
 verifier reports `tampered` (`1:linkage`) on every run from then on: the lost
 history can never verify green again.
 
+## What it can't see
+
+Deleting the newest seal **and** every row in its window leaves a shorter chain that is still
+valid, so `verify.sh` reports `ok`. It takes delete rights on both tables, and the sealer then
+reuses the number. The only trace is `head_seal_seq` going backwards between runs in `otel_logs`,
+and no Alert watches that yet. See observability#42.
+
 ## Proof
+
+`tests/verify-docker.sh` runs in CI on one ClickHouse container, through each kind of chain
+damage and a 5,000-seal chain, on UTC and on a non-UTC server.
+
 
 `tests/e2e-kind.sh` (manual) runs the chart's real `seal.sh` and `verify.sh` against a real
 ClickHouse on kind, with the CronJob schedules suspended and every run triggered by hand.

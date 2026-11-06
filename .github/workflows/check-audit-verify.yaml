@@ -41,3 +41,8 @@ jobs:
         run: pip install --quiet pyyaml
       - name: Run the verifier through each kind of damage
         run: charts/krateo-audit-worm/tests/verify-docker.sh
+      # The first window starts at '1970-01-01 00:00:00' in the server's own time zone.
+      - name: Again on a server that isn't on UTC
+        run: charts/krateo-audit-worm/tests/verify-docker.sh
+        env:
+          SERVER_TZ: Europe/Rome

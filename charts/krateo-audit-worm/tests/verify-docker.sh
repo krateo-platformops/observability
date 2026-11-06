@@ -2,7 +2,7 @@
 # krateo-audit-worm's real seal.sh and verify.sh against a real ClickHouse in one container, with
 # no cluster, so it also runs in CI. tests/e2e-kind.sh covers the Jobs; this covers the chain.
 #
-#   usage: tests/verify-docker.sh [chart-dir]
+#   usage: [SERVER_TZ=Europe/Rome] tests/verify-docker.sh [chart-dir]
 #
 # Proves verify.sh reports each kind of chain damage, names the seal, and keeps a long chain
 # inside activeDeadlineSeconds. It timed out at 264 seals on krateo-057 for 5 days.
@@ -28,7 +28,7 @@ w = sys.argv[1]
 for name, body in yaml.safe_load(open(f"{w}/cm.yaml"))["data"].items():
     open(f"{w}/scripts/{name}", "w").write(body)
 PY
-docker run -d --name "$NAME" -e CLICKHOUSE_USER=e2e -e CLICKHOUSE_PASSWORD=e2e -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 -v "$W/scripts:/scripts:ro" "$IMAGE" >/dev/null
+docker run -d --name "$NAME" -e TZ="${SERVER_TZ:-UTC}" -e CLICKHOUSE_USER=e2e -e CLICKHOUSE_PASSWORD=e2e -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 -v "$W/scripts:/scripts:ro" "$IMAGE" >/dev/null
 CH() { docker exec -i "$NAME" clickhouse-client --user e2e --password e2e "$@"; }
 for _ in $(seq 1 60); do CH -q "SELECT 1" >/dev/null 2>&1 && break; sleep 1; done
 script() { docker exec -e CH_HOST=127.0.0.1 -e CH_PORT=9000 -e CH_DB=default -e CH_USER=e2e -e CH_PASSWORD=e2e -e LAG_SECONDS="${LAG:-0}" "$NAME" sh "/scripts/$1.sh" 2>&1; }
@@ -49,6 +49,7 @@ mutate() { CH -q "ALTER TABLE krateo_audit_seal UPDATE $1 WHERE $2 SETTINGS muta
 CH -q "CREATE TABLE krateo_audit (Timestamp DateTime64(9), TraceId String, SpanId String, SeverityText LowCardinality(String), ServiceName LowCardinality(String), Body String, ResourceAttributes Map(LowCardinality(String), String), LogAttributes Map(LowCardinality(String), String)) ENGINE = MergeTree ORDER BY Timestamp"
 
 echo "== a clean chain, with an empty window in it =="
+expect "$(CH -q "SELECT timezone()")" "${SERVER_TZ:-UTC}" "server time zone"
 expect "$(verify)" "0 ok " "before the first seal: ok"
 seal() { script seal >"$W/seal.out" || { fail "seal.sh failed"; cat "$W/seal.out"; }; sleep 1.1; }
 seal; insert 3; seal; seal; insert 2; seal
@@ -106,6 +107,12 @@ restore
 expect "$(verify)" "0 ok " "restored: ok again"
 
 echo "== damage to a row =="
+for WHEN in "toDateTime64('1969-12-31 00:00:00', 9)" "toDateTime64('2200-01-01 00:00:00', 9)"; do
+  CH -q "INSERT INTO krateo_audit_worm SELECT $WHEN, Timestamp, TraceId, SpanId, SeverityText, ServiceName, Body, ResourceAttributes, LogAttributes, row_hash FROM krateo_audit_worm LIMIT 1"
+  expect "$(verify)" "1 tampered rows_outside_time:1" "a valid row copied outside all time: $WHEN"
+  CH -q "ALTER TABLE krateo_audit_worm DELETE WHERE ingested_at = $WHEN SETTINGS mutations_sync = 2"
+done
+expect "$(verify)" "0 ok " "those rows removed: ok again"
 CH -q "ALTER TABLE krateo_audit_worm DELETE WHERE row_hash = (SELECT min(row_hash) FROM krateo_audit_worm) SETTINGS mutations_sync = 2"
 expect "$(verify | cut -d' ' -f1,2)" "1 tampered" "a sealed row deleted"
 CH -q "TRUNCATE TABLE krateo_audit_worm"

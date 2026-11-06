@@ -33,5 +33,5 @@ for seq, row in enumerate(rows, 1):
     seal = sha(segment + prev_hash)
     lines.append(f"{seq}\t{prev_end}\t{end}\t1\t{segment}\t{prev_hash}\t{seal}\t{end}")
     prev_hash, prev_end = seal, end
-client("--input_format_tsv_empty_as_default=1", "-q", "INSERT INTO krateo_audit_seal SELECT seal_seq, toDateTime64(window_start, 9), toDateTime64(window_end, 9), row_count, segment_hash, prev_seal_hash, seal_hash, now64(9) FROM input('seal_seq UInt64, window_start UInt32, window_end UInt32, row_count UInt64, segment_hash String, prev_seal_hash String, seal_hash String, sealed_at UInt32') FORMAT TSV",
+client("--input_format_tsv_empty_as_default=1", "-q", "INSERT INTO krateo_audit_seal SELECT seal_seq, if(window_start = 0, toDateTime64('1970-01-01 00:00:00', 9), toDateTime64(window_start, 9)), toDateTime64(window_end, 9), row_count, segment_hash, prev_seal_hash, seal_hash, now64(9) FROM input('seal_seq UInt64, window_start UInt32, window_end UInt32, row_count UInt64, segment_hash String, prev_seal_hash String, seal_hash String, sealed_at UInt32') FORMAT TSV",
        stdin="\n".join(lines) + "\n")

@@ -75,7 +75,7 @@ data:
                 seal_seq, window_start, window_end, segment_hash, prev_seal_hash, seal_hash,
                 row_number() OVER w AS position,
                 lagInFrame(seal_hash, 1, lower(hex(SHA256('krateo-audit-genesis')))) OVER w AS expected_prev,
-                lagInFrame(window_end, 1, toDateTime64(0, 9)) OVER w AS expected_start
+                lagInFrame(window_end, 1, toDateTime64('1970-01-01 00:00:00', 9)) OVER w AS expected_start
             FROM {{ .Values.sealTable }}
             WINDOW w AS (ORDER BY seal_seq ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
         ),
@@ -174,7 +174,8 @@ data:
     # write a window that ends before it starts, which verify.sh treats as damage. Wait instead:
     # the watermark catches up, and verify.sh reports stale if it never does.
     NEXT=$((PREV_SEQ + 1))
-    if [ "$(CHQ -q "SELECT toDateTime64('$WM', 9) > toDateTime64('$PREV_END', 9)")" = "1" ]; then
+    PAST_LAST=$(CHQ -q "SELECT toDateTime64('$WM', 9) > toDateTime64('$PREV_END', 9)")
+    if [ "$PAST_LAST" = "1" ]; then
       CNT=$(CHQ -q "SELECT count() FROM {{ .Values.wormTable }} WHERE ingested_at > '$PREV_END' AND ingested_at <= '$WM'")
       SEG=$(CHQ -q "SELECT lower(hex(SHA256(arrayStringConcat(arraySort(groupArray(row_hash)), '')))) FROM {{ .Values.wormTable }} WHERE ingested_at > '$PREV_END' AND ingested_at <= '$WM'")
       SEAL=$(CHQ -q "SELECT lower(hex(SHA256(concat('$SEG','$PREV_HASH'))))")
@@ -255,6 +256,11 @@ data:
     UNSEALED=0
     if [ "$HAS_WORM" = "1" ]; then
       UNSEALED=$(CHQ -q "SELECT count() FROM {{ .Values.wormTable }} WHERE ingested_at > '$LAST_END' AND ingested_at < now64(9) - INTERVAL {{ .Values.verify.staleAfterSeconds }} SECOND")
+      # ingested_at is the MV's now64(9), so a row before the first window or from the future
+      # was not written by the mirror, however valid its row_hash is. A row past the last window
+      # can be waiting for the next seal, but neither of these can.
+      IMPOSSIBLE=$(CHQ -q "SELECT count() FROM {{ .Values.wormTable }} WHERE ingested_at <= toDateTime64('1970-01-01 00:00:00', 9) OR ingested_at > now64(9)")
+      [ "$IMPOSSIBLE" != "0" ] && PROBLEMS="$PROBLEMS rows_outside_time:$IMPOSSIBLE"
     fi
 
     # Precedence: tampered > unprotected > unsealed > stale > ok.
