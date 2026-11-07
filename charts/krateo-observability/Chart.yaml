@@ -88,7 +88,13 @@ type: application
 # 0.1.29: a comment only (#106), naming alert-provider-crd as the Alert CRD's owner. Nothing
 # rendered changes, so 0.1.28 stays pinned. A release refuses a published version whose contents
 # differ, even by a comment, so this version has to move.
-version: 0.1.29
+# 0.1.30 (installer#393): sre-clickhouse-disk-headroom, the first metric alert, fires below 3 GiB
+# free on the ClickHouse claim, with its Metric k8s-volume-available. sre-jwt-in-telemetry carries
+# observability.krateo.io/analysis: human, so a leak goes to a person without an RCA.
+# sre-certificate-expiry-warning ignores composition drift lines, which matched its own name.
+# NEEDS alert-provider 0.2.61 and otel-collector-daemonset 0.1.19. With an older alert-provider the
+# headroom alert matches no points and fires forever, and the label does nothing.
+version: 0.1.30
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack

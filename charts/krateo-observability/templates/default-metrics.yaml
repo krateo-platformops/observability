@@ -1,0 +1,29 @@
+{{- /*
+  Metric resources (observability.krateo.io/v1alpha1) that the default metric alerts name in
+  metricRef. Shipped with the alerts, because an alert whose Metric is missing is refused as Invalid.
+*/ -}}
+{{- if .Values.defaultAlerts.enabled }}
+{{- range .Values.defaultMetrics }}
+---
+apiVersion: observability.krateo.io/v1alpha1
+kind: Metric
+metadata:
+  name: {{ .name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: krateo-observability-defaults
+    app.kubernetes.io/part-of: krateo-observability
+spec:
+  metricName: {{ .metricName | quote }}
+  type: {{ .type }}
+  {{- with .unit }}
+  unit: {{ . | quote }}
+  {{- end }}
+  {{- with .collectedBy }}
+  collectedBy: {{ . | quote }}
+  {{- end }}
+  {{- with .description }}
+  description: {{ . | quote }}
+  {{- end }}
+{{- end }}
+{{- end }}

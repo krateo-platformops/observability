@@ -51,9 +51,18 @@ hyperdxLoadBalancer:
 # (interval/threshold/thresholdType/where/message) and is user-editable/deletable.
 # NOTE: the Alert CRD is served by the clickstack-agent — these apply AFTER that CRD is
 # present (installer applies clickstack-agent first). Standalone-without-CRD → enabled:false.
+# Metric resources that metric alerts in defaultAlerts refer to by name (metricRef).
+defaultMetrics:
+  - name: k8s-volume-available
+    metricName: k8s.volume.available
+    type: gauge
+    unit: By
+    collectedBy: kubeletstatsreceiver
+    description: Bytes free on a pod volume. otel-collector-daemonset reports PersistentVolumeClaims only.
+
 defaultAlerts:
-  # Ship the default alert set. Requires the Alert CRD (served by the clickstack-agent chart); set
-  # false when installing this chart standalone without it.
+  # Ship the default alert set. Requires the Alert and Metric CRDs from alert-provider-crd; set
+  # false when installing this chart standalone without them.
   enabled: true
 
   # Also ship the EXTENDED tier. Core alerts are the ones that should be silent on a healthy
@@ -108,10 +117,11 @@ defaultAlerts:
   #
   # Event alerts skip DELETED rows, the copy of an expired Event that re-fires them an hour later.
   #
-  # NOT COVERED, DELIBERATELY: saturation — CPU, memory, disk and PV percentages, node capacity,
-  # certificate DAYS REMAINING. The Alert CRD counts rows in a logs source and cannot address a
-  # metric, so writing those as log searches would produce exactly the always-OK alerts rule 1 is
-  # about. They are blocked on the Metric CRD + metricRef design (alert-troubleshooter#34).
+  # METRIC ALERTS: an entry with metricRef aggregates a Metric from defaultMetrics instead of
+  # counting log rows. Its labels select points by attribute or resource attribute, which needs
+  # alert-provider 0.2.61: an older one matches point attributes only, so a kubeletstats filter
+  # matches nothing, and a `below` alert then fires forever on the empty window.
+  # Still not covered: CPU and memory pressure, node capacity, certificate days remaining.
   #
   # COST: each firing alert starts a model-driven RCA and opens a TroubleshootingReport, one per
   # alert (observed: 3 firing alerts -> exactly 3 reports). AlertTroubleshooter's reportCooldown
@@ -273,10 +283,12 @@ defaultAlerts:
       thresholdType: above
       interval: 15m
       message: A runtime reported memory exhaustion itself — a JVM heap error, a Go allocation failure, a malloc refusal. Complements the OOMKilled alert, which only sees kills the KERNEL performed.
+    # The drift exclusion: a composition controller's drift line lists changedObjects, and this
+    # alert's own name holds both words it searches for, so it fired on its own update.
     - name: sre-certificate-expiry-warning
       tier: core
       displayName: Certificate expiry or TLS verification failure
-      where: 'ResourceAttributes[''telemetry.source''] = '''' AND ServiceName NOT IN (''krateo-observability'', ''krateo-alert-troubleshooter'', ''krateo-alert-provider'', ''incident-controller'', ''incident-provider'', ''krateo-clickstack'', ''krateo-clickstack-clickhouse-clickhouse'', ''krateo-clickstack-keeper-keeper'', ''krateo-clickstack-mongodb'', ''clickhouse-mcp-server'', ''clickhouse-operator'', ''incident-agent'', ''autopilot'', ''kagent'', ''repo-mcp-server'') AND ((positionCaseInsensitive(Body, ''certificate'') > 0 AND (positionCaseInsensitive(Body, ''expir'') > 0 OR positionCaseInsensitive(Body, ''has expired'') > 0)) OR positionCaseInsensitive(Body, ''x509: certificate'') > 0)'
+      where: 'ResourceAttributes[''telemetry.source''] = '''' AND JSONExtractString(Body, ''msg'') != ''Composition drift detected and self-healed'' AND ServiceName NOT IN (''krateo-observability'', ''krateo-alert-troubleshooter'', ''krateo-alert-provider'', ''incident-controller'', ''incident-provider'', ''krateo-clickstack'', ''krateo-clickstack-clickhouse-clickhouse'', ''krateo-clickstack-keeper-keeper'', ''krateo-clickstack-mongodb'', ''clickhouse-mcp-server'', ''clickhouse-operator'', ''incident-agent'', ''autopilot'', ''kagent'', ''repo-mcp-server'') AND ((positionCaseInsensitive(Body, ''certificate'') > 0 AND (positionCaseInsensitive(Body, ''expir'') > 0 OR positionCaseInsensitive(Body, ''has expired'') > 0)) OR positionCaseInsensitive(Body, ''x509: certificate'') > 0)'
       threshold: 1
       thresholdType: above
       interval: 1h
@@ -296,12 +308,32 @@ defaultAlerts:
     # is still a token in the store. Measured with no exclusions: 0 rows over 7 days on krateo-057.
     - name: sre-jwt-in-telemetry
       tier: core
+      # A firing means a token got past both collectors. Its incident goes to a person: no RCA,
+      # so no agent reads the row. Needs alert-provider 0.2.61; older ones ignore the label.
+      metadataLabels:
+        observability.krateo.io/analysis: human
       displayName: JWT leaked into telemetry
       where: '(match(Body, ''eyJ[A-Za-z0-9._-]{20,}'') OR match(toString(mapValues(LogAttributes)), ''eyJ[A-Za-z0-9._-]{20,}''))'
       threshold: 1
       thresholdType: above
       interval: 15m
       message: A bearer token reached the telemetry store UNREDACTED. The collector sweeps JWTs from log bodies and attributes, but that processor runs error_mode ignore, so a failed redaction statement is skipped silently and this is the only signal left. Treat the matched window as disclosed — the store is queryable by anyone with ClickHouse access and rows live for the retention period. Find the emitting ServiceName, stop it at source, then confirm this returns to 0.
+    # The ClickHouse data volume. A full disk is how this stack has failed before (installer#393):
+    # inserts fail, collectors buffer and crash, and telemetry stops. The threshold is 20% of the
+    # 15Gi claimed in clickhouse.cluster.spec.dataVolumeClaimSpec below. Change both together.
+    # `below` also fires if the metric stops: the volume stopped reporting, which is worth knowing.
+    # Needs otel-collector-daemonset 0.1.19 or later for k8s.volume.*, and alert-provider 0.2.61.
+    - name: sre-clickhouse-disk-headroom
+      tier: core
+      displayName: ClickHouse disk below 20% free
+      metricRef: k8s-volume-available
+      aggregation: min
+      labels:
+        k8s.persistentvolumeclaim.name: clickhouse-storage-volume-krateo-clickstack-clickhouse-clickhouse-0-0-0
+      threshold: 3221225472
+      thresholdType: below
+      interval: 15m
+      message: The ClickHouse data volume has under 3 GiB free. At zero, inserts fail and telemetry stops. Follow docs/clickhouse-disk-full.md, and never drop audit partitions.
     - name: sre-rbac-denied-burst
       tier: extended
       displayName: Authorization failures elevated
