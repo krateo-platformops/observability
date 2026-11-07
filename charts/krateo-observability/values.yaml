@@ -255,10 +255,16 @@ defaultAlerts:
       thresholdType: below
       interval: 15m
       message: 'Almost no logs reached the store in the last window. This is a DEAD-MAN''S SWITCH: it fires on the ABSENCE of data, which is the one failure every other alert here is blind to — a broken collector makes the whole catalogue go quiet and look healthy.'
+    # The last two clauses drop two errors controller-runtime retries on its own: a reconcile cut short
+    # by shutdown ("context canceled") and an optimistic-lock conflict ("the object has been
+    # modified"). Both appear whenever core-provider restarts in a roll. On krateo-057 they were every
+    # match in the 2 days to 2026-11-07, firing on 4 rolls. Config Connector's 516 matches in 4 days
+    # were conflicts it re-queues too. What still fires is real: a CompositionDefinition stuck
+    # waiting for its compositions to delete, 10 windows in those 4 days.
     - name: sre-krateo-composition-reconcile-error
       tier: core
       displayName: Krateo — composition reconcile errors
-      where: (positionCaseInsensitive(Body, 'Reconciler error') > 0 OR JSONExtractString(Body, 'object', 'reason') = 'CannotObserveExternalResource') AND ResourceAttributes['telemetry.source'] = '' AND ServiceName NOT IN ('krateo-observability', 'krateo-alert-troubleshooter', 'krateo-alert-provider', 'incident-controller', 'incident-provider', 'krateo-clickstack', 'krateo-clickstack-clickhouse-clickhouse', 'krateo-clickstack-keeper-keeper', 'krateo-clickstack-mongodb', 'clickhouse-mcp-server', 'clickhouse-operator', 'incident-agent', 'autopilot', 'kagent', 'repo-mcp-server')
+      where: (positionCaseInsensitive(Body, 'Reconciler error') > 0 OR JSONExtractString(Body, 'object', 'reason') = 'CannotObserveExternalResource') AND ResourceAttributes['telemetry.source'] = '' AND ServiceName NOT IN ('krateo-observability', 'krateo-alert-troubleshooter', 'krateo-alert-provider', 'incident-controller', 'incident-provider', 'krateo-clickstack', 'krateo-clickstack-clickhouse-clickhouse', 'krateo-clickstack-keeper-keeper', 'krateo-clickstack-mongodb', 'clickhouse-mcp-server', 'clickhouse-operator', 'incident-agent', 'autopilot', 'kagent', 'repo-mcp-server') AND positionCaseInsensitive(concat(JSONExtractString(Body, 'err'), JSONExtractString(Body, 'error')), 'context canceled') = 0 AND positionCaseInsensitive(concat(JSONExtractString(Body, 'err'), JSONExtractString(Body, 'error')), 'the object has been modified') = 0
       threshold: 3
       thresholdType: above
       interval: 15m
