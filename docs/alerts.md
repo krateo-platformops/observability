@@ -245,3 +245,12 @@ alert and started an RCA: 17 of the 26 active 15-minute windows on krateo-057 in
 3 times (`object.count >= 3`), meaning a probe that kept failing for about 30 seconds or more. Over the
 same week that leaves 1 firing window: snowplow unready for 2 minutes, with 25 repeats.
 
+## `sre-krateo-composition-reconcile-error` and rolls (0.1.33)
+
+controller-runtime logs "Reconciler error" for two errors it retries by itself: a reconcile cut short
+by shutdown (`context canceled`) and an optimistic-lock conflict (`the object has been modified`).
+core-provider logs both whenever it restarts. On krateo-057 they were every match in the 2 days to
+2026-11-07, firing the alert on 4 installer rolls. Config Connector's 516 matches in 4 days were
+conflicts it re-queues too. 0.1.33 excludes both messages, in `err` or `error`. Over the same 4 days
+what still fires is a CompositionDefinition stuck waiting for its compositions to delete, in 10 windows.
+
