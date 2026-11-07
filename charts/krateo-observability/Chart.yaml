@@ -94,7 +94,10 @@ type: application
 # sre-certificate-expiry-warning ignores composition drift lines, which matched its own name.
 # NEEDS alert-provider 0.2.61 and otel-collector-daemonset 0.1.19. With an older alert-provider the
 # headroom alert matches no points and fires forever, and the label does nothing.
-version: 0.1.30
+# 0.1.31 (installer#394): sre-jwt-in-traces, the span half of the JWT detector, reading otel_traces
+# with `source: traces`. Labelled analysis: human like the log detector. NEEDS alert-provider 0.2.62:
+# an older one refuses the `source` field and the release fails.
+version: 0.1.31
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack

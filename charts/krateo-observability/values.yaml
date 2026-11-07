@@ -318,6 +318,20 @@ defaultAlerts:
       thresholdType: above
       interval: 15m
       message: A bearer token reached the telemetry store UNREDACTED. The collector sweeps JWTs from log bodies and attributes, but that processor runs error_mode ignore, so a failed redaction statement is skipped silently and this is the only signal left. Treat the matched window as disclosed — the store is queryable by anyone with ClickHouse access and rows live for the retention period. Find the emitting ServiceName, stop it at source, then confirm this returns to 0.
+    # The span half of installer#394: the same JWT shape, read from otel_traces. The collectors
+    # delete http.header.Authorization and redact the rest, so this is the check for a token that
+    # got past them. Needs alert-provider 0.2.62, which adds `source`; an older one refuses the field.
+    - name: sre-jwt-in-traces
+      tier: core
+      metadataLabels:
+        observability.krateo.io/analysis: human
+      displayName: JWT leaked into traces
+      source: traces
+      where: "match(toString(mapValues(SpanAttributes)), 'eyJ[A-Za-z0-9._-]{20,}') OR match(StatusMessage, 'eyJ[A-Za-z0-9._-]{20,}') OR match(toString(mapValues(ResourceAttributes)), 'eyJ[A-Za-z0-9._-]{20,}') OR arrayExists(x -> match(toString(x), 'eyJ[A-Za-z0-9._-]{20,}'), `Events.Attributes`)"
+      threshold: 1
+      thresholdType: above
+      interval: 15m
+      message: A bearer token reached otel_traces UNREDACTED, in span or resource attributes, a status message or a span event. Treat it as exposed and rotate it. The incident goes to a person with no automatic analysis, so no agent reads the span.
     # The ClickHouse data volume. A full disk is how this stack has failed before (installer#393):
     # inserts fail, collectors buffer and crash, and telemetry stops. The threshold is 20% of the
     # 15Gi claimed in clickhouse.cluster.spec.dataVolumeClaimSpec below. Change both together.

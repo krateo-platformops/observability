@@ -386,6 +386,14 @@
                   "type": "string"
                 },
                 "description": "Extra labels on the Alert resource, e.g. observability.krateo.io/analysis: human."
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "logs",
+                  "traces"
+                ],
+                "description": "Which rows where reads: logs (default) or traces. Needs alert-provider 0.2.62. Not with metricRef."
               }
             }
           }

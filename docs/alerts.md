@@ -125,6 +125,7 @@ about whether your cluster has that problem.
 | `sre-app-out-of-memory` | core | logs | above 0 | 15m | 0 |
 | `sre-certificate-expiry-warning` | core | logs | above 0 | 1h | 7,434 |
 | `sre-jwt-in-telemetry` | core | logs | above 1 | 15m | 0 (see below) |
+| `sre-jwt-in-traces` | core | traces | above 1 | 15m | 0 of 45,180 spans |
 | `sre-clickhouse-disk-headroom` | core | metric `k8s.volume.available`, min | below 3 GiB | 15m | n/a (0.1.30) |
 | `sre-rbac-denied-burst` | extended | logs | above 20 | 15m | 3,240 |
 | `sre-upstream-timeouts` | extended | logs | above 50 | 15m | 1,217 |
