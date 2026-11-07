@@ -179,10 +179,14 @@ defaultAlerts:
       thresholdType: above
       interval: 5m
       message: The container runtime could not create or tear down a pod sandbox. Typically CNI, containerd or a node-level fault rather than anything wrong with the workload.
+    # count >= 3 keeps a probe that kept failing and drops the single readiness failure every pod
+    # logs once on start. Without it, each installer roll tripped this alert and started an RCA:
+    # 17 of 26 active 15-minute windows on krateo-057 in 7 days, all of them rolls. With it, 1 window
+    # in that week, snowplow unready for 2 minutes with 25 repeats.
     - name: sre-probe-failing
       tier: core
       displayName: Readiness or liveness probe failing
-      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'type') != 'DELETED' AND JSONExtractString(Body, 'object', 'reason') = 'Unhealthy'
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'type') != 'DELETED' AND JSONExtractString(Body, 'object', 'reason') = 'Unhealthy' AND JSONExtractInt(Body, 'object', 'count') >= 3
       threshold: 6
       thresholdType: above
       interval: 15m

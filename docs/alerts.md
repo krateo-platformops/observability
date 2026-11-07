@@ -110,7 +110,7 @@ about whether your cluster has that problem.
 | `sre-pod-unschedulable` | core | events | above 0 | 15m | 0 |
 | `sre-pod-evicted` | core | events | above 0 | 5m | 0 |
 | `sre-pod-sandbox-failure` | core | events | above 0 | 5m | 0 |
-| `sre-probe-failing` | core | events | above 5 | 15m | 470 |
+| `sre-probe-failing` | core | events, probe event repeated 3+ times | above 5 | 15m | 470 before 0.1.32 |
 | `sre-job-failed` | core | events | above 0 | 15m | 0 |
 | `sre-volume-attach-failure` | core | events | above 3 | 15m | 218 |
 | `sre-pvc-provisioning-failure` | core | events | above 0 | 15m | 0 |
@@ -236,3 +236,12 @@ Entries are prefixed `sre-` because Helm will not adopt a resource it does not a
 entry reusing the name of an alert someone hand-applied fails the upgrade outright with an
 ownership error. A draft of this set did exactly that against a hand-applied CR on a live
 cluster.
+
+## `sre-probe-failing` and rolls (0.1.32)
+
+Every pod logs one readiness failure as it starts, so before 0.1.32 each installer roll fired this
+alert and started an RCA: 17 of the 26 active 15-minute windows on krateo-057 in the 7 days to
+2026-11-07, all of them rolls. It now counts a probe event only once Kubernetes has repeated it at least
+3 times (`object.count >= 3`), meaning a probe that kept failing for about 30 seconds or more. Over the
+same week that leaves 1 firing window: snowplow unready for 2 minutes, with 25 repeats.
+
