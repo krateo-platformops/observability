@@ -12,6 +12,7 @@ timestamp: 2026-08-07T00:00:00Z
 Curated, newest first. Release notes live in GitHub Releases; the `Chart.yaml` comment
 blocks carry the per-bump rationale.
 
+- **2026-11-07 — `sse-proxy` 1.4.1 (krateo-sse-proxy 0.1.22).** The stream is live events: the cursor starts 30 seconds back and stays there while idle, so the first client no longer gets an hour of backlog into a 64-slot buffer. A client with no topic no longer gets a row twice (sse-proxy#30).
 - **2026-11-05 — `sse-proxy` 1.4.0 (krateo-sse-proxy 0.1.21).** Refuses a token in the query string
   on every path, even with valid credentials, and answers CORS preflights before authentication.
   Without that, a portal on another origin can't connect unless a gateway answers them, which left the

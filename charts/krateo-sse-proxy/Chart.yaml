@@ -49,8 +49,11 @@ type: application
 # string: it gets 401, even with valid credentials (sse-proxy#40). Every cluster running this proxy has
 # a frontend past that, 1.8.13 or later. Also answers CORS preflights itself, so a portal on another
 # origin connects without a gateway answering them; a0-openstack-d3's bell needs this.
-version: 0.1.21
-appVersion: "1.4.0"
+# 0.1.22: bump the sse-proxy image to 1.4.1. The stream is live events: the first client after a
+# boot or an idle period no longer receives an hour of backlog into a 64-slot buffer, and a client
+# with no topic no longer receives a row twice (sse-proxy#30). History stays on GET /events.
+version: 0.1.22
+appVersion: "1.4.1"
 home: https://krateo.io
 icon: https://github.com/krateoplatformops/krateo/blob/main/docs/media/logo.svg
 keywords:
