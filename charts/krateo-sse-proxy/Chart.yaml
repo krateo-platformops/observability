@@ -52,8 +52,11 @@ type: application
 # 0.1.22: bump the sse-proxy image to 1.4.1. The stream is live events: the first client after a
 # boot or an idle period no longer receives an hour of backlog into a 64-slot buffer, and a client
 # with no topic no longer receives a row twice (sse-proxy#30). History stays on GET /events.
-version: 0.1.22
-appVersion: "1.4.1"
+# 0.1.23: bump the sse-proxy image to 1.4.2. Each client's buffer holds one full poll (500 events),
+# so ordinary bursts of 68 to 257 rows no longer drop events for a client that has kept up. On 1.4.1
+# about 1 event in 9 was dropped that way (sse-proxy#30). Up to about 500 events held per client.
+version: 0.1.23
+appVersion: "1.4.2"
 home: https://krateo.io
 icon: https://github.com/krateoplatformops/krateo/blob/main/docs/media/logo.svg
 keywords:
