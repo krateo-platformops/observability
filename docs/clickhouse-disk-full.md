@@ -73,7 +73,11 @@ componentValues:
                       - query: "GRANT SELECT ON system.disks"
                       - query: "GRANT SELECT ON system.parts"
                       - query: "GRANT SELECT ON system.tables"
-                      - query: "GRANT ALTER DELETE, ALTER MATERIALIZE TTL ON default.*"
+                      - query: "GRANT ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_logs"
+                      - query: "GRANT ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_traces"
+                      - query: "GRANT ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_metrics_gauge"
+                      - query: "GRANT ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_metrics_sum"
+                      - query: "GRANT ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_metrics_histogram"
 ```
 
 `password_sha256_hex` only — a plaintext `password` is rejected by the installer's schema by name,
@@ -82,7 +86,10 @@ because the Installer CR, etcd and the helm release Secret would all carry it in
 **Grant per table, never `ON system.*` or `ON default.*` for a human principal.** `INSERT ON
 default.*` reaches `default.krateo_audit`, whose `krateo_audit_worm_mv` hashes and seals rows as
 genuine — a writer with that grant can forge audit history through the tamper-evidence the trail
-exists to provide. The grants above are read-only on `system` and carry no `INSERT` at all.
+exists to provide. `ALTER DELETE ON default.*` is as bad: it reaches `krateo_audit`, whose rows must
+never be removed. `ALTER DELETE` also covers `DROP PARTITION`, so the grants above are all section B
+needs. They carry no `INSERT` and no `SELECT` on `default`, and refuse the audit tables, tested on
+ClickHouse 24.8: `DROP PARTITION` passes on `otel_logs` and is refused on `krateo_audit`.
 
 ## Why TTL does not save you
 
