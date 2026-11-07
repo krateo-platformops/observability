@@ -85,7 +85,10 @@ type: application
 # 0.1.28: HyperDX's own traces and metrics go to the node-local agent (G13). The upstream default named
 # the disabled collector subchart, so none arrived. Logs stay off OTLP, because filelog has them, and
 # traces are sampled at 5%. The endpoint must stay set: without one the SDK defaults to HyperDX's cloud.
-version: 0.1.28
+# 0.1.29: a comment only (#106), naming alert-provider-crd as the Alert CRD's owner. Nothing
+# rendered changes, so 0.1.28 stays pinned. A release refuses a published version whose contents
+# differ, even by a comment, so this version has to move.
+version: 0.1.29
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack
