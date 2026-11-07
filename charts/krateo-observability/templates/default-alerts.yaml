@@ -39,6 +39,9 @@ metadata:
     {{- end }}
 spec:
   displayName: {{ .displayName | default .name | quote }}
+  {{- with .source }}
+  source: {{ . }}
+  {{- end }}
   {{- with .where }}
   where: {{ . | quote }}
   {{- end }}
