@@ -34,12 +34,28 @@ metadata:
   labels:
     app.kubernetes.io/managed-by: krateo-observability-defaults
     app.kubernetes.io/part-of: krateo-observability
+    {{- with .metadataLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
   displayName: {{ .displayName | default .name | quote }}
   {{- with .where }}
   where: {{ . | quote }}
   {{- end }}
-  threshold: {{ .threshold }}
+  {{- with .metricRef }}
+  metricRef:
+    name: {{ . | quote }}
+  {{- end }}
+  {{- with .aggregation }}
+  aggregation: {{ . }}
+  {{- end }}
+  {{- with .labels }}
+  labels:
+    {{- range $k, $v := . }}
+    {{ $k | quote }}: {{ $v | quote }}
+    {{- end }}
+  {{- end }}
+  threshold: {{ .threshold | int64 }}
   thresholdType: {{ .thresholdType }}
   interval: {{ .interval }}
   {{- with .message }}

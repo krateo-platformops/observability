@@ -320,7 +320,7 @@
               },
               "threshold": {
                 "type": "integer",
-                "description": "A row count. Typed integer, not number: crdgen types number as a string in the generated CRD."
+                "description": "A row count, or a metric value for a metric alert. Typed integer, not number: crdgen types number as a string in the generated CRD."
               },
               "thresholdType": {
                 "type": "string",
@@ -355,6 +355,37 @@
                   "extended"
                 ],
                 "description": "core ships whenever defaultAlerts.enabled; extended also requires defaultAlerts.extended. Absent is treated as core."
+              },
+              "metricRef": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Name of a Metric in defaultMetrics to aggregate instead of counting log rows. Excludes where."
+              },
+              "aggregation": {
+                "type": "string",
+                "enum": [
+                  "avg",
+                  "max",
+                  "min",
+                  "sum",
+                  "p95",
+                  "increase"
+                ],
+                "description": "How a metric alert's points over the interval become the compared value. Required with metricRef."
+              },
+              "labels": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Metric alerts only: keep points whose attribute or resource attribute has this value. Resource attributes need alert-provider 0.2.61."
+              },
+              "metadataLabels": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Extra labels on the Alert resource, e.g. observability.krateo.io/analysis: human."
               }
             }
           }
@@ -362,6 +393,46 @@
         "extended": {
           "type": "boolean",
           "description": "Also ship the extended tier: catch-all and baseline-relative alerts whose thresholds mean 'far above normal' rather than 'anything at all', and which need retuning per cluster."
+        }
+      }
+    },
+    "defaultMetrics": {
+      "type": "array",
+      "description": "Metric resources the default metric alerts refer to by name.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "metricName",
+          "type"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "metricName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "gauge",
+              "sum",
+              "histogram"
+            ]
+          },
+          "unit": {
+            "type": "string"
+          },
+          "collectedBy": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
         }
       }
     }

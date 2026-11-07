@@ -125,6 +125,7 @@ about whether your cluster has that problem.
 | `sre-app-out-of-memory` | core | logs | above 0 | 15m | 0 |
 | `sre-certificate-expiry-warning` | core | logs | above 0 | 1h | 7,434 |
 | `sre-jwt-in-telemetry` | core | logs | above 1 | 15m | 0 (see below) |
+| `sre-clickhouse-disk-headroom` | core | metric `k8s.volume.available`, min | below 3 GiB | 15m | n/a (0.1.30) |
 | `sre-rbac-denied-burst` | extended | logs | above 20 | 15m | 3,240 |
 | `sre-upstream-timeouts` | extended | logs | above 50 | 15m | 1,217 |
 | `sre-volume-resize-issue` | extended | events | above 0 | 1h | 4 |
@@ -213,10 +214,14 @@ the always-OK alerts rule 1 is about.
 (*Metric as a custom resource + metricRef on Alert*) is **CLOSED**, and the Alert CRD now carries
 `metricRef` and `labels`. So saturation is no longer blocked on a design — it needs a `Metric` CR
 per quantity, and there are **zero** `Metric` resources on krateo-057, so the metric path is
-unexercised rather than unavailable. A PV-headroom alert also needs `k8s.volume.*`, which
-`otel-collector-daemonset` emits from 0.1.19 for PersistentVolumeClaims only. Install that chart
-first: HyperDX evaluates an empty window as 0, so a `below` alert on a metric that isn't arriving
-could fire on nothing. See installer#393.
+unexercised rather than unavailable. `sre-clickhouse-disk-headroom` (0.1.30) is the first metric
+alert: the minimum of `k8s.volume.available` on the ClickHouse claim, below 3 GiB. It needs
+`otel-collector-daemonset` 0.1.19 for `k8s.volume.*`, and `alert-provider` 0.2.61, whose `labels`
+match resource attributes. With an older `alert-provider` the claim filter matches no points, and a
+`below` alert fires on the empty window. See installer#393.
+
+`sre-jwt-in-telemetry` carries `observability.krateo.io/analysis: human` from 0.1.30: its incident
+goes to a person with no RCA, so no agent reads the leaked row.
 
 ## Cost
 
