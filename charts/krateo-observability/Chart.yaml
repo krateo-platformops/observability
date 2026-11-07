@@ -97,7 +97,10 @@ type: application
 # 0.1.31 (installer#394): sre-jwt-in-traces, the span half of the JWT detector, reading otel_traces
 # with `source: traces`. Labelled analysis: human like the log detector. NEEDS alert-provider 0.2.62:
 # an older one refuses the `source` field and the release fails.
-version: 0.1.31
+# 0.1.32: sre-probe-failing counts only a probe event repeated at least 3 times, so the single
+# startup readiness failure of every pod in a roll no longer fires it (17 roll windows in 7 days
+# on krateo-057 down to 1, a 2-minute snowplow outage).
+version: 0.1.32
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack
