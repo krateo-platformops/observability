@@ -385,10 +385,11 @@ opentelemetry-collector:
         logs_table_name: otel_logs
         traces_table_name: otel_traces
         metrics_table_name: otel_metrics
-        # create_schema:true so this node-local agent owns otel_traces creation (idempotent
-        # CREATE IF NOT EXISTS; otel_logs/otel_metrics already exist). Required by the traces
-        # pipeline below — the gateway has create_schema:true but no traces pipeline, so
-        # without this nothing ever creates otel_traces. KOS-1 #112 bug #1.
+        # create_schema:true creates otel_logs and otel_metrics_* (idempotent CREATE IF NOT
+        # EXISTS). NOT otel_traces any more: traces leave this agent through `loadbalancing`
+        # below, and the exporter creates a signal's tables only when that signal's exporter
+        # starts, so otel-collector-tailsampling (>= 0.1.1) owns otel_traces now, with the same
+        # 168h ttl. traces_table_name stays set but unused.
         create_schema: true
         # RETENTION — DO NOT REMOVE. Incident 2026-07: with no TTL the otel_* tables grew
         # unbounded and filled the 10Gi ClickHouse volume in 8 days → every insert failed
@@ -436,6 +437,35 @@ opentelemetry-collector:
           initial_interval: 5s
           max_interval: 30s
           max_elapsed_time: 300s
+
+      # TRACES LEAVE THIS AGENT FOR THE TAIL SAMPLER (installer#402, observability#118 step 2).
+      # Tail sampling decides per FINISHED trace, so every span of a trace must reach the same
+      # sampler replica whichever node produced it: the platform gateway and snowplow run on
+      # different nodes. `loadbalancing` hashes TraceId over the replicas that the headless
+      # Service's DNS returns, and re-resolves as they come and go.
+      # Depends on otel-collector-tailsampling being installed. Both charts are pinned under the
+      # installer's `portal` feature, so neither exists without the other; if either pin's feature
+      # ever changes, this exporter would point at a Service that isn't there.
+      # The SLIs are NOT routed here: traces/slo below still sees every span on this node.
+      loadbalancing:
+        routing_key: traceID
+        protocol:
+          otlp:
+            timeout: 10s
+            tls:
+              insecure: true
+            retry_on_failure:
+              enabled: true
+              initial_interval: 5s
+              max_interval: 30s
+              max_elapsed_time: 300s
+        resolver:
+          dns:
+            hostname: otel-collector-tailsampling-opentelemetry-collector.krateo-system.svc.cluster.local
+            # A STRING: the dns resolver's `port` is typed string, and an integer here fails config
+            # decoding at startup on every node ("'port' expected type 'string'"). Caught by
+            # tests/tailsampling-route-docker.py; helm lint and the component check both pass it.
+            port: "4317"
 
     connectors:
       # SLO SPAN METRICS (D5). Turns the spans kept by filter/slo-spans into a call counter and a
@@ -566,9 +596,12 @@ opentelemetry-collector:
         traces:
           receivers: [otlp]
           # `transform` runs the trace_statements above (drop Authorization header + redact JWTs) BEFORE
-          # batch/export, so no caller JWT reaches otel_traces (#122).
+          # batch/export, so no caller JWT reaches otel_traces (#122). k8sattributes runs HERE, on the
+          # node, because it associates spans with pods by the sender's IP, which the tail sampler
+          # would not see. Then `loadbalancing` hands each trace to its tail-sampler replica, which
+          # writes the kept ones to otel_traces.
           processors: [memory_limiter, k8sattributes, transform, batch]
-          exporters: [clickhouse]
+          exporters: [loadbalancing]
         # SLO SPAN METRICS (D5): a SECOND consumer of the same otlp receiver. A receiver fans out to
         # every pipeline that names it, each getting its own copy, so the `traces` pipeline above is
         # byte-identical and every span still reaches otel_traces. This one keeps only the SLO spans

@@ -233,6 +233,12 @@ Wraps the same upstream chart in `daemonset` mode, stock
     `otelcol-contrib components` on that image). If the image changes, check again: `helm
     template` renders an unknown component without complaint and the collector only rejects
     it at startup.
+- **Traces go to the tail sampler, not to ClickHouse** (0.1.20, observability#118 step 2). The
+  `traces` pipeline enriches on the node (k8sattributes needs the sender's pod IP), redacts, then
+  hands each trace to `otel-collector-tailsampling` through a `loadbalancing` exporter keyed on
+  TraceId, DNS-resolving the sampler's headless Service. The resolver's `port` must be a string.
+  `traces/slo` is untouched, so the SLIs still count every span. Both charts are pinned under the
+  installer's `portal` feature, so neither exists without the other.
 - Same `extraEnvs` Secret wiring and resources as the deployment chart.
 
 ## `charts/otel-collector-tailsampling` — the trace tail sampler

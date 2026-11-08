@@ -16,13 +16,15 @@ on:
   pull_request:
     paths:
       - "charts/otel-collector-tailsampling/**"
-      - "tests/tailsampling-docker.py"
+      - "charts/otel-collector-daemonset/**"
+      - "tests/tailsampling-*.py"
       - ".github/workflows/check-tailsampling.yaml"
   push:
     branches: [main]
     paths:
       - "charts/otel-collector-tailsampling/**"
-      - "tests/tailsampling-docker.py"
+      - "charts/otel-collector-daemonset/**"
+      - "tests/tailsampling-*.py"
   workflow_dispatch:
 
 permissions:
@@ -46,3 +48,8 @@ jobs:
         run: helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
       - name: Run each sampling policy against the pinned collector
         run: python3 tests/tailsampling-docker.py .
+      # The daemonset's rendered loadbalancing exporter, from two stand-in agents, to two sampler
+      # replicas behind the Service's hostname: every kept trace must land whole on one replica.
+      # This is what caught the dns resolver's `port` having to be a string.
+      - name: Route traces from two agents to two sampler replicas
+        run: python3 tests/tailsampling-route-docker.py .
