@@ -9,7 +9,11 @@ description: >-
 type: application
 # 0.1.0: first release. It ships idle: nothing sends to it until otel-collector-daemonset's traces
 # pipeline is switched to its loadbalancing exporter (observability#118, step 2).
-version: 0.1.0
+# 0.1.1: this tier creates otel_traces (create_schema: true, ttl: 168h, as the daemonset did).
+# After step 2 the daemonset's ClickHouse exporter no longer serves traces, and the exporter
+# creates a signal's tables only when that signal's exporter starts, so without this a fresh
+# install would have no otel_traces. Pin 0.1.1, not 0.1.0.
+version: 0.1.1
 # The collector this chart renders: the upstream chart's own appVersion picks the image tag.
 # Keep equal to otel-collector-daemonset's appVersion, so both tiers run the same build.
 appVersion: "0.158.0"

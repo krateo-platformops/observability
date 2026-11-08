@@ -261,8 +261,9 @@ made at the gateway: agentgateway decides sampling when a request arrives, befor
 - **The SLIs are not sampled.** They come from the daemonset's `traces/slo` pipeline, which turns
   every snowplow server span into `traces.span.metrics.*` on the node, before anything reaches this
   tier.
-- **Schema.** `create_schema: false`. otel-collector-daemonset owns `otel_traces`, with its TTL;
-  this tier only inserts.
+- **Schema.** This tier owns `otel_traces`: `create_schema: true` with the same 7-day `ttl` the
+  daemonset used. The exporter creates a signal's tables only when that signal's exporter starts, so
+  once the daemonset routes traces here it no longer creates them.
 - **Sizing.** One replica and 512Mi suit krateo-057, a few spans a second. `num_traces` bounds
   what's held in memory for `decision_wait`. Re-size from a production-scale bench before a large
   install.
