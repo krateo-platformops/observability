@@ -161,9 +161,15 @@ opentelemetry-collector:
         password: "${env:CH_PASSWORD}"
         database: default
         traces_table_name: otel_traces
-        # otel_traces is created by otel-collector-daemonset (create_schema: true, with its 7-day
-        # TTL). One owner for the schema: this tier only inserts.
-        create_schema: false
+        # THIS tier owns otel_traces once the daemonset routes traces here (observability#118,
+        # step 2). The exporter creates a signal's tables only when that signal's exporter starts
+        # (contrib v0.158.0 exporter_traces.go:49-54), so after step 2 the daemonset no longer
+        # creates otel_traces and a fresh install would have none. Same settings as the daemonset
+        # used, so the CREATE is identical: CREATE ... IF NOT EXISTS, and the 7-day TTL.
+        # RETENTION, DO NOT REMOVE: with no TTL the otel_* tables filled the ClickHouse volume in
+        # 8 days (incident 2026-07, see otel-collector-daemonset's clickhouse exporter).
+        create_schema: true
+        ttl: 168h
         timeout: 10s
         retry_on_failure:
           enabled: true
