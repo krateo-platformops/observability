@@ -121,12 +121,15 @@ opentelemetry-collector:
             ottl_condition:
               error_mode: ignore
               span:
-                - 'Int(attributes["http.response.status_code"]) >= 400'
-                - 'Int(attributes["http.status"]) >= 400'
+                - 'Int(span.attributes["http.response.status_code"]) >= 400'
+                - 'Int(span.attributes["http.status"]) >= 400'
           # Scope: only the portal path is sampled. A trace with any span from another service is
           # kept whole, so composition-dynamic-controller reconcile traces (the obs-reconcile-* and
           # composition-reconcile-perf widgets) and agent-gateway LLM traces (agents-token-*) keep
-          # what they have today.
+          # what they have today. The portal path is the browser (krateo-frontend: its spans reach
+          # the collectors through snowplow's rum-ingest), the platform gateway and snowplow. If
+          # krateo-frontend were left out, every browser-originated portal trace would match here
+          # and be kept at 100%, which defeats the sample (installer#405).
           - name: outside-portal-path
             type: ottl_condition
             ottl_condition:
@@ -135,6 +138,7 @@ opentelemetry-collector:
                 - >-
                   resource.attributes["service.name"] != "krateo-agent-gateway-platform"
                   and resource.attributes["service.name"] != "snowplow"
+                  and resource.attributes["service.name"] != "krateo-frontend"
           # The sre-jwt-in-traces detector's own pattern, over the same four places it reads, so
           # sampling never hides a leaked token from it.
           - name: jwt-shaped-value
@@ -142,11 +146,11 @@ opentelemetry-collector:
             ottl_condition:
               error_mode: ignore
               span:
-                - 'IsMatch(ToKeyValueString(attributes), "eyJ[A-Za-z0-9._-]{20,}")'
-                - 'IsMatch(status.message, "eyJ[A-Za-z0-9._-]{20,}")'
+                - 'IsMatch(ToKeyValueString(span.attributes), "eyJ[A-Za-z0-9._-]{20,}")'
+                - 'IsMatch(span.status.message, "eyJ[A-Za-z0-9._-]{20,}")'
                 - 'IsMatch(ToKeyValueString(resource.attributes), "eyJ[A-Za-z0-9._-]{20,}")'
               spanevent:
-                - 'IsMatch(ToKeyValueString(attributes), "eyJ[A-Za-z0-9._-]{20,}")'
+                - 'IsMatch(ToKeyValueString(spanevent.attributes), "eyJ[A-Za-z0-9._-]{20,}")'
           # Everything else on the portal path: a fixed 5%, hashed on TraceId so every replica
           # agrees. Diego, 2026-10-24 (installer#402).
           - name: portal-sample
