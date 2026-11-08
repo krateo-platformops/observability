@@ -45,6 +45,8 @@ opentelemetry-collector:
     # Renamed otelcol-krateo -> krateo-otel-collector when the custom collector was split
     # into its own single-image repo (krateo-platformops/otel-collector) on the canonical CI.
     repository: ghcr.io/krateo-platformops/otel-collector
+    # 1.0.7: adds filterprocessor, so this chart can drop k8s.container.ready for Job-owned pods
+    #        (otel-collector#39).
     # 1.0.6: same code as 1.0.5, tagged from the first commit whose CI ran the Go tests. The
     #        installer's pin gate refuses a tag no test ran against.
     # 1.0.5: adds transformprocessor, so this chart can redact JWTs on the k8sobjects logs
@@ -58,7 +60,7 @@ opentelemetry-collector:
     # 1.0.2: + patched clickhouseexporter — recreate the otel_* schema and retry on UNKNOWN_TABLE
     #        (ClickHouse re-provisioned with a fresh DB) instead of dropping data until a restart.
     # 1.0.1: patched k8sobjectsreceiver (recycle timer + restart-on-close) — KOS-1 #112 bug #2
-    tag: "1.0.6"
+    tag: "1.0.7"
     pullPolicy: IfNotPresent
 
   # The container binary is still named otelcol-krateo (OTel builder dist.name / Dockerfile
@@ -169,7 +171,14 @@ opentelemetry-collector:
             group: ""
             namespaces: []
       k8s_cluster:
-        collection_interval: 60s
+        # 30s, not 60s (Diego, 2026-11-08). The per-pod "not Ready for 5 minutes" alert evaluates
+        # 1-minute buckets, and HyperDX (2.35) checks [t-1m, t) at t+0.4s with no evaluation delay.
+        # At 60s every point is stamped :59 and lands ~4s later, so every bucket was EMPTY when
+        # checked, and under `below 1` an empty bucket fires an ungrouped alert (measured by acmp on
+        # krateo-057, alert-provider 0.2.64). At 30s each minute also holds a :29 point that is
+        # already stored. Cost measured on krateo-057: +125,781 rows/hour, +24% of otel_metrics_gauge
+        # rows, ~+0.4 GiB over the 7-day TTL.
+        collection_interval: 30s
         node_conditions_to_report: [Ready, MemoryPressure, DiskPressure, PIDPressure]
         allocatable_types_to_report: [cpu, memory, ephemeral-storage]
         # 22.7% of otel_metrics_gauge was these two metrics and nothing reads them.
@@ -200,6 +209,27 @@ opentelemetry-collector:
             enabled: false
 
     processors:
+      # JOB-OWNED PODS' READINESS. A completed Job's pod reports k8s.container.ready = 0 for as long
+      # as the pod object exists, so a per-pod "not Ready" alert would fire on every finished
+      # CronJob run (the audit-worm seal/verify pods, the hyperdx-key-bootstrap Job). The
+      # k8s_cluster points carry no owner, so this adds ONE attribute, k8s.job.name, from the pod's
+      # ownerReference, matched by k8s.pod.uid. It is a separate instance from `k8sattributes`
+      # (logs) on purpose: that one copies every pod label, which on every cluster metric would
+      # multiply the series. Readiness is meaningless for a Job's pod, so its points are dropped
+      # below; every other metric of a Job pod is kept (and gains k8s.job.name).
+      k8sattributes/job-owner:
+        passthrough: false
+        extract:
+          metadata: [k8s.job.name]
+        pod_association:
+          - sources:
+              - from: resource_attribute
+                name: k8s.pod.uid
+      filter/job-readiness:
+        error_mode: ignore
+        metrics:
+          datapoint:
+            - 'metric.name == "k8s.container.ready" and resource.attributes["k8s.job.name"] != nil'
       # JWT redaction (installer#394). This pipeline carries Kubernetes Events, whose free-text
       # message can quote a failing command line, token included.
       #
@@ -306,7 +336,7 @@ opentelemetry-collector:
         # add it here, i.e. receivers: [k8s_cluster, prometheus].
         metrics:
           receivers: [k8s_cluster]
-          processors: [memory_limiter, batch]
+          processors: [memory_limiter, k8sattributes/job-owner, filter/job-readiness, batch]
           exporters: [clickhouse]
         traces: null
 

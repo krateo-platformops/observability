@@ -62,8 +62,14 @@ type: application
 # maps. Requires otel-collector 1.0.5, which this chart sets itself.
 # 0.3.14: image 1.0.6, the same code as 1.0.5. The installer's pin gate refused 1.0.5 because no CI
 # ran the Go tests at that tag. Requires 1.0.5 or later, for transform.
-version: 0.3.14
-appVersion: "1.0.6"
+# 0.3.15: k8s_cluster collects every 30s instead of 60s, so a 1-minute HyperDX bucket always holds a
+# point that is already stored when it is checked (the per-pod readiness alert; Diego 2026-11-08):
+# +24% otel_metrics_gauge rows on krateo-057. And k8s.container.ready is dropped for Job-owned pods,
+# found by a narrow k8sattributes/job-owner that adds only k8s.job.name: a finished Job's pod reads
+# not-ready forever. Every other metric is unchanged apart from gaining k8s.job.name on Job pods.
+# Requires image 1.0.7 (filterprocessor), which this chart sets.
+version: 0.3.15
+appVersion: "1.0.7"
 dependencies:
   - name: opentelemetry-collector
     version: 0.170.0
