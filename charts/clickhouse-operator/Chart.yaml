@@ -10,7 +10,9 @@ type: application
 # `enable: false` → `enabled: false` (else the toggles silently no-op and the webhook +
 # cert-manager Certificates the umbrella doesn't provide would come back on). CRD set unchanged
 # (clickhouseclusters + keeperclusters); patch-level app bump v0.0.5 → v0.0.7.
-version: 0.1.1
+# 0.1.2: the operator manager gets 256Mi (request 128Mi) instead of upstream's 128Mi (64Mi). The kernel
+# OOM-killed it 4 times on krateo-057 in the week to 2026-11-08; it idles at 73Mi.
+version: 0.1.2
 appVersion: "0.0.7"
 home: https://krateo.io
 icon: https://raw.githubusercontent.com/krateo-platformops/.github/main/brand/logo.svg

@@ -14,3 +14,14 @@ operator:
     enabled: false
   certManager:
     enabled: false
+  # Upstream sets the manager to 128Mi. On krateo-057 the kernel OOM-killed it 4 times in the week to
+  # 2026-11-08, each followed by its restart within about 1.5s, and it idles at 73Mi, above the
+  # upstream 64Mi request. A killed operator stops reconciling ClickHouse until it comes back.
+  manager:
+    resources:
+      limits:
+        cpu: 500m
+        memory: 256Mi
+      requests:
+        cpu: 10m
+        memory: 128Mi
