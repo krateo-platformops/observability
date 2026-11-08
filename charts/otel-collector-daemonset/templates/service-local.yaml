@@ -1,0 +1,46 @@
+{{- if .Values.localService.enabled }}
+{{- /* A NODE-LOCAL Service for OTLP senders that can only be given a Service name, not their node's IP
+       (the composition-dynamic-controllers read their endpoint from a ConfigMap via envFrom, which
+       can't carry a downward-API value).
+
+       Why a second Service: the upstream chart's Service, <release>-opentelemetry-collector, is
+       HEADLESS (clusterIP: None). internalTrafficPolicy has no effect on a headless Service: DNS
+       returns every node's agent, so a sender's spans can land on another node. There the agent's
+       k8sattributes, filtered to its own node (node_from_env_var K8S_NODE_NAME), doesn't know the
+       sending pod, and the spans go unenriched. A headless Service can't be turned into a ClusterIP
+       in place (spec.clusterIP is immutable), so this one is added beside it.
+
+       ClusterIP + internalTrafficPolicy: Local means kube-proxy delivers to the agent on the sender's
+       own node only. A DaemonSet has an agent on every schedulable node, so there is always a local
+       endpoint, except while that node's agent is restarting, when the sender's exporter retries.
+
+       Senders use http://<release>-local.<namespace>.svc:4318 (OTLP/HTTP) or :4317 (OTLP/gRPC). */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-local
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: opentelemetry-collector
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: krateo
+    component: agent-collector
+spec:
+  type: ClusterIP
+  internalTrafficPolicy: Local
+  selector:
+    app.kubernetes.io/name: opentelemetry-collector
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    component: agent-collector
+  ports:
+    - name: otlp
+      port: 4317
+      targetPort: 4317
+      protocol: TCP
+      appProtocol: grpc
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+      protocol: TCP
+{{- end }}
