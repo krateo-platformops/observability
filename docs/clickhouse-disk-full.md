@@ -70,15 +70,24 @@ componentValues:
                     password_sha256_hex: <sha256 of the password, 64 lowercase hex>
                     profile: default
                     grants:
-                      - query: "GRANT SELECT ON system.disks"
-                      - query: "GRANT SELECT ON system.parts"
-                      - query: "GRANT SELECT ON system.tables"
-                      - query: "GRANT ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_logs"
-                      - query: "GRANT ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_traces"
-                      - query: "GRANT ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_metrics_gauge"
-                      - query: "GRANT ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_metrics_sum"
-                      - query: "GRANT ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_metrics_histogram"
+                      - query: >-
+                          GRANT SELECT ON system.disks, SELECT ON system.parts, SELECT ON system.tables,
+                          ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_logs,
+                          ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_traces,
+                          ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_metrics_gauge,
+                          ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_metrics_sum,
+                          ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_metrics_histogram
 ```
+
+**Put every grant in ONE `query`. ClickHouse applies only the first `grants` list item.** Each
+`- query:` item becomes its own `<grants>` element in the preprocessed `users.xml`, and ClickHouse
+reads only the first. So eight items give the user one privilege, with no error and no log line.
+This is what happened on krateo-057 on 2026-11-08 (installer 0.3.532): `chops` could log in, but
+`SHOW GRANTS FOR chops` listed only `SELECT ON system.disks`. The chart's own `app` and
+`otelcollector` users never hit this, because each already has a single combined statement. One
+`GRANT` with several `privilege ON target` pairs is standard syntax, and every pair lands. After any
+change, check with `SHOW GRANTS FOR chops` (as `default`), never by reading the values or the
+ClickHouseCluster CR, which both look correct when only the first item was applied.
 
 `password_sha256_hex` only — a plaintext `password` is rejected by the installer's schema by name,
 because the Installer CR, etcd and the helm release Secret would all carry it in cleartext.
@@ -88,8 +97,12 @@ default.*` reaches `default.krateo_audit`, whose `krateo_audit_worm_mv` hashes a
 genuine — a writer with that grant can forge audit history through the tamper-evidence the trail
 exists to provide. `ALTER DELETE ON default.*` is as bad: it reaches `krateo_audit`, whose rows must
 never be removed. `ALTER DELETE` also covers `DROP PARTITION`, so the grants above are all section B
-needs. They carry no `INSERT` and no `SELECT` on `default`, and refuse the audit tables, tested on
-ClickHouse 24.8: `DROP PARTITION` passes on `otel_logs` and is refused on `krateo_audit`.
+needs. They carry no `INSERT` and no `SELECT` on `default`, and refuse the audit tables. Tested on
+ClickHouse 24.8 with the single-statement form above: all eight privileges land in `SHOW GRANTS`,
+`DROP PARTITION` passes on `otel_logs`, and it is refused (code 497) on `krateo_audit`, as are
+`INSERT` into `krateo_audit` and `SELECT` on `otel_logs`. On a live cluster, check privileges
+without executing anything: `CHECK GRANT ALTER DELETE ON default.krateo_audit` as `chops` must
+return 0, and `CHECK GRANT ALTER DELETE ON default.otel_logs` must return 1.
 
 ## Why TTL does not save you
 
