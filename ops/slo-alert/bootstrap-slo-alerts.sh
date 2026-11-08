@@ -165,7 +165,7 @@ log "=== Alert 3: Error-Rate SLO ==="
 # The ServiceName exclusion is rule 3 in docs/alerts.md: the observability stack must not alert on
 # itself. krateo-budget-evaluator is added because a breached budget is an ERROR line by design, and
 # a spend threshold is not an application failure.
-ERROR_QUERY="SeverityNumber >= 17 AND ResourceAttributes['telemetry.source'] != 'k8s-events' AND ServiceName NOT IN ('krateo-observability', 'krateo-alert-troubleshooter', 'krateo-alert-provider', 'incident-controller', 'incident-provider', 'krateo-clickstack', 'krateo-clickstack-clickhouse-clickhouse', 'krateo-clickstack-keeper-keeper', 'krateo-clickstack-mongodb', 'clickhouse-mcp-server', 'clickhouse-operator', 'incident-agent', 'autopilot', 'kagent', 'repo-mcp-server', 'krateo-budget-evaluator')"
+ERROR_QUERY="SeverityNumber >= 17 AND ResourceAttributes['telemetry.source'] != 'k8s-events' AND ServiceName NOT IN ('krateo-observability', 'krateo-alert-troubleshooter', 'krateo-alert-provider', 'incident-controller', 'incident-provider', 'krateo-clickstack', 'krateo-clickstack-clickhouse-clickhouse', 'krateo-clickstack-keeper-keeper', 'krateo-clickstack-mongodb', 'clickhouse-mcp-server', 'clickhouse-operator', 'incident-agent', 'autopilot', 'agentiko', 'kagent', 'repo-mcp-server', 'krateo-budget-evaluator')"
 
 ERROR_SS_ID=$(create_saved_search "SLO Error Rate" "$ERROR_QUERY")
 if [ -n "$ERROR_SS_ID" ]; then
