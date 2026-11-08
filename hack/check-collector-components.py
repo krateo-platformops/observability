@@ -26,6 +26,7 @@ import yaml
 CHARTS = {
     "charts/otel-collector-deployment": "Deployment",
     "charts/otel-collector-daemonset": "DaemonSet",
+    "charts/otel-collector-tailsampling": "Deployment",
 }
 SECTIONS = ("receivers", "processors", "exporters", "connectors", "extensions")
 

@@ -1,0 +1,180 @@
+# otel-collector-tailsampling: the tier that decides, per FINISHED trace, whether it is stored.
+#
+# Why here and not at the gateway (installer#402, observability#118): agentgateway v1.5.0 decides
+# sampling when a request ARRIVES (log.rs, Executor::new_request), before any response exists, so
+# "always keep errors" cannot be a gateway rule. Only a decision taken after the trace has finished
+# can keep every error trace complete. So the platform gateway and snowplow record everything, and
+# this tier keeps what matters.
+#
+# Topology: every node's otel-collector-daemonset exports traces with a `loadbalancing` exporter
+# keyed on TraceId to this chart's HEADLESS Service, so all spans of one trace reach the same
+# replica whichever node they came from. Tail sampling is only correct under that routing.
+#
+# What this tier does NOT touch: the SLIs. The daemonset's `traces/slo` pipeline turns every snowplow
+# server span into traces.span.metrics.* on the node, before anything is sampled, and
+# krateo-slo-rollup reads only those metrics. Availability and p95 count every request.
+opentelemetry-collector:
+  mode: deployment
+  # Keep the upstream chart's legacy component names (as both sibling charts do), so this config
+  # reads the same as theirs.
+  rewriteDeprecatedComponentNames: false
+  # One replica is enough on krateo-057 (a few spans a second). More replicas are safe at any time:
+  # the daemonset's loadbalancing exporter resolves the headless Service and re-routes by TraceId.
+  replicaCount: 1
+  image:
+    repository: otel/opentelemetry-collector-contrib
+  command:
+    name: otelcol-contrib
+  # HEADLESS: the loadbalancing exporter's DNS resolver needs one A record per replica, which a
+  # ClusterIP Service would hide behind a single virtual IP.
+  service:
+    enabled: true
+    type: ClusterIP
+    clusterIP: None
+  # OTLP/gRPC only. The daemonset is the only sender, and it speaks gRPC.
+  ports:
+    otlp:
+      enabled: true
+      hostPort: null
+    otlp-http:
+      enabled: false
+    jaeger-compact:
+      enabled: false
+    jaeger-thrift:
+      enabled: false
+    jaeger-grpc:
+      enabled: false
+    zipkin:
+      enabled: false
+  presets:
+    kubernetesAttributes:
+      enabled: false
+  # Same credentials Secret as the two sibling collectors.
+  extraEnvs:
+    - name: CH_USERNAME
+      valueFrom:
+        secretKeyRef:
+          name: otel-clickhouse-credentials
+          key: username
+    - name: CH_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: otel-clickhouse-credentials
+          key: password
+  # tail_sampling holds every trace in memory for decision_wait. Sized for krateo-057 (about
+  # 0.1-0.2 portal requests a second; num_traces below bounds the worst case). Re-size from
+  # snowplow's production-scale bench with tracing on (about 250 req/s) before any large install.
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 50m
+      memory: 128Mi
+  livenessProbe:
+    timeoutSeconds: 5
+    failureThreshold: 6
+  readinessProbe:
+    timeoutSeconds: 5
+    failureThreshold: 3
+  config:
+    receivers:
+      jaeger: null
+      zipkin: null
+      prometheus: null
+      otlp:
+        protocols:
+          grpc:
+            endpoint: ${env:MY_POD_IP}:4317
+          http: null
+    processors:
+      memory_limiter:
+        check_interval: 5s
+        limit_percentage: 80
+        spike_limit_percentage: 25
+      tail_sampling:
+        # How long after a trace's FIRST span the decision is taken. The portal path's spans
+        # (gateway, snowplow, api-steps) all end within a request, so 30s covers slow requests with
+        # margin.
+        decision_wait: 30s
+        # Upper bound on traces held in memory at once; the oldest are decided early beyond it.
+        num_traces: 50000
+        expected_new_traces_per_sec: 50
+        # LATE SPANS. A span arriving after its trace was decided follows that decision instead of
+        # starting a new trace. Needed for snowplow's GET /refreshes (SSE), whose server span ends
+        # only when the stream closes, minutes to hours later.
+        decision_cache:
+          sampled_cache_size: 100000
+          non_sampled_cache_size: 100000
+        # OR'ed: a trace is kept if ANY policy keeps it.
+        policies:
+          # 5xx, panics, and snowplow's named-endpoint client spans on 4xx/5xx.
+          - name: error-status
+            type: status_code
+            status_code:
+              status_codes: [ERROR]
+          # 4xx as well. Read from the attribute, never from span status: a 4xx SERVER span is
+          # Unset by semconv. snowplow uses stable semconv (http.response.status_code); the gateway
+          # uses http.status.
+          - name: http-status-400-or-more
+            type: ottl_condition
+            ottl_condition:
+              error_mode: ignore
+              span:
+                - 'Int(attributes["http.response.status_code"]) >= 400'
+                - 'Int(attributes["http.status"]) >= 400'
+          # Scope: only the portal path is sampled. A trace with any span from another service is
+          # kept whole, so composition-dynamic-controller reconcile traces (the obs-reconcile-* and
+          # composition-reconcile-perf widgets) and agent-gateway LLM traces (agents-token-*) keep
+          # what they have today.
+          - name: outside-portal-path
+            type: ottl_condition
+            ottl_condition:
+              error_mode: ignore
+              span:
+                - >-
+                  resource.attributes["service.name"] != "krateo-agent-gateway-platform"
+                  and resource.attributes["service.name"] != "snowplow"
+          # The sre-jwt-in-traces detector's own pattern, over the same four places it reads, so
+          # sampling never hides a leaked token from it.
+          - name: jwt-shaped-value
+            type: ottl_condition
+            ottl_condition:
+              error_mode: ignore
+              span:
+                - 'IsMatch(ToKeyValueString(attributes), "eyJ[A-Za-z0-9._-]{20,}")'
+                - 'IsMatch(status.message, "eyJ[A-Za-z0-9._-]{20,}")'
+                - 'IsMatch(ToKeyValueString(resource.attributes), "eyJ[A-Za-z0-9._-]{20,}")'
+              spanevent:
+                - 'IsMatch(ToKeyValueString(attributes), "eyJ[A-Za-z0-9._-]{20,}")'
+          # Everything else on the portal path: a fixed 5%, hashed on TraceId so every replica
+          # agrees. Diego, 2026-10-24 (installer#402).
+          - name: portal-sample
+            type: probabilistic
+            probabilistic:
+              sampling_percentage: 5
+      batch: {}
+    exporters:
+      clickhouse:
+        endpoint: "tcp://krateo-clickstack-clickhouse-clickhouse-headless.krateo-system.svc:9000"
+        username: "${env:CH_USERNAME}"
+        password: "${env:CH_PASSWORD}"
+        database: default
+        traces_table_name: otel_traces
+        # otel_traces is created by otel-collector-daemonset (create_schema: true, with its 7-day
+        # TTL). One owner for the schema: this tier only inserts.
+        create_schema: false
+        timeout: 10s
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+          max_elapsed_time: 300s
+    service:
+      pipelines:
+        logs: null
+        metrics: null
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, tail_sampling, batch]
+          exporters: [clickhouse]

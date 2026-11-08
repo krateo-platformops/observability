@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "otel-collector-tailsampling values",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "global": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Global values shared across charts."
+    },
+    "opentelemetry-collector": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Values forwarded to the upstream opentelemetry-collector subchart. The tail_sampling policies live under config.processors.tail_sampling.",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "deployment",
+            "statefulset"
+          ]
+        },
+        "replicaCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "config": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    }
+  }
+}

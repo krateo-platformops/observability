@@ -1,0 +1,48 @@
+# The trace tail sampler's policies, run in the pinned collector image.
+#
+# lint.yaml renders the chart, and `otelcol validate` accepts it, but neither compiles the
+# tail_sampling OTTL conditions: a misspelt function passes both and only fails when the collector
+# starts on a cluster. This runs the collector with the chart's own policies, sends it one trace per
+# rule (errors, 4xx on either status key, a JWT in each of the places sre-jwt-in-traces reads,
+# traces outside the portal path, late spans) plus 400 plain portal traces, and checks which it
+# kept. The design is observability#118.
+#
+# It is a separate workflow on purpose. lint.yaml is the org-wide canonical chart-repo lint,
+# identical across every krateo-* chart repo.
+
+name: check-tailsampling
+
+on:
+  pull_request:
+    paths:
+      - "charts/otel-collector-tailsampling/**"
+      - "tests/tailsampling-docker.py"
+      - ".github/workflows/check-tailsampling.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "charts/otel-collector-tailsampling/**"
+      - "tests/tailsampling-docker.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  policies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Add the dependency repository
+        run: helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+      - name: Run each sampling policy against the pinned collector
+        run: python3 tests/tailsampling-docker.py .
