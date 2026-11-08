@@ -1,5 +1,12 @@
 global: {}
 
+# NODE-LOCAL Service (templates/service-local.yaml): <release>-local, ClusterIP with
+# internalTrafficPolicy: Local, OTLP on 4317/4318. For senders that can only be given a Service name
+# (the composition-dynamic-controllers); the upstream chart's own Service is headless, so it is
+# not node-local. Senders that can use their node's IP (status.hostIP) keep doing so.
+localService:
+  enabled: true
+
 opentelemetry-collector:
   mode: daemonset
 

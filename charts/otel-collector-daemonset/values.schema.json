@@ -573,6 +573,16 @@
         }
       },
       "description": "Values forwarded to the upstream opentelemetry-collector subchart."
+    },
+    "localService": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Node-local OTLP Service (<release>-local): ClusterIP with internalTrafficPolicy: Local, for senders that can only be given a Service name.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
     }
   }
 }

@@ -121,7 +121,12 @@ type: application
 # `loadbalancing` exporter instead of straight to ClickHouse (installer#402, observability#118 step 2).
 # Requires otel-collector-tailsampling >= 0.1.1, which now owns otel_traces; pin it FIRST. The
 # traces/slo pipeline is unchanged, so the SLIs still count every span. Logs and metrics unchanged.
-version: 0.1.20
+# 0.1.21: adds a NODE-LOCAL Service, <release>-local (ClusterIP, internalTrafficPolicy: Local, OTLP 4317/4318),
+# for senders that can only be given a Service name: the composition-dynamic-controllers, whose tracing
+# Diego turned on for OTEL-8 (installer#400). The upstream Service is headless, which ignores
+# internalTrafficPolicy, so spans could land on another node's agent and go unenriched by its
+# node-filtered k8sattributes. Additive: nothing else changes.
+version: 0.1.21
 appVersion: "0.158.0"
 dependencies:
   - name: opentelemetry-collector

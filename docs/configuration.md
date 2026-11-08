@@ -239,6 +239,12 @@ Wraps the same upstream chart in `daemonset` mode, stock
   TraceId, DNS-resolving the sampler's headless Service. The resolver's `port` must be a string.
   `traces/slo` is untouched, so the SLIs still count every span. Both charts are pinned under the
   installer's `portal` feature, so neither exists without the other.
+- **A node-local Service, `<release>-local`** (0.1.21): ClusterIP with `internalTrafficPolicy: Local`, OTLP on
+  4317 and 4318. Use it when a sender can only be given a Service name, like the composition-dynamic-
+  controllers, whose endpoint comes from a ConfigMap. The upstream Service is headless, which ignores
+  `internalTrafficPolicy`: DNS returns every node's agent, and an agent's k8sattributes only knows its own
+  node's pods. Senders that can use `status.hostIP` (snowplow) keep doing so. `localService.enabled` (default
+  true) turns it off.
 - Same `extraEnvs` Secret wiring and resources as the deployment chart.
 
 ## `charts/otel-collector-tailsampling` — the trace tail sampler
