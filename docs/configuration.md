@@ -235,6 +235,41 @@ Wraps the same upstream chart in `daemonset` mode, stock
     it at startup.
 - Same `extraEnvs` Secret wiring and resources as the deployment chart.
 
+## `charts/otel-collector-tailsampling` — the trace tail sampler
+
+Decides, per finished trace, whether it is stored (installer#402, design in
+[observability#118](https://github.com/krateo-platformops/observability/issues/118)). The platform
+gateway and snowplow record every request, and this tier keeps what matters. The decision can't be
+made at the gateway: agentgateway decides sampling when a request arrives, before any error exists.
+
+- **Topology.** Every node's daemonset sends traces to this chart's **headless** Service through a
+  `loadbalancing` exporter keyed on TraceId, so all spans of one trace reach the same replica.
+  Without that routing, tail sampling decides on fragments. The headless Service is why
+  `service.clusterIP: None`: the exporter's DNS resolver needs one record per replica.
+- **Policies** (`config.processors.tail_sampling.policies`; any match keeps the trace):
+
+  | Policy | Keeps |
+  |---|---|
+  | `error-status` | any span with status ERROR: 5xx, panics, snowplow's failing client calls |
+  | `http-status-400-or-more` | any span whose `http.response.status_code` (snowplow) or `http.status` (gateway) is 400 or more. Read from the attribute: a 4xx server span's status is Unset |
+  | `outside-portal-path` | any trace with a span from a service other than `krateo-agent-gateway-platform` and `snowplow`, so reconcile and LLM traces keep today's 100% |
+  | `jwt-shaped-value` | the `sre-jwt-in-traces` pattern in span attributes, status message, resource attributes or event attributes, so sampling never hides a leaked token |
+  | `portal-sample` | 5% of what's left, hashed on TraceId |
+
+- **Late spans.** `decision_cache` makes a span that arrives after its trace was decided follow that
+  decision. snowplow's `GET /refreshes` (SSE) span ends only when the stream closes.
+- **The SLIs are not sampled.** They come from the daemonset's `traces/slo` pipeline, which turns
+  every snowplow server span into `traces.span.metrics.*` on the node, before anything reaches this
+  tier.
+- **Schema.** `create_schema: false`. otel-collector-daemonset owns `otel_traces`, with its TTL;
+  this tier only inserts.
+- **Sizing.** One replica and 512Mi suit krateo-057, a few spans a second. `num_traces` bounds
+  what's held in memory for `decision_wait`. Re-size from a production-scale bench before a large
+  install.
+- **Tested** by `tests/tailsampling-docker.py` (workflow `check-tailsampling`). `otelcol validate`
+  doesn't compile the policies' OTTL, so the test runs the pinned image with the chart's own
+  policies and checks which traces it keeps.
+
 ## `charts/krateo-sse-proxy`
 
 - **`replicaCount: 1` is deliberate.** sse-proxy is a STATEFUL in-memory SSE hub (each pod

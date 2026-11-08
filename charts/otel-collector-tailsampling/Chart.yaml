@@ -1,0 +1,31 @@
+apiVersion: v2
+name: otel-collector-tailsampling
+description: >-
+  Trace tail-sampling tier for Krateo. The node collectors route every span by TraceId to this
+  collector, which waits for each trace to finish and keeps it only if it matters: any error, any
+  HTTP status of 400 or more, any span outside the portal path, any JWT-shaped value, or a 5% sample
+  of the rest. Exports the kept traces to ClickHouse otel_traces. Wraps the upstream
+  opentelemetry-collector chart (installer#402, OTEL-10; design in observability#118).
+type: application
+# 0.1.0: first release. It ships idle: nothing sends to it until otel-collector-daemonset's traces
+# pipeline is switched to its loadbalancing exporter (observability#118, step 2).
+version: 0.1.0
+# The collector this chart renders: the upstream chart's own appVersion picks the image tag.
+# Keep equal to otel-collector-daemonset's appVersion, so both tiers run the same build.
+appVersion: "0.158.0"
+dependencies:
+  - name: opentelemetry-collector
+    version: 0.170.0
+    repository: https://open-telemetry.github.io/opentelemetry-helm-charts
+home: https://krateo.io
+icon: https://raw.githubusercontent.com/krateo-platformops/.github/main/brand/logo.svg
+keywords:
+  - krateo
+  - platformops
+  - opentelemetry
+  - observability
+  - tracing
+sources:
+  - https://github.com/krateo-platformops/observability
+annotations:
+  krateo.io/display-name: OTel Trace Tail Sampler
