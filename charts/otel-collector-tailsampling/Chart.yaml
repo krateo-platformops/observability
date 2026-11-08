@@ -13,7 +13,11 @@ type: application
 # After step 2 the daemonset's ClickHouse exporter no longer serves traces, and the exporter
 # creates a signal's tables only when that signal's exporter starts, so without this a fresh
 # install would have no otel_traces. Pin 0.1.1, not 0.1.0.
-version: 0.1.1
+# 0.1.2: krateo-frontend joins the portal path, so browser-originated portal traces are sampled
+# at 5% like the rest instead of being kept whole (installer#405; browser spans arrive through
+# snowplow's rum-ingest). OTTL paths now carry their context prefix (span., spanevent.), which
+# the collector otherwise rewrote at startup with an info note; the conditions are unchanged.
+version: 0.1.2
 # The collector this chart renders: the upstream chart's own appVersion picks the image tag.
 # Keep equal to otel-collector-daemonset's appVersion, so both tiers run the same build.
 appVersion: "0.158.0"

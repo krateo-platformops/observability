@@ -216,9 +216,19 @@ def main():
         case("eyJ-prefixed but too short to be a JWT", "sampled",
              lambda t: portal_trace(t, attrs={"note": "eyJshort"}))
 
+        case("browser-originated portal 5xx", True,
+             lambda t: [span(t, "krateo-frontend", "krateo.widget.fetch", {"http.response.status_code": 500})]
+             + portal_trace(t, gw_status="500", sp_status=500, status=2))
+
         ok_ids = [tid() for _ in range(400)]
         for t in ok_ids:
             post(port, portal_trace(t))
+        # Browser-originated portal traces (installer#405): krateo-frontend is on the portal path, so a
+        # plain one is sampled like the rest, NOT kept whole as "outside the portal path".
+        browser_ids = [tid() for _ in range(400)]
+        for t in browser_ids:
+            post(port, [span(t, "krateo-frontend", "krateo.widget.fetch",
+                             {"http.route": "/call", "http.response.status_code": 200})] + portal_trace(t))
 
         # Late spans: arrive after their trace's decision. Each must follow that decision.
         late_kept, late_dropped = cases["portal 4xx on snowplow http.response.status_code"][0], None
@@ -254,6 +264,10 @@ def main():
     within = 6 <= n_ok <= 38
     failed |= not within
     print(f"{'ok  ' if within else 'FAIL'} plain 2xx portal traces kept: {n_ok}/{len(ok_ids)} ({share:.1f}%), expected about 5%")
+    n_br = sum(1 for t in browser_ids if t in kept)
+    within_br = 6 <= n_br <= 38
+    failed |= not within_br
+    print(f"{'ok  ' if within_br else 'FAIL'} plain browser-originated portal traces kept: {n_br}/{len(browser_ids)}, expected about 5%")
 
     late_k = any(n == "GET /refreshes (late)" for _, n in kept.get(late_kept, []))
     late_d = late_dropped in kept
