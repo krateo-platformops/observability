@@ -52,6 +52,15 @@ spec:
   {{- with .aggregation }}
   aggregation: {{ . }}
   {{- end }}
+  {{- with .groupBy }}
+  groupBy:
+    {{- range . }}
+    - {{ . | quote }}
+    {{- end }}
+  {{- end }}
+  {{- with .consecutiveWindows }}
+  consecutiveWindows: {{ . | int }}
+  {{- end }}
   {{- with .labels }}
   labels:
     {{- range $k, $v := . }}

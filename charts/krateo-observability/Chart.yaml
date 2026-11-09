@@ -105,7 +105,10 @@ type: application
 # four firings on krateo-057, all rolls, drop to none; real reconcile errors still match.
 # 0.1.34: the six ServiceName exclusions that skip 'autopilot' also skip 'agentiko', the renamed agent
 # that runs beside autopilot during the side-by-side cutover. 'autopilot' stays until it is retired.
-version: 0.1.34
+# 0.1.35: sre-container-not-ready fires when one container stays unready for 5 minutes, naming it;
+# sre-probe-failing keeps only liveness and startup probes. NEEDS alert-provider 0.2.64 (groupBy,
+# consecutiveWindows) and otel-collector-deployment 0.3.15 (30s readiness, Job pods dropped).
+version: 0.1.35
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack
