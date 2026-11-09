@@ -126,7 +126,7 @@ type: application
 # Diego turned on for OTEL-8 (installer#400). The upstream Service is headless, which ignores
 # internalTrafficPolicy, so spans could land on another node's agent and go unenriched by its
 # node-filtered k8sattributes. Additive: nothing else changes.
-version: 0.1.21
+version: 0.1.22
 appVersion: "0.158.0"
 dependencies:
   - name: opentelemetry-collector

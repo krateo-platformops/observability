@@ -1,0 +1,47 @@
+# otel-collector-daemonset's agentgateway scrape job (OTEL-14(a), installer#406), run in the pinned
+# collector image.
+#
+# lint.yaml renders the chart, but nothing there runs the scrape. Kubernetes discovery can't run in
+# a runner, so the test keeps the job's relabel_configs exactly as rendered and gives it file_sd
+# targets with the labels pod discovery would set. It checks that the annotated gateway is
+# scraped, that a target not marked for scraping is dropped, and that service.name and the pod's
+# namespace and name land on the resource.
+#
+# A separate workflow, like check-tailsampling: lint.yaml is the org-wide canonical chart lint.
+
+name: check-agentgateway-scrape
+
+on:
+  pull_request:
+    paths:
+      - "charts/otel-collector-daemonset/**"
+      - "tests/agentgateway-scrape-docker.py"
+      - ".github/workflows/check-agentgateway-scrape.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "charts/otel-collector-daemonset/**"
+      - "tests/agentgateway-scrape-docker.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Add the dependency repository
+        run: helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+      - name: Scrape a stand-in gateway with the chart's own job
+        run: python3 tests/agentgateway-scrape-docker.py .
