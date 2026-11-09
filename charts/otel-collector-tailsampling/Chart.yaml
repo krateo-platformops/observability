@@ -17,7 +17,7 @@ type: application
 # at 5% like the rest instead of being kept whole (installer#405; browser spans arrive through
 # snowplow's rum-ingest). OTTL paths now carry their context prefix (span., spanevent.), which
 # the collector otherwise rewrote at startup with an info note; the conditions are unchanged.
-version: 0.1.2
+version: 0.1.3
 # The collector this chart renders: the upstream chart's own appVersion picks the image tag.
 # Keep equal to otel-collector-daemonset's appVersion, so both tiers run the same build.
 appVersion: "0.158.0"

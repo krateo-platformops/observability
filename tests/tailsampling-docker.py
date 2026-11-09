@@ -120,6 +120,14 @@ def portal_trace(trace_id, gw_status="200", sp_status=200, **sp_extra):
     ]
 
 
+def sse_trace(trace_id, status=0):
+    """A portal SSE stream: the platform gateway's span and sse-proxy's, in one trace."""
+    return [
+        span(trace_id, "krateo-agent-gateway-platform", "GET /events/*", {"http.status": "200"}),
+        span(trace_id, "sse-proxy", "GET /notifications", {"http.response.status_code": 200}, status=status),
+    ]
+
+
 def post(port, spans):
     body = json.dumps(payload(spans)).encode()
     req = urllib.request.Request(
@@ -220,6 +228,9 @@ def main():
              lambda t: [span(t, "krateo-frontend", "krateo.widget.fetch", {"http.response.status_code": 500})]
              + portal_trace(t, gw_status="500", sp_status=500, status=2))
 
+        case("SSE stream that errors (sse-proxy, on the portal path)", True,
+             lambda t: sse_trace(t, status=2))
+
         ok_ids = [tid() for _ in range(400)]
         for t in ok_ids:
             post(port, portal_trace(t))
@@ -229,6 +240,11 @@ def main():
         for t in browser_ids:
             post(port, [span(t, "krateo-frontend", "krateo.widget.fetch",
                              {"http.route": "/call", "http.response.status_code": 200})] + portal_trace(t))
+
+        # Portal SSE streams: sse-proxy is on the portal path, so a plain stream is sampled too.
+        sse_ids = [tid() for _ in range(400)]
+        for t in sse_ids:
+            post(port, sse_trace(t))
 
         # Late spans: arrive after their trace's decision. Each must follow that decision.
         late_kept, late_dropped = cases["portal 4xx on snowplow http.response.status_code"][0], None
@@ -268,6 +284,11 @@ def main():
     within_br = 6 <= n_br <= 38
     failed |= not within_br
     print(f"{'ok  ' if within_br else 'FAIL'} plain browser-originated portal traces kept: {n_br}/{len(browser_ids)}, expected about 5%")
+
+    n_sse = sum(1 for t in sse_ids if t in kept)
+    within_sse = 6 <= n_sse <= 38
+    failed |= not within_sse
+    print(f"{'ok  ' if within_sse else 'FAIL'} plain portal SSE traces (sse-proxy) kept: {n_sse}/{len(sse_ids)}, expected about 5%")
 
     late_k = any(n == "GET /refreshes (late)" for _, n in kept.get(late_kept, []))
     late_d = late_dropped in kept

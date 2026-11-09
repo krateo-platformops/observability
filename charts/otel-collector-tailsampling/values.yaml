@@ -127,9 +127,11 @@ opentelemetry-collector:
           # kept whole, so composition-dynamic-controller reconcile traces (the obs-reconcile-* and
           # composition-reconcile-perf widgets) and agent-gateway LLM traces (agents-token-*) keep
           # what they have today. The portal path is the browser (krateo-frontend: its spans reach
-          # the collectors through snowplow's rum-ingest), the platform gateway and snowplow. If
-          # krateo-frontend were left out, every browser-originated portal trace would match here
-          # and be kept at 100%, which defeats the sample (installer#405).
+          # the collectors through snowplow's rum-ingest), the platform gateway, snowplow and
+          # sse-proxy (the portal's /events and /notifications streams). A portal service left out
+          # here makes every trace through it match and be kept at 100%, which defeats the sample:
+          # krateo-frontend (installer#405) and sse-proxy, whose 5-18K streams a day each gained
+          # two gateway spans once the platform gateway traced every request.
           - name: outside-portal-path
             type: ottl_condition
             ottl_condition:
@@ -139,6 +141,7 @@ opentelemetry-collector:
                   resource.attributes["service.name"] != "krateo-agent-gateway-platform"
                   and resource.attributes["service.name"] != "snowplow"
                   and resource.attributes["service.name"] != "krateo-frontend"
+                  and resource.attributes["service.name"] != "sse-proxy"
           # The sre-jwt-in-traces detector's own pattern, over the same four places it reads, so
           # sampling never hides a leaked token from it.
           - name: jwt-shaped-value
