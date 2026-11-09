@@ -258,11 +258,24 @@ opentelemetry-collector:
               # or added later -- is caught without enumerating the key. Enumerating is what let
               # http.path through on the traces side for days (installer#396).
               - 'replace_all_patterns(attributes, "value", "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>")'
+              # S1 (2026-11-09): drop any attribute whose KEY names a credential header, whatever its
+              # value, in any naming (http.header.Authorization, http.request.header.authorization,
+              # http.request.header.cookie, ...). The JWT sweep above only catches JWT-shaped values;
+              # an opaque bearer token or a session cookie passes it. Partial, case-insensitive match,
+              # so proxy-authorization and set-cookie go too.
+              - 'delete_matching_keys(attributes, "(?i)(authorization|cookie)")'
               - 'set(attributes["krateo.io/composition-id"], resource.attributes["k8s.pod.labels.krateo.io/composition-id"]) where resource.attributes["k8s.pod.labels.krateo.io/composition-id"] != nil'
         trace_statements:
           - context: span
             statements:
               - 'delete_key(attributes, "http.header.Authorization")'
+              # S1 (2026-11-09): upstream kagent tools copy the raw Authorization header into spans when
+              # tracing is on, and the exact key above misses other namings
+              # (http.request.header.authorization) and cookies. An opaque non-JWT token is not caught
+              # by the JWT sweep below either. So drop any attribute whose KEY names a credential
+              # header, case-insensitive and partial (proxy-authorization, set-cookie included).
+              # krateo-observability's sre-credential-header-in-traces fires if one ever gets through.
+              - 'delete_matching_keys(attributes, "(?i)(authorization|cookie)")'
               # MEASURED on krateo-057 2026-10-22 (installer#396): 22 spans still carried a raw JWT
               # after the per-key statements below, every one of them in `http.path`, on spans named
               # `GET /events/*` and `GET krateo-sse-proxy...:8080`. The enumerated keys could not
@@ -277,6 +290,7 @@ opentelemetry-collector:
               - 'replace_pattern(attributes["exception.message"], "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>") where attributes["exception.message"] != nil'
           - context: spanevent
             statements:
+              - 'delete_matching_keys(attributes, "(?i)(authorization|cookie)")'
               - 'replace_all_patterns(attributes, "value", "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>")'
               - 'replace_pattern(attributes["exception.message"], "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>") where attributes["exception.message"] != nil'
               - 'replace_pattern(attributes["error.message"], "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>") where attributes["error.message"] != nil'

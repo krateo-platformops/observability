@@ -196,6 +196,14 @@ Wraps the same upstream chart in `daemonset` mode, stock
   `k8s.volume.available` and `k8s.volume.capacity` and turning the inode metrics off.
   `filter/pvc-volumes` keeps only PersistentVolumeClaims, because most pod volumes are
   configmaps, tokens and emptyDirs. Each point carries `k8s.persistentvolumeclaim.name`.
+- **Credential headers** (0.1.24, S1): `transform` drops every span, span-event and log attribute
+  whose **key** names a credential header (`delete_matching_keys(attributes, "(?i)(authorization|cookie)")`:
+  `http.header.Authorization`, `http.request.header.authorization`, `…cookie`, `set-cookie`,
+  `proxy-authorization`), whatever the value. The JWT sweep catches only JWT-shaped values, so an
+  opaque bearer token or a session cookie would otherwise reach ClickHouse; upstream kagent tools
+  copy the raw Authorization header into spans when tracing is on. krateo-observability's
+  `sre-credential-header-in-traces` fires if one ever gets through. Tested by
+  `tests/credential-keys-docker.py` (workflow `check-credential-keys`).
 - **Browser resources** (0.1.23, installer#405): browser spans arrive from snowplow's rum-ingest, so
   `k8sattributes` matches them by connection to snowplow's pod and stamps snowplow's `k8s.*`, pod
   labels and `service.version` on them. `transform/browser-resource`, right after it in `traces`,
