@@ -196,6 +196,11 @@ Wraps the same upstream chart in `daemonset` mode, stock
   `k8s.volume.available` and `k8s.volume.capacity` and turning the inode metrics off.
   `filter/pvc-volumes` keeps only PersistentVolumeClaims, because most pod volumes are
   configmaps, tokens and emptyDirs. Each point carries `k8s.persistentvolumeclaim.name`.
+- **Browser resources** (0.1.23, installer#405): browser spans arrive from snowplow's rum-ingest, so
+  `k8sattributes` matches them by connection to snowplow's pod and stamps snowplow's `k8s.*`, pod
+  labels and `service.version` on them. `transform/browser-resource`, right after it in `traces`,
+  keeps only `service.name` on a `krateo-frontend` resource, which is all the frontend sets. Tested by
+  `tests/browser-resource-docker.py` (workflow `check-browser-resource`).
 - **Gateway metrics** (0.1.22, OTEL-14(a), installer#406): `prometheus/agentgateway` scrapes the
   agentgateway pods on the agent's own node (Kubernetes pod discovery, selected by
   `gateway.networking.k8s.io/gateway-class-name=agentgateway` and `spec.nodeName`), at their

@@ -373,6 +373,21 @@ opentelemetry-collector:
       # one aggregate per service per node agent, and ServiceName still lands in its own column.
       # Safe because the temporality is DELTA (see span_metrics), where summing rows is correct
       # without any per-producer identity.
+      # Browser spans (installer#405) reach this agent from snowplow's rum-ingest, not from the
+      # browser, so k8sattributes associates them by connection with SNOWPLOW's pod and stamps
+      # snowplow's k8s.*, pod labels and service.version on them: on krateo-057, browser spans
+      # carried k8s.deployment.name=snowplow and service.version=1.12.67, snowplow's version. The
+      # frontend sets only service.name on its resource (ui/src/otel/tracing.ts), so after
+      # k8sattributes a krateo-frontend resource keeps only service.name. It runs before
+      # loadbalancing, so the tail sampler and otel_traces never see the wrong pod.
+      transform/browser-resource:
+        error_mode: ignore
+        trace_statements:
+          - context: resource
+            conditions:
+              - 'attributes["service.name"] == "krateo-frontend"'
+            statements:
+              - 'keep_keys(attributes, ["service.name"])'
       transform/slo-resource:
         error_mode: ignore
         trace_statements:
@@ -639,8 +654,9 @@ opentelemetry-collector:
           # batch/export, so no caller JWT reaches otel_traces (#122). k8sattributes runs HERE, on the
           # node, because it associates spans with pods by the sender's IP, which the tail sampler
           # would not see. Then `loadbalancing` hands each trace to its tail-sampler replica, which
-          # writes the kept ones to otel_traces.
-          processors: [memory_limiter, k8sattributes, transform, batch]
+          # writes the kept ones to otel_traces. transform/browser-resource undoes k8sattributes'
+          # snowplow-pod guess on browser spans, which snowplow forwards.
+          processors: [memory_limiter, k8sattributes, transform/browser-resource, transform, batch]
           exporters: [loadbalancing]
         # SLO SPAN METRICS (D5): a SECOND consumer of the same otlp receiver. A receiver fans out to
         # every pipeline that names it, each getting its own copy, so the `traces` pipeline above is

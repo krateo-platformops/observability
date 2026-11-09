@@ -1,0 +1,43 @@
+# otel-collector-daemonset's transform/browser-resource (installer#405), run in the pinned collector
+# image. Browser spans reach the node agent from snowplow, so k8sattributes stamps snowplow's pod on
+# them; the transform must strip that from krateo-frontend resources and nothing else. The test runs
+# the rendered processor on both kinds of resource and checks what comes out.
+#
+# A separate workflow, like check-tailsampling: lint.yaml is the org-wide canonical chart lint.
+
+name: check-browser-resource
+
+on:
+  pull_request:
+    paths:
+      - "charts/otel-collector-daemonset/**"
+      - "tests/browser-resource-docker.py"
+      - ".github/workflows/check-browser-resource.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "charts/otel-collector-daemonset/**"
+      - "tests/browser-resource-docker.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  resource:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Add the dependency repository
+        run: helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+      - name: Run the chart's transform on a browser and a snowplow resource
+        run: python3 tests/browser-resource-docker.py .
