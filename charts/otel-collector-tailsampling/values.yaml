@@ -154,6 +154,17 @@ opentelemetry-collector:
                 - 'IsMatch(ToKeyValueString(resource.attributes), "eyJ[A-Za-z0-9._-]{20,}")'
               spanevent:
                 - 'IsMatch(ToKeyValueString(spanevent.attributes), "eyJ[A-Za-z0-9._-]{20,}")'
+          # A snowplow resolve whose stages failed while the response still succeeded (snowplow#1264,
+          # #1278): snowplow puts snowplow.stages.failed (int) on its Server span and leaves the
+          # status Unset, so neither rule above keeps it. Absent (no stage outcomes) or 0 doesn't
+          # match: Int() of a missing attribute is nil, which error_mode: ignore treats as no match.
+          # Widget responses don't carry stage outcomes yet (snowplow#1279).
+          - name: snowplow-stage-failure
+            type: ottl_condition
+            ottl_condition:
+              error_mode: ignore
+              span:
+                - 'Int(span.attributes["snowplow.stages.failed"]) > 0'
           # Everything else on the portal path: a fixed 5%, hashed on TraceId so every replica
           # agrees. Diego, 2026-10-24 (installer#402).
           - name: portal-sample

@@ -281,6 +281,7 @@ made at the gateway: agentgateway decides sampling when a request arrives, befor
   | `error-status` | any span with status ERROR: 5xx, panics, snowplow's failing client calls |
   | `http-status-400-or-more` | any span whose `http.response.status_code` (snowplow) or `http.status` (gateway) is 400 or more. Read from the attribute: a 4xx server span's status is Unset |
   | `outside-portal-path` | any trace with a span from a service other than the portal path's `krateo-frontend`, `krateo-agent-gateway-platform`, `snowplow` and `sse-proxy`, so reconcile and LLM traces keep today's 100% |
+  | `snowplow-stage-failure` | any span with `snowplow.stages.failed > 0` (snowplow#1264): a resolve whose stages failed while the response succeeded. Its status stays Unset, so the two rules above miss it. Absent or 0 doesn't match. Widget responses don't carry it yet (snowplow#1279) |
   | `jwt-shaped-value` | the `sre-jwt-in-traces` pattern in span attributes, status message, resource attributes or event attributes, so sampling never hides a leaked token |
   | `portal-sample` | 5% of what's left, hashed on TraceId |
 

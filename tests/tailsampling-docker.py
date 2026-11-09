@@ -68,6 +68,8 @@ def test_config(relay):
 
 
 def attr(key, value):
+    if isinstance(value, list):
+        return {"key": key, "value": {"arrayValue": {"values": [{"stringValue": v} for v in value]}}}
     if isinstance(value, bool):
         return {"key": key, "value": {"boolValue": value}}
     if isinstance(value, int):
@@ -221,6 +223,11 @@ def main():
              lambda t: [span(t, "krateo-agent-gateway", "POST /v1/chat/completions", {"http.status": "200"})])
         case("portal trace touching another service", True,
              lambda t: portal_trace(t) + [span(t, "git-provider", "GET /repos")])
+        case("snowplow stages failed on a 200 (snowplow.stages.failed=2)", True,
+             lambda t: portal_trace(t, attrs={"snowplow.stages.failed": 2,
+                                              "snowplow.stages.failure_reasons": ["other", "timeout"]}))
+        case("snowplow stages all succeeded (snowplow.stages.failed=0)", "sampled",
+             lambda t: portal_trace(t, attrs={"snowplow.stages.failed": 0}))
         case("eyJ-prefixed but too short to be a JWT", "sampled",
              lambda t: portal_trace(t, attrs={"note": "eyJshort"}))
 
