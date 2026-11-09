@@ -9,3 +9,4 @@ in from the former `krateo-clickstack` code repo when its two images were split 
 - `ha/` — network policies, pod-disruption-budgets, canary heartbeat
 - `pod-restart-alert/` — alert bootstrap scripts
 - `clickstack/` — clickstack values reference
+- `audit-reconcile-join/` — OTEL-8's query from a portal write to the reconciles it caused, with its test
