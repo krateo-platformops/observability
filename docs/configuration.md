@@ -196,6 +196,17 @@ Wraps the same upstream chart in `daemonset` mode, stock
   `k8s.volume.available` and `k8s.volume.capacity` and turning the inode metrics off.
   `filter/pvc-volumes` keeps only PersistentVolumeClaims, because most pod volumes are
   configmaps, tokens and emptyDirs. Each point carries `k8s.persistentvolumeclaim.name`.
+- **Gateway metrics** (0.1.22, OTEL-14(a), installer#406): `prometheus/agentgateway` scrapes the
+  agentgateway pods on the agent's own node (Kubernetes pod discovery, selected by
+  `gateway.networking.k8s.io/gateway-class-name=agentgateway` and `spec.nodeName`), at their
+  `prometheus.io/port` and `prometheus.io/path` annotations, every 30s. agentgateway publishes
+  metrics only as Prometheus: its metrics policy has no OTLP push. `service.name` is the pod's
+  `app.kubernetes.io/name` (`krateo-agent-gateway`, `krateo-agent-gateway-platform`), the same as
+  on the gateways' traces, and the receiver sets `k8s.namespace.name` and `k8s.pod.name` from
+  discovery. The metrics include `agentgateway_requests_total` (route, status, `team` on the agent
+  gateway), `agentgateway_request_duration_seconds` and `agentgateway_gen_ai_client_token_usage`,
+  about 2,100 series on krateo-057. They run in their own pipeline, `metrics/agentgateway`, without
+  `k8sattributes`. Tested by `tests/agentgateway-scrape-docker.py` (workflow `check-agentgateway-scrape`).
 - **JSON log lines** (0.1.17, #54): `filelog` promotes a string `level` or `severity_text` to
   `SeverityText` (upper case) and `SeverityNumber`, and a 32-hex `trace_id` to `TraceId`, with a
   16-hex `span_id` to `SpanId` alongside it. `Body` stays the raw line and `LogAttributes` are unchanged.

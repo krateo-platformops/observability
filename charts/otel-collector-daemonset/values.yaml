@@ -197,6 +197,39 @@ opentelemetry-collector:
           container.uptime:
             enabled: true
 
+      # The agentgateways' own metrics (OTEL-14(a), installer#406): requests by route and status,
+      # latencies, and LLM token usage by team. agentgateway exposes them only as Prometheus on
+      # :15020/metrics (its metrics policy has no OTLP push), so each node agent scrapes the gateway
+      # pods on its own node. Scoped to the agentgateway gateway class, not to every pod with
+      # prometheus.io annotations: about 2,100 series today, and a new gateway is picked up without
+      # a chart change. `job` is the pod's app.kubernetes.io/name, which the receiver turns into
+      # service.name, so the metrics carry the same name as the gateway's traces. The receiver sets
+      # k8s.namespace.name and k8s.pod.name on the resource from the pod's discovery labels.
+      prometheus/agentgateway:
+        config:
+          scrape_configs:
+            - job_name: agentgateway
+              scrape_interval: 30s
+              kubernetes_sd_configs:
+                - role: pod
+                  selectors:
+                    - role: pod
+                      field: spec.nodeName=${env:K8S_NODE_NAME}
+                      label: gateway.networking.k8s.io/gateway-class-name=agentgateway
+              relabel_configs:
+                - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+                  regex: "true"
+                  action: keep
+                - source_labels: [__meta_kubernetes_pod_ip, __meta_kubernetes_pod_annotation_prometheus_io_port]
+                  regex: (.+);(\d+)
+                  replacement: $$1:$$2
+                  target_label: __address__
+                - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+                  regex: (.+)
+                  target_label: __metrics_path__
+                - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+                  target_label: job
+
     processors:
       transform:
         # error_mode:ignore so a redaction statement on an absent attribute key never fails the
@@ -625,6 +658,13 @@ opentelemetry-collector:
         # `metrics`, which would run k8sattributes over these and change a pipeline that works.
         metrics/slo:
           receivers: [span_metrics]
+          processors: [memory_limiter, batch]
+          exporters: [clickhouse]
+        # The gateways' scraped Prometheus metrics (OTEL-14(a)). Their own pipeline so the scrape
+        # can't change the `metrics` pipeline, and no k8sattributes: the scrape's connection is the
+        # collector itself, and the receiver already names the namespace and pod from discovery.
+        metrics/agentgateway:
+          receivers: [prometheus/agentgateway]
           processors: [memory_limiter, batch]
           exporters: [clickhouse]
 
