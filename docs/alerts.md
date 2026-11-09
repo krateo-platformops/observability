@@ -1,7 +1,7 @@
 ---
 type: Configuration
 title: observability — the default alert set
-description: The 29 Alert CRs the chart seeds, the measured evidence behind every filter and threshold, and the three rules that decide whether an Alert can fire at all — `where` is ClickHouse SQL and not the Lucene the CRD advertises, severity needs `otel-collector-daemonset` ≥ 0.1.17 and JSON logs, and log alerts must exclude the observability stack or they diagnose themselves. Event alerts skip the DELETED copy of an expired Event.
+description: The 30 Alert CRs the chart seeds, the measured evidence behind every filter and threshold, and the three rules that decide whether an Alert can fire at all — `where` is ClickHouse SQL and not the Lucene the CRD advertises, severity needs `otel-collector-daemonset` ≥ 0.1.17 and JSON logs, and log alerts must exclude the observability stack or they diagnose themselves. Event alerts skip the DELETED copy of an expired Event.
 resource: oci://ghcr.io/krateo-platformops/charts/krateo-observability
 tags: [alerting, alerts, observability, clickhouse, hyperdx, sre, runbook]
 timestamp: 2026-09-18T00:00:00Z
@@ -127,6 +127,7 @@ about whether your cluster has that problem.
 | `sre-certificate-expiry-warning` | core | logs | above 0 | 1h | 7,434 |
 | `sre-jwt-in-telemetry` | core | logs | above 1 | 15m | 0 (see below) |
 | `sre-jwt-in-traces` | core | traces | above 1 | 15m | 0 of 45,180 spans |
+| `sre-credential-header-in-traces` | core | traces | above 1 | 15m | 0 in 7 days (0.1.38) |
 | `sre-clickhouse-disk-headroom` | core | metric `k8s.volume.available`, min | below 3 GiB | 15m | n/a (0.1.30) |
 | `sre-rbac-denied-burst` | extended | logs | above 20 | 15m | 3,240 |
 | `sre-upstream-timeouts` | extended | logs | above 50 | 15m | 1,217 |
@@ -237,6 +238,18 @@ Entries are prefixed `sre-` because Helm will not adopt a resource it does not a
 entry reusing the name of an alert someone hand-applied fails the upgrade outright with an
 ownership error. A draft of this set did exactly that against a hand-applied CR on a live
 cluster.
+
+## `sre-credential-header-in-traces` (0.1.38, S1)
+
+`sre-jwt-in-traces` matches JWT-shaped **values**, so it can't see an opaque bearer token or a session
+cookie. This alert matches the **key** instead: any span or span-event attribute whose key contains
+`authorization` or `cookie`, case-insensitive (`http.header.Authorization`,
+`http.request.header.authorization`, `proxy-authorization`, `…cookie`, `set-cookie`). otel-collector-daemonset
+0.1.24 deletes those keys at the node agent whatever their value, so a match means the redaction failed or
+a sender bypassed the node agents. The motivating case: upstream kagent tools copy the raw Authorization
+header into spans when tracing is on. On krateo-057, 0 matching spans in the 7 days to 2026-11-09; the same
+query found `http.route` keys on 83,084 spans in one day, so it reads the keys. Like the JWT detectors, it's
+labelled `observability.krateo.io/analysis: human`, so no agent reads the leaked span.
 
 ## `sre-probe-failing` and rolls (0.1.32)
 
