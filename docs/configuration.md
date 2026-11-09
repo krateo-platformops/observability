@@ -284,6 +284,7 @@ made at the gateway: agentgateway decides sampling when a request arrives, befor
   | `snowplow-stage-failure` | any span with `snowplow.stages.failed > 0` (snowplow#1264): a resolve whose stages failed while the response succeeded. Its status stays Unset, so the two rules above miss it. Absent or 0 doesn't match. Widget responses don't carry it yet (snowplow#1279) |
   | `jwt-shaped-value` | the `sre-jwt-in-traces` pattern in span attributes, status message, resource attributes or event attributes, so sampling never hides a leaked token |
   | `alert-provider-incident` | any trace with an `incident.*` span: alert-provider's RCA path (`incident.fire`, `incident.compare`, `incident.analyze`), kept whole whatever else is in the trace |
+  | `audited-write` | any trace with a span carrying `krateo.audit.recorded = true` (AUDIT-9): a request that wrote an audit record, so the audit view's trace link resolves (within the 7-day TTL) |
   | `sample-5pct` | 5% of what's left, hashed on TraceId |
 
 - **Late spans.** `decision_cache` makes a span that arrives after its trace was decided follow that
