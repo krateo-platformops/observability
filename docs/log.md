@@ -12,6 +12,7 @@ timestamp: 2026-08-07T00:00:00Z
 Curated, newest first. Release notes live in GitHub Releases; the `Chart.yaml` comment
 blocks carry the per-bump rationale.
 
+- **2026-11-09 — OTEL-8's audit-to-reconcile join (`ops/audit-reconcile-join/`).** A query lists, for each portal write in `krateo_audit`, the composition-controller reconciles of the same object within a window, with the actor named and any reconcile two writes can claim flagged as ambiguous (installer#400). It joins on the controller name core-provider sets (`<resource>-<version>-controller`) rather than on a Kind guessed from the plural, which real data breaks (`agentikoes`). It's tested in ClickHouse 26.8.36.3 against 057's own DDL (`check-audit-reconcile-join`), since 057 has no reconcile spans until core-provider's `otel.enabled`.
 - **2026-11-07 — `sse-proxy` 1.4.2 (krateo-sse-proxy 0.1.23).** Each client's buffer holds one full poll, 500 events, so ordinary bursts no longer drop events for a client that has kept up. On 1.4.1, polls over 64 rows dropped about 1 event in 9 (sse-proxy#30).
 - **2026-11-07 — `sse-proxy` 1.4.1 (krateo-sse-proxy 0.1.22).** The stream is live events: the cursor starts 30 seconds back and stays there while idle, so the first client no longer gets an hour of backlog into a 64-slot buffer. A client with no topic no longer gets a row twice (sse-proxy#30).
 - **2026-11-05 — `sse-proxy` 1.4.0 (krateo-sse-proxy 0.1.21).** Refuses a token in the query string

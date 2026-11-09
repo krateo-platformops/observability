@@ -1,0 +1,40 @@
+# The OTEL-8 audit-to-reconcile join (ops/audit-reconcile-join/query.sql), run in the ClickHouse
+# version krateo-057 runs, against tables created from 057's own DDL (tests/fixtures/).
+#
+# The query can't be exercised on a cluster until composition controllers export reconcile spans,
+# so this is where it's proven: the matches, every negative control left out, and the ambiguous
+# case flagged rather than resolved. See ops/audit-reconcile-join/README.md.
+#
+# It is a separate workflow on purpose. lint.yaml is the org-wide canonical chart-repo lint,
+# identical across every krateo-* chart repo.
+
+name: check-audit-reconcile-join
+
+on:
+  pull_request:
+    paths:
+      - "ops/audit-reconcile-join/**"
+      - "tests/audit-reconcile-join-docker.py"
+      - "tests/fixtures/**"
+      - ".github/workflows/check-audit-reconcile-join.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "ops/audit-reconcile-join/**"
+      - "tests/audit-reconcile-join-docker.py"
+      - "tests/fixtures/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  join:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run the join against matches, negative controls and an ambiguous pair
+        run: python3 tests/audit-reconcile-join-docker.py .
