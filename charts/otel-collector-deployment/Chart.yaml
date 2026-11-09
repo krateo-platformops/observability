@@ -68,7 +68,12 @@ type: application
 # found by a narrow k8sattributes/job-owner that adds only k8s.job.name: a finished Job's pod reads
 # not-ready forever. Every other metric is unchanged apart from gaining k8s.job.name on Job pods.
 # Requires image 1.0.7 (filterprocessor), which this chart sets.
-version: 0.3.15
+# 0.3.16: k8s.container.ready is also dropped for incident-provider's check pods (pod label
+# app.kubernetes.io/component=incident-check), bare run-to-completion pods that kept
+# sre-container-not-ready in PENDING on a healthy cluster. job-owner/job-readiness are renamed
+# run-to-completion/run-to-completion-readiness; the label is read into a temporary attribute and
+# deleted after the filter, so no other series changes.
+version: 0.3.16
 appVersion: "1.0.7"
 dependencies:
   - name: opentelemetry-collector
