@@ -258,6 +258,10 @@ def main():
              lambda t: [span(t, "krateo-frontend", "krateo.widget.fetch", {"http.response.status_code": 500})]
              + portal_trace(t, gw_status="500", sp_status=500, status=2))
 
+        case("audited write (krateo.audit.recorded=true)", True,
+             lambda t: portal_trace(t, attrs={"krateo.audit.recorded": True}))
+        case("snowplow call not audited (krateo.audit.recorded=false)", "sampled",
+             lambda t: portal_trace(t, attrs={"krateo.audit.recorded": False}))
         case("alert-provider reconcile whose HyperDX call got 429", True,
              lambda t: alert_provider_reconcile(t, hyperdx_status=429))
         case("alert-provider incident (incident.fire/compare/analyze)", True, alert_provider_incident)
