@@ -70,8 +70,8 @@ spec:
   threshold: {{ .threshold | int64 }}
   thresholdType: {{ .thresholdType }}
   interval: {{ .interval }}
-  {{- with .message }}
-  message: {{ . | quote }}
+  {{- with .description }}
+  description: {{ . | quote }}
   {{- end }}
 {{- end }}
 {{- end }}

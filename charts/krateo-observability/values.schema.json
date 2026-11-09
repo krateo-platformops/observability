@@ -315,7 +315,7 @@
               "where": {
                 "type": "string"
               },
-              "message": {
+              "description": {
                 "type": "string"
               },
               "threshold": {

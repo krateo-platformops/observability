@@ -23,7 +23,7 @@ spec:
   threshold: 1
   thresholdType: above
   interval: 1h
-  message: "The audit verifier reported a status other than ok: tampered, unprotected, unsealed or stale. Read krateo.audit.problem_seals on the line. Don't repair the tables before capturing them, because the chain is the evidence."
+  description: "The audit log failed its integrity check, for example because it was tampered with or not sealed."
 ---
 apiVersion: observability.krateo.io/v1alpha1
 kind: Alert
@@ -38,5 +38,5 @@ spec:
   threshold: 1
   thresholdType: below
   interval: 1h
-  message: "No successful audit verification in the last hour, so the chain has no verdict. Sealing can still be running. Check the {{ include "krateo-audit-worm.fullname" . }}-verify CronJob: a run past activeDeadlineSeconds prints nothing. This alert means unverified, not tampered."
+  description: "The audit log has not been verified in the last hour."
 {{- end }}
