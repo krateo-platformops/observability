@@ -1,0 +1,42 @@
+# otel-collector-deployment's run-to-completion readiness filter, run in the pinned collector image.
+# It must drop k8s.container.ready for Job pods and incident-provider's check pods, keep everything
+# else, and remove the temporary label attribute it filters on.
+#
+# A separate workflow, like check-tailsampling: lint.yaml is the org-wide canonical chart lint.
+
+name: check-run-to-completion-readiness
+
+on:
+  pull_request:
+    paths:
+      - "charts/otel-collector-deployment/**"
+      - "tests/run-to-completion-readiness-docker.py"
+      - ".github/workflows/check-run-to-completion-readiness.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "charts/otel-collector-deployment/**"
+      - "tests/run-to-completion-readiness-docker.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  readiness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Add the dependency repository
+        run: helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+      - name: Run the chart's filter on Job, check and ordinary pods
+        run: python3 tests/run-to-completion-readiness-docker.py .

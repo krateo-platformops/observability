@@ -217,19 +217,39 @@ opentelemetry-collector:
       # (logs) on purpose: that one copies every pod label, which on every cluster metric would
       # multiply the series. Readiness is meaningless for a Job's pod, so its points are dropped
       # below; every other metric of a Job pod is kept (and gains k8s.job.name).
-      k8sattributes/job-owner:
+      #
+      # incident-provider's CHECK PODS are run-to-completion too, but bare pods with no Job
+      # owner: a new one every 30-60s in krateo-incident-checks, each ready=0 for its one point.
+      # They can't fire sre-container-not-ready (5 windows), but one is nearly always in the
+      # current window, so the alert sat in PENDING on a healthy cluster. They're matched by
+      # the pod label app.kubernetes.io/component=incident-check: a constant in incident-provider
+      # (ComponentCheck, checkpod.go) that its NetworkPolicy also selects on, whereas the
+      # namespace is a chart value. The label is read into a temporary attribute and removed
+      # after the filter, so no other series changes.
+      k8sattributes/run-to-completion:
         passthrough: false
         extract:
           metadata: [k8s.job.name]
+          labels:
+            - tag_name: krateo.tmp.pod.component
+              key: app.kubernetes.io/component
+              from: pod
         pod_association:
           - sources:
               - from: resource_attribute
                 name: k8s.pod.uid
-      filter/job-readiness:
+      filter/run-to-completion-readiness:
         error_mode: ignore
         metrics:
           datapoint:
             - 'metric.name == "k8s.container.ready" and resource.attributes["k8s.job.name"] != nil'
+            - 'metric.name == "k8s.container.ready" and resource.attributes["krateo.tmp.pod.component"] == "incident-check"'
+      transform/drop-tmp-component:
+        error_mode: ignore
+        metric_statements:
+          - context: resource
+            statements:
+              - 'delete_key(attributes, "krateo.tmp.pod.component")'
       # JWT redaction (installer#394). This pipeline carries Kubernetes Events, whose free-text
       # message can quote a failing command line, token included.
       #
@@ -336,7 +356,7 @@ opentelemetry-collector:
         # add it here, i.e. receivers: [k8s_cluster, prometheus].
         metrics:
           receivers: [k8s_cluster]
-          processors: [memory_limiter, k8sattributes/job-owner, filter/job-readiness, batch]
+          processors: [memory_limiter, k8sattributes/run-to-completion, filter/run-to-completion-readiness, transform/drop-tmp-component, batch]
           exporters: [clickhouse]
         traces: null
 

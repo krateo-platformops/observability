@@ -267,9 +267,13 @@ Two things make the metric usable, both from otel-collector-deployment 0.3.15:
 - **Job pods are dropped.** A finished Job pod reports ready 0 for as long as it exists. Before
   0.3.15 that gave 895 five-minute unready runs in 7 days, all Job pods (audit-worm seal and verify,
   hyperdx-key-bootstrap). The collector now drops `k8s.container.ready` for pods with a
-  `k8s.job.name`. incident-provider's check pods in `krateo-incident-checks` are bare pods, not
-  Jobs, so they still report, but each lives a few seconds and records at most one point (794 pods
-  in 24 hours). One stuck for 5 minutes fires, as it should.
+  `k8s.job.name`.
+- **Check pods are dropped** (0.3.16). incident-provider's check pods in `krateo-incident-checks` are
+  bare run-to-completion pods, not Jobs: a new one every 30–60s, each with a single ready-0 point.
+  They could never fire the alert, but one was nearly always in the current window, so the alert sat
+  in `PENDING` on a healthy cluster. The collector drops their readiness by the pod label
+  `app.kubernetes.io/component=incident-check`. A stuck check pod is still caught by the image-pull,
+  unschedulable and crashloop alerts.
 - **30s collection.** A 1-minute window holds two points, so one late scrape doesn't leave an empty
   window that restarts the count.
 
