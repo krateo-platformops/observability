@@ -355,7 +355,7 @@ defaultAlerts:
       threshold: 1
       thresholdType: above
       interval: 15m
-      description: An access token was stored unredacted in the logs and should be treated as leaked.
+      description: An access token was stored unredacted in the logs, so treat it as leaked, rotate it, and stop the emitting service from logging it.
     # The span half of installer#394: the same JWT shape, read from otel_traces. The collectors
     # delete http.header.Authorization and redact the rest, so this is the check for a token that
     # got past them. Needs alert-provider 0.2.62, which adds `source`; an older one refuses the field.
@@ -369,7 +369,7 @@ defaultAlerts:
       threshold: 1
       thresholdType: above
       interval: 15m
-      description: An access token was stored unredacted in the traces and should be treated as leaked.
+      description: An access token was stored unredacted in the traces, so treat it as leaked and rotate it.
     # The ClickHouse data volume. A full disk is how this stack has failed before (installer#393):
     # inserts fail, collectors buffer and crash, and telemetry stops. The threshold is 20% of the
     # 15Gi claimed in clickhouse.cluster.spec.dataVolumeClaimSpec below. Change both together.
@@ -385,7 +385,7 @@ defaultAlerts:
       threshold: 3221225472
       thresholdType: below
       interval: 15m
-      description: The telemetry database's disk has less than 3 GiB free.
+      description: The telemetry database's disk has less than 3 GiB free; free space by following docs/clickhouse-disk-full.md, never by dropping audit partitions.
     - name: sre-rbac-denied-burst
       tier: extended
       displayName: Authorization failures elevated

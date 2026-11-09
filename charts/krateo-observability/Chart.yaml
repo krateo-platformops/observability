@@ -110,7 +110,12 @@ type: application
 # consecutiveWindows) and otel-collector-deployment 0.3.15 (30s readiness, Job pods dropped).
 # 0.1.36: every alert carries a one-sentence `description` in place of `message`. NEEDS
 # alert-provider-crds with spec.description: an older CRD drops the field.
-version: 0.1.36
+# 0.1.37: the three safety-critical descriptions carry their instruction again, in the one sentence:
+# disk headroom (follow docs/clickhouse-disk-full.md, never drop audit partitions) and the two JWT
+# alerts (rotate the token, stop it at source). 0.1.36's one-sentence rewrite had dropped them, and
+# the description is what the notification and the RCA read. Interim until alert-provider gains a
+# `runbook` field (Diego, 2026-11-09), where the full guidance moves back.
+version: 0.1.37
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack
