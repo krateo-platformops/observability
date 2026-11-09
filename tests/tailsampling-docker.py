@@ -130,6 +130,29 @@ def sse_trace(trace_id, status=0):
     ]
 
 
+def alert_provider_reconcile(trace_id, hyperdx_status=200):
+    """alert-provider's routine loop: one Alert's observe/reconcile pass with its HyperDX API call."""
+    svc = "krateo-alert-provider"
+    return [
+        span(trace_id, svc, "alert.observe"),
+        span(trace_id, svc, "alert.reconcile"),
+        span(trace_id, svc, "HTTP GET", {"http.response.status_code": hyperdx_status},
+             status=2 if hyperdx_status >= 400 else 0),
+    ]
+
+
+def alert_provider_incident(trace_id):
+    """An RCA as alert-provider emits it before the agent runtime traces: incident.* plus its calls."""
+    svc = "krateo-alert-provider"
+    return [
+        span(trace_id, svc, "incident.fire"),
+        span(trace_id, svc, "incident.compare"),
+        span(trace_id, svc, "HTTP POST", {"http.response.status_code": 200}),
+        span(trace_id, svc, "incident.analyze"),
+        span(trace_id, svc, "HTTP POST", {"http.response.status_code": 200}),
+    ]
+
+
 def post(port, spans):
     body = json.dumps(payload(spans)).encode()
     req = urllib.request.Request(
@@ -235,6 +258,9 @@ def main():
              lambda t: [span(t, "krateo-frontend", "krateo.widget.fetch", {"http.response.status_code": 500})]
              + portal_trace(t, gw_status="500", sp_status=500, status=2))
 
+        case("alert-provider reconcile whose HyperDX call got 429", True,
+             lambda t: alert_provider_reconcile(t, hyperdx_status=429))
+        case("alert-provider incident (incident.fire/compare/analyze)", True, alert_provider_incident)
         case("SSE stream that errors (sse-proxy, on the portal path)", True,
              lambda t: sse_trace(t, status=2))
 
@@ -252,6 +278,11 @@ def main():
         sse_ids = [tid() for _ in range(400)]
         for t in sse_ids:
             post(port, sse_trace(t))
+
+        # alert-provider's routine loop is a sampled service (0.1.5): a healthy pass is sampled.
+        ap_ids = [tid() for _ in range(400)]
+        for t in ap_ids:
+            post(port, alert_provider_reconcile(t))
 
         # Late spans: arrive after their trace's decision. Each must follow that decision.
         late_kept, late_dropped = cases["portal 4xx on snowplow http.response.status_code"][0], None
@@ -296,6 +327,11 @@ def main():
     within_sse = 6 <= n_sse <= 38
     failed |= not within_sse
     print(f"{'ok  ' if within_sse else 'FAIL'} plain portal SSE traces (sse-proxy) kept: {n_sse}/{len(sse_ids)}, expected about 5%")
+
+    n_ap = sum(1 for t in ap_ids if t in kept)
+    within_ap = 6 <= n_ap <= 38
+    failed |= not within_ap
+    print(f"{'ok  ' if within_ap else 'FAIL'} routine alert-provider reconcile traces kept: {n_ap}/{len(ap_ids)}, expected about 5%")
 
     late_k = any(n == "GET /refreshes (late)" for _, n in kept.get(late_kept, []))
     late_d = late_dropped in kept
