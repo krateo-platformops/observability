@@ -370,6 +370,24 @@ defaultAlerts:
       thresholdType: above
       interval: 15m
       description: An access token was stored unredacted in the traces, so treat it as leaked and rotate it.
+    # S1 (2026-11-09): a credential HEADER, by key, in otel_traces: any span or span-event attribute
+    # whose key names authorization, proxy-authorization, cookie or set-cookie. otel-collector-daemonset
+    # 0.1.24 deletes those keys whatever the value, so one here means the redaction failed or a sender
+    # bypassed the node agents. It complements sre-jwt-in-traces, which matches JWT-shaped VALUES and so
+    # misses an opaque bearer token or a session cookie. Upstream kagent tools copy the raw
+    # Authorization header into spans when tracing is on. 0 rows on krateo-057 in the 7 days to
+    # 2026-11-09. Human-only, like the JWT detectors: no agent reads the leaked span.
+    - name: sre-credential-header-in-traces
+      tier: core
+      metadataLabels:
+        observability.krateo.io/analysis: human
+      displayName: Credential header leaked into traces
+      source: traces
+      where: "arrayExists(k -> match(lower(k), 'authorization|cookie'), mapKeys(SpanAttributes)) OR arrayExists(m -> arrayExists(k -> match(lower(k), 'authorization|cookie'), mapKeys(m)), `Events.Attributes`)"
+      threshold: 1
+      thresholdType: above
+      interval: 15m
+      description: A credential header reached the traces, so the redaction failed; treat the credential as leaked and rotate it.
     # The ClickHouse data volume. A full disk is how this stack has failed before (installer#393):
     # inserts fail, collectors buffer and crash, and telemetry stops. The threshold is 20% of the
     # 15Gi claimed in clickhouse.cluster.spec.dataVolumeClaimSpec below. Change both together.
