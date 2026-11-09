@@ -59,6 +59,11 @@ defaultMetrics:
     unit: By
     collectedBy: kubeletstatsreceiver
     description: Bytes free on a pod volume. otel-collector-daemonset reports PersistentVolumeClaims only.
+  - name: k8s-container-ready
+    metricName: k8s.container.ready
+    type: gauge
+    collectedBy: k8sclusterreceiver
+    description: 1 while a container passes its readiness probe, 0 otherwise. otel-collector-deployment reports it every 30s and drops it for Job pods.
 
 defaultAlerts:
   # Ship the default alert set. Requires the Alert and Metric CRDs from alert-provider-crd; set
@@ -180,17 +185,40 @@ defaultAlerts:
       interval: 5m
       message: The container runtime could not create or tear down a pod sandbox. Typically CNI, containerd or a node-level fault rather than anything wrong with the workload.
     # count >= 3 keeps a probe that kept failing and drops the single readiness failure every pod
-    # logs once on start. Without it, each installer roll tripped this alert and started an RCA:
-    # 17 of 26 active 15-minute windows on krateo-057 in 7 days, all of them rolls. With it, 1 window
-    # in that week, snowplow unready for 2 minutes with 25 repeats.
+    # logs once on start (0.1.32). Readiness is not counted here since 0.1.35:
+    # sre-container-not-ready watches it per container from the readiness metric. In the 7 days to
+    # 2026-11-09 readiness was 160 of the 161 repeated probe events and all 5 firing windows, every
+    # one a short dip during a roll or a node event. Liveness and startup probes stay here, because
+    # a failing liveness probe restarts the container and shows no lasting unreadiness.
     - name: sre-probe-failing
       tier: core
-      displayName: Readiness or liveness probe failing
-      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'type') != 'DELETED' AND JSONExtractString(Body, 'object', 'reason') = 'Unhealthy' AND JSONExtractInt(Body, 'object', 'count') >= 3
+      displayName: Liveness or startup probe failing
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events' AND JSONExtractString(Body, 'type') != 'DELETED' AND JSONExtractString(Body, 'object', 'reason') = 'Unhealthy' AND JSONExtractInt(Body, 'object', 'count') >= 3 AND NOT startsWith(JSONExtractString(Body, 'object', 'message'), 'Readiness probe')
       threshold: 6
       thresholdType: above
       interval: 15m
-      message: Probes are failing repeatedly. A failing liveness probe restarts the container; a failing readiness probe silently removes it from its Service's endpoints, which looks like partial outage rather than an outage.
+      message: Liveness or startup probes are failing repeatedly. A failing liveness probe restarts the container, so look for restarts and for what the probe endpoint waits on. Readiness is covered per container by sre-container-not-ready.
+    # One series per container: fires when a container has not been ready for 5 whole minutes in a
+    # row, naming the namespace, pod and container that is out of its Service's endpoints. A roll's
+    # short readiness dip stays below 5 minutes, and an empty minute restarts the count, so a pod
+    # that is gone stops counting. Needs alert-provider 0.2.64 (groupBy, consecutiveWindows) and
+    # otel-collector-deployment 0.3.15 (30s readiness, no Job pods: a finished Job pod is unready
+    # for good, 895 such 5-minute runs in 7 days before 0.3.15). In the 7 days to 2026-11-09 on
+    # krateo-057 it would have fired once: acmp's deliberate readiness test.
+    - name: sre-container-not-ready
+      tier: core
+      displayName: Container not ready for 5 minutes
+      metricRef: k8s-container-ready
+      aggregation: max
+      groupBy:
+        - k8s.namespace.name
+        - k8s.pod.name
+        - k8s.container.name
+      consecutiveWindows: 5
+      threshold: 1
+      thresholdType: below
+      interval: 1m
+      message: A container has failed its readiness probe for 5 minutes, so its Service has stopped sending it traffic. The Group line names the namespace, pod and container. Check the pod's events and logs for what the probe waits on.
     - name: sre-job-failed
       tier: core
       displayName: Job or CronJob failed

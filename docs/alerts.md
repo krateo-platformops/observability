@@ -1,7 +1,7 @@
 ---
 type: Configuration
 title: observability — the default alert set
-description: The 26 Alert CRs the chart seeds, the measured evidence behind every filter and threshold, and the three rules that decide whether an Alert can fire at all — `where` is ClickHouse SQL and not the Lucene the CRD advertises, severity needs `otel-collector-daemonset` ≥ 0.1.17 and JSON logs, and log alerts must exclude the observability stack or they diagnose themselves. Event alerts skip the DELETED copy of an expired Event.
+description: The 29 Alert CRs the chart seeds, the measured evidence behind every filter and threshold, and the three rules that decide whether an Alert can fire at all — `where` is ClickHouse SQL and not the Lucene the CRD advertises, severity needs `otel-collector-daemonset` ≥ 0.1.17 and JSON logs, and log alerts must exclude the observability stack or they diagnose themselves. Event alerts skip the DELETED copy of an expired Event.
 resource: oci://ghcr.io/krateo-platformops/charts/krateo-observability
 tags: [alerting, alerts, observability, clickhouse, hyperdx, sre, runbook]
 timestamp: 2026-09-18T00:00:00Z
@@ -110,7 +110,8 @@ about whether your cluster has that problem.
 | `sre-pod-unschedulable` | core | events | above 0 | 15m | 0 |
 | `sre-pod-evicted` | core | events | above 0 | 5m | 0 |
 | `sre-pod-sandbox-failure` | core | events | above 0 | 5m | 0 |
-| `sre-probe-failing` | core | events, probe event repeated 3+ times | above 5 | 15m | 470 before 0.1.32 |
+| `sre-probe-failing` | core | events, liveness or startup probe event repeated 3+ times | above 5 | 15m | 1 (0 firing windows) |
+| `sre-container-not-ready` | core | metric `k8s.container.ready`, max per container | below 1 for 5 consecutive 1m windows | 1m | 1 firing run (acmp's test) |
 | `sre-job-failed` | core | events | above 0 | 15m | 0 |
 | `sre-volume-attach-failure` | core | events | above 3 | 15m | 218 |
 | `sre-pvc-provisioning-failure` | core | events | above 0 | 15m | 0 |
@@ -244,6 +245,37 @@ alert and started an RCA: 17 of the 26 active 15-minute windows on krateo-057 in
 2026-11-07, all of them rolls. It now counts a probe event only once Kubernetes has repeated it at least
 3 times (`object.count >= 3`), meaning a probe that kept failing for about 30 seconds or more. Over the
 same week that leaves 1 firing window: snowplow unready for 2 minutes, with 25 repeats.
+
+## Readiness moves to `sre-container-not-ready` (0.1.35)
+
+`sre-probe-failing` counted readiness and liveness events together in 15-minute windows. Readiness
+was nearly all of it: in the 7 days to 2026-11-09 on krateo-057, 160 of the 161 repeated probe events
+and all 5 firing windows. Each window was a short dip: snowplow unready for about 2 minutes in three
+rolls, about a dozen krateo-system and sre-* test pods unready together at 03:53–03:58 on 2026-11-08,
+and acmp's deliberate test. A count of events can't tell a 2-minute dip in a roll from a container
+that stays out of its Service, and it can't name the container.
+
+`sre-container-not-ready` watches the readiness metric instead, one series per namespace, pod and
+container (`groupBy`, alert-provider 0.2.64). It fires when a container's highest readiness value
+stays below 1 for 5 consecutive 1-minute windows (`consecutiveWindows: 5`), and HyperDX's `Group:` line
+names the container. A window with no points restarts the count, so a deleted pod stops counting
+rather than firing. Over the same 7 days it would have fired once, for acmp's test pod (10 minutes
+unready), and never for a roll.
+
+Two things make the metric usable, both from otel-collector-deployment 0.3.15:
+
+- **Job pods are dropped.** A finished Job pod reports ready 0 for as long as it exists. Before
+  0.3.15 that gave 895 five-minute unready runs in 7 days, all Job pods (audit-worm seal and verify,
+  hyperdx-key-bootstrap). The collector now drops `k8s.container.ready` for pods with a
+  `k8s.job.name`. incident-provider's check pods in `krateo-incident-checks` are bare pods, not
+  Jobs, so they still report, but each lives a few seconds and records at most one point (794 pods
+  in 24 hours). One stuck for 5 minutes fires, as it should.
+- **30s collection.** A 1-minute window holds two points, so one late scrape doesn't leave an empty
+  window that restarts the count.
+
+`sre-probe-failing` now matches only liveness and startup probe events (`NOT startsWith(message,
+'Readiness probe')`), which in that week was 1 event and 0 firing windows. A failing liveness probe
+restarts the container rather than leaving it unready, so the readiness metric wouldn't show it.
 
 ## `sre-krateo-composition-reconcile-error` and rolls (0.1.33)
 

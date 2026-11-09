@@ -394,6 +394,23 @@
                   "traces"
                 ],
                 "description": "Which rows where reads: logs (default) or traces. Needs alert-provider 0.2.62. Not with metricRef."
+              },
+              "groupBy": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^[A-Za-z0-9_./-]+$"
+                },
+                "description": "Metric alerts only: one series per distinct value of these attribute keys, e.g. [k8s.namespace.name, k8s.pod.name, k8s.container.name]. Needs alert-provider 0.2.64."
+              },
+              "consecutiveWindows": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 60,
+                "description": "Fire only once the condition has held for this many consecutive intervals; counted per series with groupBy. An empty interval restarts the count. Needs alert-provider 0.2.64."
               }
             }
           }
