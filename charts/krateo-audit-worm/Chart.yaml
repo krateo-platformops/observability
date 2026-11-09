@@ -12,7 +12,9 @@ type: application
 # 0.1.5: comments and a schema description only (#106), naming alert-provider-crd as the Alert CRD's
 # owner. Nothing rendered changes, so 0.1.4 stays pinned. A release refuses a published version
 # whose contents differ, even by a comment, so this version has to move.
-version: 0.1.5
+# 0.1.6: both alerts carry a one-sentence `description` in place of `message`. NEEDS
+# alert-provider-crds with spec.description: an older CRD drops the field.
+version: 0.1.6
 keywords:
   - audit
   - worm

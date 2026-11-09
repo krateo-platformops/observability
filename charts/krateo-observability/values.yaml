@@ -48,7 +48,7 @@ hyperdxLoadBalancer:
 # empty one (the chart ships the Alert CRD + alert-troubleshooter but seeded zero Alerts).
 # enabled:true by default; extend/override `alerts` freely, or set enabled:false to seed
 # none. Each renders as an observability.krateo.io Alert CR off the live CRD schema
-# (interval/threshold/thresholdType/where/message) and is user-editable/deletable.
+# (interval/threshold/thresholdType/where/description) and is user-editable/deletable.
 # NOTE: the Alert CRD is served by the clickstack-agent — these apply AFTER that CRD is
 # present (installer applies clickstack-agent first). Standalone-without-CRD → enabled:false.
 # Metric resources that metric alerts in defaultAlerts refer to by name (metricRef).
@@ -143,7 +143,7 @@ defaultAlerts:
       threshold: 1
       thresholdType: above
       interval: 5m
-      message: A container is exiting and kubelet is backing off restarting it. Check the container's own last log lines for why it exits — the event says only that it did.
+      description: A container keeps crashing and Kubernetes keeps restarting it.
     - name: sre-pod-oomkilled
       tier: core
       displayName: Pod killed for memory
@@ -151,7 +151,7 @@ defaultAlerts:
       threshold: 1
       thresholdType: above
       interval: 5m
-      message: A container was killed for exceeding its memory limit. A runtime OOM kill writes no application log line — the evidence is in the pod's status.containerStatuses[].lastState.terminated, which the investigation reads.
+      description: A container was stopped because it used more memory than its limit allows.
     - name: sre-image-pull-failure
       tier: core
       displayName: Image pull failing
@@ -159,7 +159,7 @@ defaultAlerts:
       threshold: 1
       thresholdType: above
       interval: 5m
-      message: 'A pod cannot pull its image: the tag may not exist, or the registry rejected the credentials. Usually a bad deploy or an expired pull secret.'
+      description: A pod cannot download its container image, usually because of a wrong tag or expired registry credentials.
     - name: sre-pod-unschedulable
       tier: core
       displayName: Pod cannot be scheduled
@@ -167,7 +167,7 @@ defaultAlerts:
       threshold: 1
       thresholdType: above
       interval: 15m
-      message: The scheduler cannot place a pod — no node satisfies its requests, affinity, taints or topology constraints. Often the first visible symptom of a cluster that has run out of room.
+      description: A pod is waiting because no node has room for it or meets its requirements.
     - name: sre-pod-evicted
       tier: core
       displayName: Pod evicted
@@ -175,7 +175,7 @@ defaultAlerts:
       threshold: 1
       thresholdType: above
       interval: 5m
-      message: 'The kubelet evicted a pod to reclaim a starved node resource. Treat as a NODE problem first: the evicted pod is usually the victim, not the cause.'
+      description: A pod was removed from its node because the node ran short of memory or disk.
     - name: sre-pod-sandbox-failure
       tier: core
       displayName: Pod sandbox / lifecycle failure
@@ -183,7 +183,7 @@ defaultAlerts:
       threshold: 1
       thresholdType: above
       interval: 5m
-      message: The container runtime could not create or tear down a pod sandbox. Typically CNI, containerd or a node-level fault rather than anything wrong with the workload.
+      description: Kubernetes could not set up or tear down a pod, usually because of a network or node problem.
     # count >= 3 keeps a probe that kept failing and drops the single readiness failure every pod
     # logs once on start (0.1.32). Readiness is not counted here since 0.1.35:
     # sre-container-not-ready watches it per container from the readiness metric. In the 7 days to
@@ -197,7 +197,7 @@ defaultAlerts:
       threshold: 6
       thresholdType: above
       interval: 15m
-      message: Liveness or startup probes are failing repeatedly. A failing liveness probe restarts the container, so look for restarts and for what the probe endpoint waits on. Readiness is covered per container by sre-container-not-ready.
+      description: A container keeps failing its liveness or startup health check, so Kubernetes restarts it.
     # One series per container: fires when a container has not been ready for 5 whole minutes in a
     # row, naming the namespace, pod and container that is out of its Service's endpoints. A roll's
     # short readiness dip stays below 5 minutes, and an empty minute restarts the count, so a pod
@@ -218,7 +218,7 @@ defaultAlerts:
       threshold: 1
       thresholdType: below
       interval: 1m
-      message: A container has failed its readiness probe for 5 minutes, so its Service has stopped sending it traffic. The Group line names the namespace, pod and container. Check the pod's events and logs for what the probe waits on.
+      description: A container has failed its readiness check for 5 minutes, so it is not receiving traffic.
     - name: sre-job-failed
       tier: core
       displayName: Job or CronJob failed
@@ -226,7 +226,7 @@ defaultAlerts:
       threshold: 1
       thresholdType: above
       interval: 15m
-      message: A Job exhausted its backoffLimit or could not create its pods. Scheduled work is silently not happening — backups and reconciliation jobs fail this way for weeks unnoticed.
+      description: A Job or CronJob failed, so the work it runs did not happen.
     - name: sre-volume-attach-failure
       tier: core
       displayName: Volume mount or attach failing
@@ -234,7 +234,7 @@ defaultAlerts:
       threshold: 4
       thresholdType: above
       interval: 15m
-      message: 'A pod cannot mount or attach its volume. Common causes: the PV is still attached to another node, a missing Secret or ConfigMap named as a volume, or a CSI driver that is down.'
+      description: A pod cannot mount one of its volumes.
     - name: sre-pvc-provisioning-failure
       tier: core
       displayName: PersistentVolume provisioning failed
@@ -242,7 +242,7 @@ defaultAlerts:
       threshold: 1
       thresholdType: above
       interval: 15m
-      message: A PersistentVolumeClaim cannot be satisfied — no matching PV, a storage class that does not exist, or a quota refusal from the storage backend.
+      description: Kubernetes cannot create or find the storage a volume claim asks for.
     - name: sre-node-not-ready
       tier: core
       displayName: Node not ready
@@ -250,7 +250,7 @@ defaultAlerts:
       threshold: 1
       thresholdType: above
       interval: 5m
-      message: A node stopped reporting ready, was cordoned, or rebooted. Everything it was running is being rescheduled — expect correlated workload alerts and treat this one as the cause.
+      description: A node went down, rebooted or stopped accepting new pods.
     - name: sre-node-resource-pressure
       tier: core
       displayName: Node under resource pressure
@@ -258,7 +258,7 @@ defaultAlerts:
       threshold: 1
       thresholdType: above
       interval: 5m
-      message: 'A node is short of disk, memory or PIDs. Evictions follow if it is not relieved. NOTE: this catches the kubelet''s pressure TRANSITIONS, not a utilisation percentage — a true saturation threshold needs the metric support this catalogue''s header describes.'
+      description: A node is running low on disk, memory or process IDs.
     - name: sre-node-preempted
       tier: core
       displayName: Node preempted or scheduled for termination
@@ -266,7 +266,7 @@ defaultAlerts:
       threshold: 1
       thresholdType: above
       interval: 5m
-      message: A spot/preemptible node is being reclaimed by the cloud provider. Expected on preemptible pools — alarming on a pool that is supposed to be on-demand, which is exactly the misconfiguration worth catching.
+      description: The cloud provider is taking back a spot or preemptible node.
     - name: sre-loadbalancer-failure
       tier: core
       displayName: LoadBalancer reconciliation failing
@@ -274,7 +274,7 @@ defaultAlerts:
       threshold: 1
       thresholdType: above
       interval: 15m
-      message: The cloud controller cannot create, update or delete a LoadBalancer. A failing DELETE is the expensive one — it leaks a billed cloud resource that no longer appears in the cluster.
+      description: Kubernetes cannot create, update or delete a cloud load balancer.
     - name: sre-telemetry-pipeline-stalled
       tier: core
       displayName: Telemetry pipeline stalled
@@ -282,7 +282,7 @@ defaultAlerts:
       threshold: 100
       thresholdType: below
       interval: 15m
-      message: 'Almost no logs reached the store in the last window. This is a DEAD-MAN''S SWITCH: it fires on the ABSENCE of data, which is the one failure every other alert here is blind to — a broken collector makes the whole catalogue go quiet and look healthy.'
+      description: Almost no logs are arriving, so the other alerts may be blind.
     # The last two clauses drop two errors controller-runtime retries on its own: a reconcile cut short
     # by shutdown ("context canceled") and an optimistic-lock conflict ("the object has been
     # modified"). Both appear whenever core-provider restarts in a roll. On krateo-057 they were every
@@ -296,7 +296,7 @@ defaultAlerts:
       threshold: 3
       thresholdType: above
       interval: 15m
-      message: Compositions are failing to reconcile. The composition may still report Ready — Ready means the chart rendered and applied, not that its children are healthy — so trust this over the status pill.
+      description: Krateo compositions are failing to reconcile, even if they still show Ready.
     - name: sre-krateo-provider-connection-failure
       tier: core
       displayName: Krateo — provider cannot reach its target
@@ -304,7 +304,7 @@ defaultAlerts:
       threshold: 11
       thresholdType: above
       interval: 15m
-      message: A Krateo provider cannot reach the system it manages — expired credentials, a rotated token, or the endpoint being unreachable. Everything that provider manages is frozen while this lasts.
+      description: A Krateo provider cannot connect to the system it manages, often because of expired credentials.
     - name: sre-app-panic
       tier: core
       displayName: Application panic or unhandled traceback
@@ -312,7 +312,7 @@ defaultAlerts:
       threshold: 1
       thresholdType: above
       interval: 15m
-      message: 'A process crashed on an unhandled error. Distinct from the crash-loop alert: this catches the FIRST crash and names the failing code, before kubelet backoff makes it visible as a restart loop.'
+      description: An application crashed on an unhandled error.
     - name: sre-app-out-of-memory
       tier: core
       displayName: Out-of-memory reported by an application
@@ -320,7 +320,7 @@ defaultAlerts:
       threshold: 1
       thresholdType: above
       interval: 15m
-      message: A runtime reported memory exhaustion itself — a JVM heap error, a Go allocation failure, a malloc refusal. Complements the OOMKilled alert, which only sees kills the KERNEL performed.
+      description: An application logged that it ran out of memory.
     # The drift exclusion: a composition controller's drift line lists changedObjects, and this
     # alert's own name holds both words it searches for, so it fired on its own update.
     - name: sre-certificate-expiry-warning
@@ -330,7 +330,7 @@ defaultAlerts:
       threshold: 1
       thresholdType: above
       interval: 1h
-      message: Something reported an expiring, expired or unverifiable certificate. Caught from LOG LINES, so it fires when a client already failed — expiry measured in days remaining needs the metric support described in this file's header.
+      description: Something logged an expired, expiring or untrusted TLS certificate.
     # The redaction detector for installer#394. The collectors DO sweep JWTs out of log bodies
     # AND log attributes (transform/log_statements: replace_pattern on body.string, because a map
     # body ignores replace_pattern on body, and replace_all_patterns on attributes) — but that
@@ -355,7 +355,7 @@ defaultAlerts:
       threshold: 1
       thresholdType: above
       interval: 15m
-      message: A bearer token reached the telemetry store UNREDACTED. The collector sweeps JWTs from log bodies and attributes, but that processor runs error_mode ignore, so a failed redaction statement is skipped silently and this is the only signal left. Treat the matched window as disclosed — the store is queryable by anyone with ClickHouse access and rows live for the retention period. Find the emitting ServiceName, stop it at source, then confirm this returns to 0.
+      description: An access token was stored unredacted in the logs and should be treated as leaked.
     # The span half of installer#394: the same JWT shape, read from otel_traces. The collectors
     # delete http.header.Authorization and redact the rest, so this is the check for a token that
     # got past them. Needs alert-provider 0.2.62, which adds `source`; an older one refuses the field.
@@ -369,7 +369,7 @@ defaultAlerts:
       threshold: 1
       thresholdType: above
       interval: 15m
-      message: A bearer token reached otel_traces UNREDACTED, in span or resource attributes, a status message or a span event. Treat it as exposed and rotate it. The incident goes to a person with no automatic analysis, so no agent reads the span.
+      description: An access token was stored unredacted in the traces and should be treated as leaked.
     # The ClickHouse data volume. A full disk is how this stack has failed before (installer#393):
     # inserts fail, collectors buffer and crash, and telemetry stops. The threshold is 20% of the
     # 15Gi claimed in clickhouse.cluster.spec.dataVolumeClaimSpec below. Change both together.
@@ -385,7 +385,7 @@ defaultAlerts:
       threshold: 3221225472
       thresholdType: below
       interval: 15m
-      message: The ClickHouse data volume has under 3 GiB free. At zero, inserts fail and telemetry stops. Follow docs/clickhouse-disk-full.md, and never drop audit partitions.
+      description: The telemetry database's disk has less than 3 GiB free.
     - name: sre-rbac-denied-burst
       tier: extended
       displayName: Authorization failures elevated
@@ -393,7 +393,7 @@ defaultAlerts:
       threshold: 20
       thresholdType: above
       interval: 15m
-      message: A burst of authorization refusals. Either a ServiceAccount lost a binding it needs — a controller silently stops working this way — or something is probing for access it should not have.
+      description: Many requests are being refused for missing permissions.
     - name: sre-upstream-timeouts
       tier: extended
       displayName: Upstream timeouts elevated
@@ -401,7 +401,7 @@ defaultAlerts:
       threshold: 50
       thresholdType: above
       interval: 15m
-      message: 'Calls between services are timing out or being refused. Baseline-relative by nature: a healthy cluster has a non-zero rate, so retune the threshold to this cluster rather than trusting the default.'
+      description: Calls between services are timing out or being refused more than usual.
     - name: sre-volume-resize-issue
       tier: extended
       displayName: Volume resize pending or failed
@@ -409,7 +409,7 @@ defaultAlerts:
       threshold: 1
       thresholdType: above
       interval: 1h
-      message: A volume expansion is stuck or needs a pod restart to complete the filesystem resize. Usually benign, occasionally the reason a disk-full condition never actually clears.
+      description: A volume resize is stuck or waiting for a pod restart.
     - name: sre-krateo-external-resource-failure
       tier: extended
       displayName: Krateo — external resource operations failing
@@ -417,7 +417,7 @@ defaultAlerts:
       threshold: 200
       thresholdType: above
       interval: 15m
-      message: 'Providers are failing to observe, create, update or delete the resources they manage. DELIBERATELY BLUNT and extended-tier: on a busy platform this reason has a high steady baseline, so the default threshold means `far above normal`, not `any failure`. Retune it to this cluster''s own baseline.'
+      description: Krateo providers are failing to manage their external resources far more often than usual.
     - name: sre-kubernetes-warning-burst
       tier: extended
       displayName: Kubernetes warning events elevated
@@ -425,7 +425,7 @@ defaultAlerts:
       threshold: 100
       thresholdType: above
       interval: 15m
-      message: 'A catch-all safety net: warning events across the cluster are far above normal. It names nothing specific by design — it exists to catch the failure modes this catalogue does NOT have a named alert for, which is the whole point of having one.'
+      description: Kubernetes is reporting far more warnings than usual.
 
 # ---------------------------------------------------------------------------
 # Upstream clickstack passthrough (verbatim from obs-stack/clickstack/values.yaml)
