@@ -145,6 +145,12 @@ opentelemetry-collector:
           # day on krateo-057, 0 errors, read by no widget or alert) and is sampled from here on.
           # Their errors stay whole under the two rules above. composition-dynamic-controller is
           # NOT here: the reconcile widgets read its traces.
+          # krateo-observability is the HyperDX server's own service.name (Diego, 2026-11-10).
+          # alert-provider's HyperDX API calls carry trace context, so HyperDX's server spans
+          # (express middleware, mongodb.find) join alert-provider's trace; left out, they kept 82
+          # of 171 alert-provider reconcile traces whole on krateo-057 in one hour (about 11%, not
+          # 5%). Essentially all of HyperDX's traces are those calls. Its errors and HTTP >= 400
+          # stay whole under the two rules above.
           - name: outside-sampled-services
             type: ottl_condition
             ottl_condition:
@@ -159,6 +165,7 @@ opentelemetry-collector:
                   and resource.attributes["service.name"] != "git-provider"
                   and resource.attributes["service.name"] != "incident-provider"
                   and resource.attributes["service.name"] != "core-provider"
+                  and resource.attributes["service.name"] != "krateo-observability"
           # The sre-jwt-in-traces detector's own pattern, over the same four places it reads, so
           # sampling never hides a leaked token from it.
           - name: jwt-shaped-value

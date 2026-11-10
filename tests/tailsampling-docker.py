@@ -170,6 +170,19 @@ def provider_reconcile(trace_id, svc, error=False):
     ]
 
 
+def hyperdx_server(trace_id, status_code=200):
+    """The HyperDX server's own spans (service.name krateo-observability) under an alert-provider API
+    call, as they arrive through trace-context propagation."""
+    svc = "krateo-observability"
+    return [
+        span(trace_id, svc, "router - /", {"http.route": "/"}),
+        span(trace_id, svc, "middleware - authenticate"),
+        span(trace_id, svc, "mongodb.find"),
+        span(trace_id, svc, "GET /api/v2/charts/series", {"http.response.status_code": status_code},
+             status=2 if status_code >= 500 else 0),
+    ]
+
+
 def post(port, spans):
     body = json.dumps(payload(spans)).encode()
     req = urllib.request.Request(
@@ -285,6 +298,8 @@ def main():
         case("alert-provider reconcile whose HyperDX call got 429", True,
              lambda t: alert_provider_reconcile(t, hyperdx_status=429))
         case("alert-provider incident (incident.fire/compare/analyze)", True, alert_provider_incident)
+        case("alert-provider reconcile whose HyperDX server answered 500", True,
+             lambda t: alert_provider_reconcile(t) + hyperdx_server(t, status_code=500))
         for svc in PROVIDERS:
             case(f"{svc} reconcile that failed (status ERROR)", True,
                  lambda t, svc=svc: provider_reconcile(t, svc, error=True))
@@ -310,6 +325,11 @@ def main():
         ap_ids = [tid() for _ in range(400)]
         for t in ap_ids:
             post(port, alert_provider_reconcile(t))
+        # The same loop with the HyperDX server's spans joined through propagation (0.1.9): still
+        # sampled, not kept whole as "touching another service".
+        aph_ids = [tid() for _ in range(400)]
+        for t in aph_ids:
+            post(port, alert_provider_reconcile(t) + hyperdx_server(t))
 
         # The providers' routine loops are sampled services (0.1.7): a healthy pass is sampled.
         pr_ids = [tid() for _ in range(400)]
@@ -364,6 +384,11 @@ def main():
     within_ap = 6 <= n_ap <= 38
     failed |= not within_ap
     print(f"{'ok  ' if within_ap else 'FAIL'} routine alert-provider reconcile traces kept: {n_ap}/{len(ap_ids)}, expected about 5%")
+
+    n_aph = sum(1 for t in aph_ids if t in kept)
+    within_aph = 6 <= n_aph <= 38
+    failed |= not within_aph
+    print(f"{'ok  ' if within_aph else 'FAIL'} routine alert-provider traces with HyperDX server spans kept: {n_aph}/{len(aph_ids)}, expected about 5%")
 
     n_pr = sum(1 for t in pr_ids if t in kept)
     within_pr = 6 <= n_pr <= 38
