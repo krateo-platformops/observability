@@ -21,7 +21,7 @@
   install THIS chart standalone without that CRD, set defaultAlerts.enabled=false.
 */ -}}
 {{- if .Values.defaultAlerts.enabled }}
-{{- range .Values.defaultAlerts.alerts }}
+{{- range $a := .Values.defaultAlerts.alerts }}
 {{- /* Tier gate: `core` always ships; `extended` only when defaultAlerts.extended is set. An entry
        with no tier is treated as core, so a values override that predates tiering keeps working. */}}
 {{- if or (ne (.tier | default "core") "extended") $.Values.defaultAlerts.extended }}
@@ -72,6 +72,15 @@ spec:
   interval: {{ .interval }}
   {{- with .description }}
   description: {{ . | quote }}
+  {{- end }}
+  {{- with .runbook }}
+  {{- /* alert-provider >= 0.2.69. HyperDX compiles the notification (description, a blank line,
+         then the runbook) as a Handlebars template and caps it at 4096 characters, so the chart
+         refuses what would break it there rather than letting HyperDX reject or mangle it. */}}
+  {{- if contains "{{" . }}{{ fail (printf "defaultAlerts %s: runbook contains '{{', which HyperDX compiles as Handlebars" $a.name) }}{{ end }}
+  {{- if regexMatch "(^|\\s)@[A-Za-z]" . }}{{ fail (printf "defaultAlerts %s: runbook has an @word after whitespace, which HyperDX turns into a notify helper" $a.name) }}{{ end }}
+  {{- if gt (add (len ($a.description | default "")) 2 (len .)) 4096 }}{{ fail (printf "defaultAlerts %s: description + 2 + runbook exceeds HyperDX's 4096-character message" $a.name) }}{{ end }}
+  runbook: {{ . | quote }}
   {{- end }}
 {{- end }}
 {{- end }}

@@ -121,7 +121,13 @@ type: application
 # 0.1.39: sre-incident-checks-unknown fires once per incident whose check script stopped giving a
 # verdict (incident-provider >= 0.8.0 logs reason=ChecksUnknown in the JSON body); only a person
 # moves it on. Human-only analysis. Decision: Diego 2026-11-10, this signal only.
-version: 0.1.39
+# 0.1.40: alerts take an optional `runbook`, rendered as spec.runbook. NEEDS alert-provider 0.2.69
+# (an older CRD drops the field). The disk-headroom and two JWT alerts get one: the full guidance
+# 0.1.37 had squeezed into the description moves there, and the descriptions are short again
+# (the disk one keeps "never drop audit partitions"). The runbook follows the description in the
+# notification and reaches the RCA prompt. The template refuses '{{', an @word and a message over
+# HyperDX's 4096 characters.
+version: 0.1.40
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack

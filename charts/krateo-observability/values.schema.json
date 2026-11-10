@@ -318,6 +318,12 @@
               "description": {
                 "type": "string"
               },
+              "runbook": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 3072,
+                "description": "Operator guidance, rendered as spec.runbook (alert-provider >= 0.2.69). It follows the description in the HyperDX notification (description, a blank line, the runbook; at most 4096 characters in all) and goes to the RCA prompt between <runbook> tags. No '{{' and no @word after whitespace: HyperDX compiles the message as Handlebars. The template refuses both, and the 4096 overflow."
+              },
               "threshold": {
                 "type": "integer",
                 "description": "A row count, or a metric value for a metric alert. Typed integer, not number: crdgen types number as a string in the generated CRD."
