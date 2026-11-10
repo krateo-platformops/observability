@@ -101,10 +101,14 @@ rule: the span is counted (snowplow never forwards one).
   per-series reset handling: `sum(Value)` for calls, `sumForEach(BucketCounts)` and `sum(Count)`
   for the histogram. HyperDX 2.35.0, which evaluates the alert-provider's tiles, reads
   `AggregationTemporality = 1` rows as already-per-interval for both sums and histograms.
-- **Histogram buckets** (`ExplicitBounds`, ms): `[25, 50, 100, 250, 500, 750, 1000, 1500, 2500,
-  5000, 10000]`, so `BucketCounts` has 12 entries; the last is `> 10000`. Bucket *i* counts
+- **Histogram buckets** (`ExplicitBounds`, ms): `[25, 50, 100, 250, 500, 750, 1000, 1500, 2000,
+  2500, 5000, 10000]`, so `BucketCounts` has 13 entries; the last is `> 10000`. Bucket *i* counts
   durations `≤ ExplicitBounds[i]` and `> ExplicitBounds[i-1]`. These resolve a p95 anywhere from
-  50 ms to 10 s and are not tuned to any target; the targets are deploy-time configuration.
+  50 ms to 10 s and are not tuned to any target; the targets are deploy-time configuration. The one
+  exception is 2000 (otel-collector-daemonset 0.1.26): it sits at the UI page-load objective's
+  boundary (p95 ≤ 2000 ms), so that objective is decidable rather than falling in (1500, 2500].
+  Rows written before 0.1.26 have the old 11-bound layout; anything summing buckets must group by
+  `ExplicitBounds` (the daily rollup does).
 - **Retention:** the same 7-day TTL as every `otel_metrics_*` table. For the 28-day window, see
   [the daily rollup](#28-day-rollup).
 - **Where the spans come from.** snowplow exports its own spans to the node-local agent

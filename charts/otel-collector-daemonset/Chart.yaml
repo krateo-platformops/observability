@@ -130,7 +130,12 @@ type: application
 # gcp.vertex.agent.{tool_response,tool_call_args,llm_request,llm_response} and gen_ai prompt/completion/
 # message keys, on spans and span events (Diego, 2026-11-10: strip all content, keep kagent.user_id).
 # Ships BEFORE kagent agent tracing is switched on. tests/agent-content-keys-docker.py runs it.
-version: 0.1.25
+# 0.1.26: the span-metrics duration histogram gains a 2000 ms boundary (acmp#21), so the UI
+# page-load objective (p95 <= 2000 ms) is decidable instead of falling in (1500, 2500]. A layout
+# change: krateo-slo-rollup keeps rows per bounds and reports no p95 over a window that spans both
+# layouts, so a 30-day p95 that includes the change day is unavailable until the window passes
+# (krateo-slo-rollup isn't deployed on krateo-057 today). HyperDX and alert quantiles read bounds per row.
+version: 0.1.26
 appVersion: "0.158.0"
 dependencies:
   - name: opentelemetry-collector

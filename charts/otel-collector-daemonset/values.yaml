@@ -598,8 +598,12 @@ opentelemetry-collector:
           # Fixed for a p95 that may sit anywhere from 50 ms to 10 s; NOT tuned to any target (the
           # targets are set at deploy time and never committed). The bucket bounds land in
           # ExplicitBounds as [25, 50, ..., 10000] (ms), plus the implicit +Inf bucket.
+          # 2000ms (0.1.26, acmp#21): the UI page-load objective is p95 <= 2000 ms, and without a
+          # 2000 boundary a p95 between 1500 and 2500 ms could never be judged against it. A bucket
+          # at an objective's boundary is the exception to "not tuned to any target": it doesn't
+          # tune, it makes the objective decidable. Cost: one more count per histogram row.
           explicit:
-            buckets: [25ms, 50ms, 100ms, 250ms, 500ms, 750ms, 1s, 1500ms, 2500ms, 5s, 10s]
+            buckets: [25ms, 50ms, 100ms, 250ms, 500ms, 750ms, 1s, 1500ms, 2000ms, 2500ms, 5s, 10s]
         # Circuit breaker per service per agent per interval, set above the loose bound in
         # docs/SLO.md (~1,400 for snowplow); past it, new combinations fold into one series marked
         # otel.metric.overflow=true instead of growing the table.
