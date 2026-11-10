@@ -55,8 +55,16 @@ type: application
 # 0.1.23: bump the sse-proxy image to 1.4.2. Each client's buffer holds one full poll (500 events),
 # so ordinary bursts of 68 to 257 rows no longer drop events for a client that has kept up. On 1.4.1
 # about 1 event in 9 was dropped that way (sse-proxy#30). Up to about 500 events held per client.
-version: 0.1.23
-appVersion: "1.4.2"
+# 0.1.24: bump the sse-proxy image to 1.5.0 (sse-proxy#45). /events reads are time-bounded on
+# otel_logs.TimestampTime (default 7 days, the TTL) and pruned by the namespace bloom index: one
+# request went from ~4.2 to ~0.1 CPU-s on krateo-057, which is what saturated ClickHouse under the X5
+# load. A 4 s budget answers 200 with a partial body (X-Events-Status). Every query sends readonly=2,
+# cancel-on-close and max_execution_time, so an abandoned query stops in ClickHouse. A caller that
+# leaves gets 499 (not 500/ERROR) and its ClickHouse span isn't an error. Events carry
+# composition {id, namespace, name} (names need otel-collector-deployment >= 0.3.17). /audit gets the
+# same limits and its empty fields now carry values. Auth 503s are logged. No new env required.
+version: 0.1.24
+appVersion: "1.5.0"
 home: https://krateo.io
 icon: https://github.com/krateoplatformops/krateo/blob/main/docs/media/logo.svg
 keywords:
