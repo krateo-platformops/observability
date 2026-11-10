@@ -153,6 +153,19 @@ def alert_provider_incident(trace_id):
     ]
 
 
+PROVIDERS = ("git-provider", "incident-provider", "core-provider")
+
+
+def provider_reconcile(trace_id, svc, error=False):
+    """A provider-runtime v1.14.0 reconcile: the `reconcile` root and its step. An error goes through
+    tracing.RecordError, which sets status Error on the step AND the root (provider-runtime#60)."""
+    status = 2 if error else 0
+    return [
+        span(trace_id, svc, "reconcile", status=status),
+        span(trace_id, svc, "observe", {"provider_runtime.step": "observe"}, status=status),
+    ]
+
+
 def post(port, spans):
     body = json.dumps(payload(spans)).encode()
     req = urllib.request.Request(
@@ -244,8 +257,11 @@ def main():
              lambda t: [span(t, "composition-dynamic-controller", "reconcile")])
         case("LLM trace (agent gateway)", True,
              lambda t: [span(t, "krateo-agent-gateway", "POST /v1/chat/completions", {"http.status": "200"})])
+        # A service outside the sampled list makes the whole trace kept. composition-dynamic-controller
+        # stays outside on purpose (the reconcile widgets read its traces). This used git-provider
+        # until 0.1.7 made the providers sampled services.
         case("portal trace touching another service", True,
-             lambda t: portal_trace(t) + [span(t, "git-provider", "GET /repos")])
+             lambda t: portal_trace(t) + [span(t, "composition-dynamic-controller", "reconcile")])
         case("snowplow stages failed on a 200 (snowplow.stages.failed=2)", True,
              lambda t: portal_trace(t, attrs={"snowplow.stages.failed": 2,
                                               "snowplow.stages.failure_reasons": ["other", "timeout"]}))
@@ -265,6 +281,9 @@ def main():
         case("alert-provider reconcile whose HyperDX call got 429", True,
              lambda t: alert_provider_reconcile(t, hyperdx_status=429))
         case("alert-provider incident (incident.fire/compare/analyze)", True, alert_provider_incident)
+        for svc in PROVIDERS:
+            case(f"{svc} reconcile that failed (status ERROR)", True,
+                 lambda t, svc=svc: provider_reconcile(t, svc, error=True))
         case("SSE stream that errors (sse-proxy, on the portal path)", True,
              lambda t: sse_trace(t, status=2))
 
@@ -287,6 +306,11 @@ def main():
         ap_ids = [tid() for _ in range(400)]
         for t in ap_ids:
             post(port, alert_provider_reconcile(t))
+
+        # The providers' routine loops are sampled services (0.1.7): a healthy pass is sampled.
+        pr_ids = [tid() for _ in range(400)]
+        for n, t in enumerate(pr_ids):
+            post(port, provider_reconcile(t, PROVIDERS[n % len(PROVIDERS)]))
 
         # Late spans: arrive after their trace's decision. Each must follow that decision.
         late_kept, late_dropped = cases["portal 4xx on snowplow http.response.status_code"][0], None
@@ -336,6 +360,11 @@ def main():
     within_ap = 6 <= n_ap <= 38
     failed |= not within_ap
     print(f"{'ok  ' if within_ap else 'FAIL'} routine alert-provider reconcile traces kept: {n_ap}/{len(ap_ids)}, expected about 5%")
+
+    n_pr = sum(1 for t in pr_ids if t in kept)
+    within_pr = 6 <= n_pr <= 38
+    failed |= not within_pr
+    print(f"{'ok  ' if within_pr else 'FAIL'} routine provider reconcile traces (git/incident/core-provider) kept: {n_pr}/{len(pr_ids)}, expected about 5%")
 
     late_k = any(n == "GET /refreshes (late)" for _, n in kept.get(late_kept, []))
     late_d = late_dropped in kept

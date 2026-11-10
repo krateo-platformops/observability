@@ -17,7 +17,11 @@ type: application
 # at 5% like the rest instead of being kept whole (installer#405; browser spans arrive through
 # snowplow's rum-ingest). OTTL paths now carry their context prefix (span., spanevent.), which
 # the collector otherwise rewrote at startup with an info note; the conditions are unchanged.
-version: 0.1.6
+# 0.1.7: git-provider, incident-provider and core-provider join the sampled services (Diego,
+# 2026-11-10): provider-runtime v1.14.0 traces every reconcile, so their routine loops are sampled
+# at 5% before any chart turns tracing on; errors stay whole. core-provider's existing per-pass
+# compositiondefinition.observe traces (31K a day on krateo-057) are sampled from here on.
+version: 0.1.7
 # The collector this chart renders: the upstream chart's own appVersion picks the image tag.
 # Keep equal to otel-collector-daemonset's appVersion, so both tiers run the same build.
 appVersion: "0.158.0"
