@@ -118,6 +118,9 @@ type: application
 # 0.1.38: sre-credential-header-in-traces (S1) fires on any span or span-event attribute whose key
 # names authorization or cookie, the case sre-jwt-in-traces can't see (an opaque token, a cookie).
 # Pairs with otel-collector-daemonset 0.1.24, which deletes those keys. Human-only analysis.
+# 0.1.39: sre-incident-checks-unknown fires once per incident whose check script stopped giving a
+# verdict (incident-provider >= 0.8.0 logs reason=ChecksUnknown in the JSON body); only a person
+# moves it on. Human-only analysis. Decision: Diego 2026-11-10, this signal only.
 version: 0.1.39
 appVersion: "3.2.0"
 dependencies:
