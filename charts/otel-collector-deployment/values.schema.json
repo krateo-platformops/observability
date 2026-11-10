@@ -339,6 +339,12 @@
                     },
                     "label_key": {
                       "type": "string"
+                    },
+                    "name_label_key": {
+                      "type": "string"
+                    },
+                    "namespace_label_key": {
+                      "type": "string"
                     }
                   }
                 }

@@ -45,6 +45,10 @@ opentelemetry-collector:
     # Renamed otelcol-krateo -> krateo-otel-collector when the custom collector was split
     # into its own single-image repo (krateo-platformops/otel-collector) on the canonical CI.
     repository: ghcr.io/krateo-platformops/otel-collector
+    # 1.0.8: compositionresolver also writes krateo.io/composition-name and
+    #        krateo.io/composition-namespace next to the id (otel-collector#40). Needed by the
+    #        name_label_key/namespace_label_key keys below: the processor's config is strict, so
+    #        1.0.7 and older refuse those keys at startup.
     # 1.0.7: adds filterprocessor, so this chart can drop k8s.container.ready for Job-owned pods
     #        (otel-collector#39).
     # 1.0.6: same code as 1.0.5, tagged from the first commit whose CI ran the Go tests. The
@@ -60,7 +64,7 @@ opentelemetry-collector:
     # 1.0.2: + patched clickhouseexporter — recreate the otel_* schema and retry on UNKNOWN_TABLE
     #        (ClickHouse re-provisioned with a fresh DB) instead of dropping data until a restart.
     # 1.0.1: patched k8sobjectsreceiver (recycle timer + restart-on-close) — KOS-1 #112 bug #2
-    tag: "1.0.7"
+    tag: "1.0.8"
     pullPolicy: IfNotPresent
 
   # The container binary is still named otelcol-krateo (OTel builder dist.name / Dockerfile
@@ -310,6 +314,14 @@ opentelemetry-collector:
         cache_ttl: 5m
         negative_cache_ttl: 30s
         label_key: "krateo.io/composition-id"
+        # Compositions are named at the source: each event records the composition's name and
+        # namespace next to its id, so a consumer can link to /compositions/<ns>/<name> without
+        # listing every composition kind to map an id. They come from the same source as the id:
+        # the involvedObject's krateo.io/composition-name/-namespace labels, or a root
+        # composition's own metadata. Each is written only when known. "" turns one off.
+        # Requires image 1.0.8 or later.
+        name_label_key: "krateo.io/composition-name"
+        namespace_label_key: "krateo.io/composition-namespace"
 
     exporters:
       clickhouse:
