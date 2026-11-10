@@ -333,6 +333,9 @@ def main():
         for svc in PROVIDERS:
             case(f"{svc} reconcile that failed (status ERROR)", True,
                  lambda t, svc=svc: provider_reconcile(t, svc, error=True))
+        case("sse-proxy 500 under snowplow (a real backend failure)", True,
+             lambda t: [span(t, "snowplow", "GET /call", {"http.response.status_code": 200}),
+                        span(t, "sse-proxy", "GET /events", {"http.response.status_code": 500}, status=2)])
         case("SSE stream that errors (sse-proxy, on the portal path)", True,
              lambda t: sse_trace(t, status=2))
 
@@ -360,6 +363,12 @@ def main():
         aph_ids = [tid() for _ in range(400)]
         for t in aph_ids:
             post(port, alert_provider_reconcile(t) + hyperdx_server(t))
+
+        # sse-proxy 499 (0.1.10): the caller left, so nothing failed in sse-proxy; sampled, not kept.
+        c499_ids = [tid() for _ in range(400)]
+        for t in c499_ids:
+            post(port, [span(t, "snowplow", "GET /call", {"http.response.status_code": 200}),
+                        span(t, "sse-proxy", "GET /events", {"http.response.status_code": 499})])
 
         # The providers' routine loops are sampled services (0.1.7): a healthy pass is sampled.
         pr_ids = [tid() for _ in range(400)]
@@ -455,6 +464,11 @@ def main():
     act_ok = act_in_up == len(rt_up)
     failed |= not act_ok
     print(f"{'ok  ' if act_ok else 'FAIL'} v1.14.1 act span stored inside R: {act_in_up}/{len(rt_up)}")
+
+    n_499 = sum(1 for t in c499_ids if t in kept)
+    within_499 = 6 <= n_499 <= 38
+    failed |= not within_499
+    print(f"{'ok  ' if within_499 else 'FAIL'} portal traces whose only 4xx is sse-proxy's 499 kept: {n_499}/{len(c499_ids)}, expected about 5%")
 
     n_pr = sum(1 for t in pr_ids if t in kept)
     within_pr = 6 <= n_pr <= 38
