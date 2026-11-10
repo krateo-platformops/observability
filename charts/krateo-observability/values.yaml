@@ -388,6 +388,24 @@ defaultAlerts:
       thresholdType: above
       interval: 15m
       description: A credential header reached the traces, so the redaction failed; treat the credential as leaked and rotate it.
+    # An incident whose check script stopped giving a verdict. incident-provider (>= 0.8.0) gives up
+    # after the no-verdict bound and logs reason=ChecksUnknown once, in the JSON body (filelog leaves
+    # its fields in Body, not LogAttributes). From then on nothing moves the incident except a person:
+    # spec.applied, spec.closed or spec.reanalysis. Event-shaped: one line per incident, so the alert
+    # fires once for each newly stuck incident and then resolves. Human-only: an RCA of "a check gave
+    # no verdict" would re-read the same script output the log line already carries. Validated on
+    # krateo-057 on 2026-11-10: 16 lines at the 0.8.0 roll = 16 Incidents with ChecksUnknown=True.
+    # Decision: Diego 2026-11-10 (ChecksUnknown only, not "Open too long").
+    - name: sre-incident-checks-unknown
+      tier: core
+      metadataLabels:
+        observability.krateo.io/analysis: human
+      displayName: Incident stuck, its checks give no verdict
+      where: "ServiceName = 'incident-provider' AND JSONExtractString(Body, 'reason') = 'ChecksUnknown'"
+      threshold: 1
+      thresholdType: above
+      interval: 15m
+      description: An incident's check script stopped giving a verdict, so the incident can't move on by itself; open it and apply, close or re-analyse it.
     # The ClickHouse data volume. A full disk is how this stack has failed before (installer#393):
     # inserts fail, collectors buffer and crash, and telemetry stops. The threshold is 20% of the
     # 15Gi claimed in clickhouse.cluster.spec.dataVolumeClaimSpec below. Change both together.
