@@ -276,6 +276,19 @@ opentelemetry-collector:
               # header, case-insensitive and partial (proxy-authorization, set-cookie included).
               # krateo-observability's sre-credential-header-in-traces fires if one ever gets through.
               - 'delete_matching_keys(attributes, "(?i)(authorization|cookie)")'
+              # Agent CONTENT (Diego, 2026-11-10: strip all content, keep kagent.user_id). kagent 0.10.1
+              # agents record the full tool response and tool arguments on every execute_tool span
+              # (adk telemetry.go; no switch, no size cap) and the whole prompt and model reply on
+              # generate_content (go/adk/pkg/telemetry/attributes.go), and the Python agents'
+              # OpenLLMetry instrumentor records gen_ai.prompt.* / gen_ai.completion.* (TRACELOOP_TRACE_CONTENT,
+              # default true, not settable centrally). Whatever an agent reads through a tool (helm values,
+              # a Secret the caller may read, pod logs) would otherwise sit in otel_traces for 7 days.
+              # Deleted here, at the first collector, so it never leaves the node. Kept: span names,
+              # model, token counts, finish reasons, tool names, timings, errors, kagent.user_id.
+              # The newer semconv content keys (gen_ai.input.messages, output.messages,
+              # system_instructions) are included so an upstream upgrade can't reintroduce content.
+              - 'delete_matching_keys(attributes, "^gcp\\.vertex\\.agent\\.(tool_response|tool_call_args|llm_request|llm_response)$")'
+              - 'delete_matching_keys(attributes, "^gen_ai\\.(prompt|completion|input\\.messages|output\\.messages|system_instructions)($|\\.)")'
               # MEASURED on krateo-057 2026-10-22 (installer#396): 22 spans still carried a raw JWT
               # after the per-key statements below, every one of them in `http.path`, on spans named
               # `GET /events/*` and `GET krateo-sse-proxy...:8080`. The enumerated keys could not
@@ -291,6 +304,9 @@ opentelemetry-collector:
           - context: spanevent
             statements:
               - 'delete_matching_keys(attributes, "(?i)(authorization|cookie)")'
+              # Agent content, as on spans above: some GenAI instrumentations emit it as span events.
+              - 'delete_matching_keys(attributes, "^gcp\\.vertex\\.agent\\.(tool_response|tool_call_args|llm_request|llm_response)$")'
+              - 'delete_matching_keys(attributes, "^gen_ai\\.(prompt|completion|input\\.messages|output\\.messages|system_instructions)($|\\.)")'
               - 'replace_all_patterns(attributes, "value", "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>")'
               - 'replace_pattern(attributes["exception.message"], "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>") where attributes["exception.message"] != nil'
               - 'replace_pattern(attributes["error.message"], "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>") where attributes["error.message"] != nil'

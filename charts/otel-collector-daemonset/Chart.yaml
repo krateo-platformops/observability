@@ -126,7 +126,11 @@ type: application
 # Diego turned on for OTEL-8 (installer#400). The upstream Service is headless, which ignores
 # internalTrafficPolicy, so spans could land on another node's agent and go unenriched by its
 # node-filtered k8sattributes. Additive: nothing else changes.
-version: 0.1.24
+# 0.1.25: the trace transform deletes agent CONTENT before it leaves the node: kagent's
+# gcp.vertex.agent.{tool_response,tool_call_args,llm_request,llm_response} and gen_ai prompt/completion/
+# message keys, on spans and span events (Diego, 2026-11-10: strip all content, keep kagent.user_id).
+# Ships BEFORE kagent agent tracing is switched on. tests/agent-content-keys-docker.py runs it.
+version: 0.1.25
 appVersion: "0.158.0"
 dependencies:
   - name: opentelemetry-collector
