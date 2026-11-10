@@ -116,13 +116,17 @@ opentelemetry-collector:
           # 4xx as well. Read from the attribute, never from span status: a 4xx SERVER span is
           # Unset by semconv. snowplow uses stable semconv (http.response.status_code); the gateway
           # uses http.status.
+          # EXCEPT 499 (0.1.10, Diego 2026-11-10): sse-proxy >= 1.5.0 answers 499 when its CALLER went
+          # away (e.g. snowplow's 10 s page budget cut the request). That's not a failure of the
+          # span's own service, so it doesn't keep the trace; whatever made the caller give up keeps
+          # it through the caller's own error. Under X5's load these were ~10,900 kept spans/min.
           - name: http-status-400-or-more
             type: ottl_condition
             ottl_condition:
               error_mode: ignore
               span:
-                - 'Int(span.attributes["http.response.status_code"]) >= 400'
-                - 'Int(span.attributes["http.status"]) >= 400'
+                - 'Int(span.attributes["http.response.status_code"]) >= 400 and Int(span.attributes["http.response.status_code"]) != 499'
+                - 'Int(span.attributes["http.status"]) >= 400 and Int(span.attributes["http.status"]) != 499'
           # Scope: only the SAMPLED SERVICES are sampled: the portal path, and alert-provider's routine
           # reconcile loop. A trace with any span from another service is kept whole, so composition-dynamic-controller reconcile traces (the obs-reconcile-* and
           # composition-reconcile-perf widgets) and agent-gateway LLM traces (agents-token-*) keep

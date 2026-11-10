@@ -27,7 +27,10 @@ type: application
 # 0.1.9: krateo-observability (the HyperDX server) joins the sampled services (Diego, 2026-11-10):
 # its spans ride in alert-provider's traces through the API calls, and as an unsampled service they
 # kept about half of alert-provider's routine traces whole (about 11% stored instead of 5%).
-version: 0.1.9
+# 0.1.10: HTTP 499 (client closed request) no longer keeps a trace under http-status-400-or-more.
+# sse-proxy 1.5.0 answers 499 when its caller leaves; the caller's own error keeps the trace if it
+# failed (Diego, 2026-11-10: caller cancels are not server errors).
+version: 0.1.10
 # The collector this chart renders: the upstream chart's own appVersion picks the image tag.
 # Keep equal to otel-collector-daemonset's appVersion, so both tiers run the same build.
 appVersion: "0.158.0"
