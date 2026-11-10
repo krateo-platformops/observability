@@ -1,0 +1,42 @@
+# otel-collector-daemonset's agent-content deletion (0.1.25), run in the pinned collector image. The
+# transform must drop kagent's tool response/args and LLM request/response, and gen_ai prompt/completion/
+# message keys, on spans and span events, and keep span metadata, token counts and kagent.user_id.
+#
+# A separate workflow, like check-tailsampling: lint.yaml is the org-wide canonical chart lint.
+
+name: check-agent-content-keys
+
+on:
+  pull_request:
+    paths:
+      - "charts/otel-collector-daemonset/**"
+      - "tests/agent-content-keys-docker.py"
+      - ".github/workflows/check-agent-content-keys.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "charts/otel-collector-daemonset/**"
+      - "tests/agent-content-keys-docker.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  agent-content:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Add the dependency repository
+        run: helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+      - name: Run the chart's transform on agent spans and events carrying content
+        run: python3 tests/agent-content-keys-docker.py .
