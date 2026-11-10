@@ -114,6 +114,11 @@ Krateo additions rendered by THIS chart's own templates
 - **`otel-clickhouse-credentials` Secret** (`otel-credentials-secret.yaml`, gated on
   `otelCredentials.enabled`) — `username`/`password` for the collectors' ClickHouse
   `otelcollector` user, created in the release namespace.
+- **`clickhouse-sse-proxy-credentials` and `clickhouse-snowplow-reader-credentials` Secrets**
+  (`clickhouse-reader-credentials.yaml`, since `0.1.41`) — `username`, `password` and
+  `password_sha256_hex` for the read-only portal users `sse_proxy` and `snowplow_reader`. The
+  password is generated on first install and kept on upgrade (lookup). ClickHouse reads only the
+  hash, through `containerTemplate.env`.
 - **`krateo-clickstack-app-lb` LoadBalancer Service** (`hyperdx-loadbalancer.yaml`, gated on
   `hyperdxLoadBalancer.enabled`) — an ADDITIONAL Service exposing the HyperDX UI on port
   3000 externally (upstream only emits the ClusterIP `krateo-clickstack`), no hardcoded

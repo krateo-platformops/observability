@@ -501,6 +501,25 @@ clickstack:
           # versionProbe Job, http_handlers/TTL config re-check on 26.8).
           image:
             tag: "26.8-alpine"
+          # Password hashes of the portal reader users (settings.extraUsersConfig below). Each user's
+          # password_sha256_hex is read from one of these variables with @from_env, so the hash comes
+          # from a Secret and never sits in values, the ClickHouseCluster CR or the operator's
+          # ConfigMap. templates/clickhouse-reader-credentials.yaml creates both Secrets and refuses
+          # to render if either entry is missing here: a componentValues override of this list
+          # replaces it whole, and without the variable the user has no valid password.
+          # The variables are read when the pod starts. Changing a Secret's password needs a restart
+          # of the ClickHouse pod before the new one works.
+          env:
+            - name: CLICKHOUSE_USER_SSE_PROXY_SHA256
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-sse-proxy-credentials
+                  key: password_sha256_hex
+            - name: CLICKHOUSE_USER_SNOWPLOW_READER_SHA256
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-snowplow-reader-credentials
+                  key: password_sha256_hex
           resources:
             limits:
               cpu: "4"
@@ -573,6 +592,80 @@ clickstack:
         # dynamic_query_handler rules are required: once http_handlers is defined ClickHouse stops
         # serving its default routes, so the operator probes + native query API must be re-declared.
         settings:
+          # PORTAL READER USERS. sse-proxy and snowplow read ClickHouse as `default` today, which has
+          # no password and GRANT ALL. These two users bound portal reads instead: read-only, a time
+          # limit, two threads each and a per-user query cap, so reads can't fill the server's 100
+          # query slots that ingestion also needs. This chart only ADDS them; moving the clients onto
+          # them is a separate, coordinated change (sse-proxy's CLICKHOUSE_USER/PASSWORD, and the
+          # portal's clickhouse-endpoint Secret for snowplow).
+          #
+          # Helm deep-merges this map with upstream clickstack's (app, otelcollector) and with any
+          # componentValues users (chops). Keys are ClickHouse users.d YAML, written by the operator
+          # to users.d/99-extra-users-config.yaml.
+          #
+          # readonly is 2, NOT 1: readonly=1 refuses every query that sets a setting, and sse-proxy
+          # sends readonly, cancel_http_readonly_queries_on_client_close and max_execution_time with
+          # each query. cancel_http_readonly_queries_on_client_close only acts when readonly > 0, and
+          # it cancels a query whose HTTP client has gone away instead of running it to the end.
+          # The constraints keep a client from raising the limits per query.
+          extraUsersConfig:
+            profiles:
+              portal_reader:
+                readonly: 2
+                cancel_http_readonly_queries_on_client_close: 1
+                max_execution_time: 8
+                max_threads: 2
+                max_concurrent_queries_for_user: 16
+                constraints:
+                  max_execution_time:
+                    max: 8
+                  max_threads:
+                    max: 2
+                  max_concurrent_queries_for_user:
+                    const: true
+              # snowplow's admin widgets: the same limits, at most 8 queries at a time. Written out
+              # in full on purpose. `profile: portal_reader` (inheritance) does not work here: the
+              # operator writes this map with its keys sorted, so `profile` lands after the
+              # override and the inherited 16 wins (measured on kind: getSetting gave 16).
+              # snowplow can't send settings per query, so this profile is all it gets.
+              portal_reader_snowplow:
+                readonly: 2
+                cancel_http_readonly_queries_on_client_close: 1
+                max_execution_time: 8
+                max_threads: 2
+                max_concurrent_queries_for_user: 8
+                constraints:
+                  max_execution_time:
+                    max: 8
+                  max_threads:
+                    max: 2
+                  max_concurrent_queries_for_user:
+                    const: true
+            users:
+              # Grants: ONE statement per user. users.d YAML applies only the FIRST `grants` item
+              # and drops the rest without a word (docs/clickhouse-disk-full.md). Per table, never
+              # ON default.* or ON system.*: default.* would reach krateo_audit's sealing tables.
+              # Check on the database with SHOW GRANTS FOR <user> and CHECK GRANT, not in config.
+              #
+              # sse_proxy reads otel_logs (/events and the /notifications poller) and krateo_audit
+              # (/audit), unqualified, in the default database.
+              sse_proxy:
+                password_sha256_hex:
+                  "@from_env": CLICKHOUSE_USER_SSE_PROXY_SHA256
+                profile: portal_reader
+                grants:
+                  - query: "GRANT SELECT ON default.otel_logs, SELECT ON default.krateo_audit"
+              # snowplow_reader: the tables read by the RESTAction stages that use
+              # endpointRef clickhouse-endpoint (41 stages in 35 RESTActions on krateo-057).
+              snowplow_reader:
+                password_sha256_hex:
+                  "@from_env": CLICKHOUSE_USER_SNOWPLOW_READER_SHA256
+                profile: portal_reader_snowplow
+                grants:
+                  - query: >-
+                      GRANT SELECT ON default.otel_logs, SELECT ON default.otel_traces,
+                      SELECT ON default.otel_metrics_gauge, SELECT ON default.otel_metrics_sum,
+                      SELECT ON default.otel_metrics_histogram, SELECT ON default.krateo_audit
           extraConfig:
             # SERVER LOG FILES — the other half of the retention incident below.
             # That fix bounded the system.* log TABLES with a 3-day ttl, but the server's own
