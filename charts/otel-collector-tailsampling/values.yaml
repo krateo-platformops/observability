@@ -132,8 +132,9 @@ opentelemetry-collector:
           # here makes every trace through it match and be kept at 100%, which defeats the sample:
           # krateo-frontend (installer#405) and sse-proxy, whose 5-18K streams a day each gained
           # two gateway spans once the platform gateway traced every request.
-          # krateo-alert-provider (Diego, 2026-11-09): its native tracing (0.2.66) puts an
-          # alert.observe/alert.reconcile trace with HyperDX API calls on every pass of every Alert,
+          # krateo-alert-provider (Diego, 2026-11-09): its native tracing (0.2.66) puts a trace with
+          # HyperDX API calls on every pass of every Alert (alert.observe/alert.reconcile until 0.2.70;
+          # from 0.2.71, provider-runtime's `reconcile` root with connect/observe/update/delete),
           # about 316K spans a day on krateo-057, 2.3x the whole cluster's 139K the day before. That
           # routine loop is sampled; its errors (HyperDX 429s, failed reconciles) are kept by the two
           # rules above, and incident analysis by alert-provider-incident below.
@@ -182,7 +183,8 @@ opentelemetry-collector:
               span:
                 - 'Int(span.attributes["snowplow.stages.failed"]) > 0'
           # An alert-provider incident: incident.fire is the root of an RCA trace (with a span link to
-          # the alert.observe that fired it), and incident.compare / incident.analyze carry the model
+          # the observe that fired it: alert.observe until 0.2.70, the runtime's observe from 0.2.71),
+          # and incident.compare / incident.analyze carry the model
           # and A2A calls. Kept whole by name, so an analysis never depends on whether a gateway or
           # agent span happened to land in the same trace.
           - name: alert-provider-incident
