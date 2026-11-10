@@ -131,11 +131,15 @@ def sse_trace(trace_id, status=0):
 
 
 def alert_provider_reconcile(trace_id, hyperdx_status=200):
-    """alert-provider's routine loop: one Alert's observe/reconcile pass with its HyperDX API call."""
+    """alert-provider's routine loop as alert-provider >= 0.2.71 emits it (provider-runtime v1.14.0):
+    the runtime's `reconcile` root with connect/observe/update children and the HyperDX API call. The
+    policy keys on the service, not span names, so 0.2.70's alert.observe/alert.reconcile behave the same."""
     svc = "krateo-alert-provider"
     return [
-        span(trace_id, svc, "alert.observe"),
-        span(trace_id, svc, "alert.reconcile"),
+        span(trace_id, svc, "reconcile"),
+        span(trace_id, svc, "connect", {"provider_runtime.step": "connect"}),
+        span(trace_id, svc, "observe", {"provider_runtime.step": "observe"}),
+        span(trace_id, svc, "update", {"provider_runtime.step": "update", "alert.action": "update"}),
         span(trace_id, svc, "HTTP GET", {"http.response.status_code": hyperdx_status},
              status=2 if hyperdx_status >= 400 else 0),
     ]
