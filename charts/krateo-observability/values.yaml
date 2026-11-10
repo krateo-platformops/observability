@@ -355,7 +355,8 @@ defaultAlerts:
       threshold: 1
       thresholdType: above
       interval: 15m
-      description: An access token was stored unredacted in the logs, so treat it as leaked, rotate it, and stop the emitting service from logging it.
+      description: "An access token was stored unredacted in the logs and should be treated as leaked."
+      runbook: "1. Treat the token as leaked from the moment it was written. Do not copy its value into a ticket, chat or query result you share. 2. Find who emitted it, without printing the value: group the matching otel_logs rows by ServiceName and ResourceAttributes['k8s.pod.name'] over the alert window. 3. If it may still be valid, revoke it. For a Krateo authn token, only a signing-key rotation revokes it (authn has no per-token revocation), which signs every user out, so weigh it against the token's remaining lifetime (decode only iss and exp). For other issuers, rotate the credential. 4. Stop it at the source: change the emitting service so it does not log the token. A collector redaction rule (otel-collector-daemonset) is defense in depth, not the fix. 5. Check the other copies: the pod's own container log and Google Cloud Logging (GKE ships stdout there, kept 30 days) hold the raw line even when ClickHouse is redacted."
     # The span half of installer#394: the same JWT shape, read from otel_traces. The collectors
     # delete http.header.Authorization and redact the rest, so this is the check for a token that
     # got past them. Needs alert-provider 0.2.62, which adds `source`; an older one refuses the field.
@@ -369,7 +370,8 @@ defaultAlerts:
       threshold: 1
       thresholdType: above
       interval: 15m
-      description: An access token was stored unredacted in the traces, so treat it as leaked and rotate it.
+      description: "An access token was stored unredacted in the traces and should be treated as leaked."
+      runbook: "1. Treat the token as leaked from the moment it was written. Do not copy its value into a ticket, chat or query result you share. 2. Find who emitted it, without printing the value: group the matching otel_traces rows by ServiceName and SpanName over the alert window, and note which attribute holds it. 3. If it may still be valid, revoke it. For a Krateo authn token, only a signing-key rotation revokes it (authn has no per-token revocation), which signs every user out, so weigh it against the token's remaining lifetime (decode only iss and exp). For other issuers, rotate the credential. 4. Stop it at the source: change the service's instrumentation so it does not record the token. otel-collector-daemonset deletes credential header keys and redacts JWT-shaped values; a firing means a token got past both, so also report the attribute to the collector's owner. 5. If the service also prints spans to stdout, check its container log and Google Cloud Logging."
     # S1 (2026-11-09): a credential HEADER, by key, in otel_traces: any span or span-event attribute
     # whose key names authorization, proxy-authorization, cookie or set-cookie. otel-collector-daemonset
     # 0.1.24 deletes those keys whatever the value, so one here means the redaction failed or a sender
@@ -421,7 +423,8 @@ defaultAlerts:
       threshold: 3221225472
       thresholdType: below
       interval: 15m
-      description: The telemetry database's disk has less than 3 GiB free; free space by following docs/clickhouse-disk-full.md, never by dropping audit partitions.
+      description: "The telemetry database's disk has less than 3 GiB free, and audit partitions must never be dropped to free it."
+      runbook: "1. Confirm the disk is the problem. A Ready ClickHouse pod is not evidence of a healthy disk. The definitive symptom is Code: 243 or 'Not enough space' in the ClickHouse log (kubectl logs -n krateo-system -l clickhouse.altinity.com/chi=krateo-clickstack-clickhouse --tail=200). 2. Find and stop the source first, or the disk fills again within the hour: SELECT ServiceName, count() FROM default.otel_logs WHERE Timestamp > now() - INTERVAL 1 HOUR GROUP BY ServiceName ORDER BY 2 DESC LIMIT 10 (works with the shipped otelcollector credentials). Rule out your own diagnostic Jobs, whose output the collectors scrape back into otel_logs. 3. Make room. Expand the volume through the Installer CR, componentValues krateo-observability clickstack.clickhouse.cluster.spec.dataVolumeClaimSpec.resources.requests.storage, never by editing the PVC (the reconciler reverts it). Expansion is one-way; FileSystemResizePending clears when the pod restarts. Or, with an ops principal, drop the oldest partition of otel_logs or otel_traces. 4. NEVER drop a partition of krateo_audit, krateo_audit_seal or krateo_audit_worm: the audit trail is sealed, and removing rows is indistinguishable from tampering. If the audit tables filled the disk, escalate instead. Full runbook: docs/clickhouse-disk-full.md in krateo-platformops/observability."
     - name: sre-rbac-denied-burst
       tier: extended
       displayName: Authorization failures elevated
