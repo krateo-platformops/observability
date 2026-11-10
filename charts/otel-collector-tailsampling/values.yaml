@@ -137,6 +137,13 @@ opentelemetry-collector:
           # about 316K spans a day on krateo-057, 2.3x the whole cluster's 139K the day before. That
           # routine loop is sampled; its errors (HyperDX 429s, failed reconciles) are kept by the two
           # rules above, and incident analysis by alert-provider-incident below.
+          # git-provider, incident-provider, core-provider (Diego, 2026-11-10): provider-runtime
+          # v1.14.0 traces every reconcile under these OTEL_SERVICE_NAMEs (provider-runtime#60), so
+          # each provider's routine loop is sampled before its chart turns tracing on. core-provider
+          # already sent a single-span compositiondefinition.observe trace on every pass (31,478 a
+          # day on krateo-057, 0 errors, read by no widget or alert) and is sampled from here on.
+          # Their errors stay whole under the two rules above. composition-dynamic-controller is
+          # NOT here: the reconcile widgets read its traces.
           - name: outside-sampled-services
             type: ottl_condition
             ottl_condition:
@@ -148,6 +155,9 @@ opentelemetry-collector:
                   and resource.attributes["service.name"] != "krateo-frontend"
                   and resource.attributes["service.name"] != "sse-proxy"
                   and resource.attributes["service.name"] != "krateo-alert-provider"
+                  and resource.attributes["service.name"] != "git-provider"
+                  and resource.attributes["service.name"] != "incident-provider"
+                  and resource.attributes["service.name"] != "core-provider"
           # The sre-jwt-in-traces detector's own pattern, over the same four places it reads, so
           # sampling never hides a leaked token from it.
           - name: jwt-shaped-value
