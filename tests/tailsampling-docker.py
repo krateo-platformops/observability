@@ -77,11 +77,11 @@ def attr(key, value):
     return {"key": key, "value": {"stringValue": value}}
 
 
-def span(trace_id, service, name, attrs=None, status=0, message="", events=None):
+def span(trace_id, service, name, attrs=None, status=0, message="", events=None, links=None, span_id=None, parent=None):
     now = time.time_ns()
     s = {
         "traceId": trace_id,
-        "spanId": "%016x" % random.getrandbits(64),
+        "spanId": span_id or "%016x" % random.getrandbits(64),
         "name": name,
         "kind": 2,
         "startTimeUnixNano": str(now - 5_000_000),
@@ -89,6 +89,10 @@ def span(trace_id, service, name, attrs=None, status=0, message="", events=None)
         "attributes": [attr(k, v) for k, v in (attrs or {}).items()],
         "status": {"code": status, "message": message},
     }
+    if parent:
+        s["parentSpanId"] = parent
+    if links:
+        s["links"] = [{"traceId": t, "spanId": sid} for t, sid in links]
     if events:
         s["events"] = [
             {"timeUnixNano": str(now), "name": "e", "attributes": [attr(k, v) for k, v in ev.items()]}
@@ -181,6 +185,32 @@ def hyperdx_server(trace_id, status_code=200):
         span(trace_id, svc, "GET /api/v2/charts/series", {"http.response.status_code": status_code},
              status=2 if status_code >= 500 else 0),
     ]
+
+
+def runtime_pass(root_tid, svc, upstream_tid, upstream_sid, act=None):
+    """A provider-runtime v1.14.1 reconcile (provider-runtime#70). Its own trace: a `reconcile` root
+    (Server, k8s.object.*) linking to the object's stamped trace R, with connect and observe. A
+    first-acting pass also emits its act span (create/update/delete) as a child of R, IN R's trace,
+    linking back to the root. Returns (own-trace spans, spans for R's trace)."""
+    root_sid = "%016x" % random.getrandbits(64)
+    obj = {"k8s.object.kind": "Alert", "k8s.object.namespace": "krateo-system", "k8s.object.name": "a"}
+    own = [
+        span(root_tid, svc, "reconcile", obj, links=[(upstream_tid, upstream_sid)], span_id=root_sid),
+        span(root_tid, svc, "connect", {"provider_runtime.step": "connect"}, parent=root_sid),
+        span(root_tid, svc, "observe", {"provider_runtime.step": "observe"}, parent=root_sid),
+    ]
+    upstream = []
+    if act:
+        upstream = [span(upstream_tid, svc, act, {"provider_runtime.step": act}, parent=upstream_sid,
+                         links=[(root_tid, root_sid)])]
+    return own, upstream
+
+
+def cdc_apply(tid):
+    """The composition-dynamic-controller span whose context cdc stamps on every object of a release
+    apply as krateo.io/traceparent: the upstream trace R. Returns (span list, its span id)."""
+    sid = "%016x" % random.getrandbits(64)
+    return [span(tid, "composition-dynamic-controller", "reconcile", span_id=sid)], sid
 
 
 def post(port, spans):
@@ -336,6 +366,25 @@ def main():
         for n, t in enumerate(pr_ids):
             post(port, provider_reconcile(t, PROVIDERS[n % len(PROVIDERS)]))
 
+        # provider-runtime v1.14.1 (#70), 400 objects each stamped with its own release apply R:
+        # every object's first-acting pass. R (a cdc span + the act span) must be kept whole, since cdc
+        # is outside the sampled list; the pass's own reconcile trace must still be sampled.
+        rt_own, rt_up = [], []
+        for _ in range(400):
+            r_tid, a_tid = tid(), tid()
+            r_spans, r_sid = cdc_apply(r_tid)
+            own, up = runtime_pass(a_tid, "krateo-alert-provider", r_tid, r_sid, act="update")
+            post(port, r_spans + up)
+            post(port, own)
+            rt_own.append(a_tid); rt_up.append(r_tid)
+        # ...and every later pass for the same value: own trace only, linking to R, nothing in R.
+        rt_later = []
+        for _ in range(400):
+            r_tid, a_tid = tid(), tid()
+            own, _ = runtime_pass(a_tid, "krateo-alert-provider", r_tid, "%016x" % random.getrandbits(64))
+            post(port, own)
+            rt_later.append(a_tid)
+
         # Late spans: arrive after their trace's decision. Each must follow that decision.
         late_kept, late_dropped = cases["portal 4xx on snowplow http.response.status_code"][0], None
         time.sleep(DECISION_WAIT_S + 4)
@@ -389,6 +438,23 @@ def main():
     within_aph = 6 <= n_aph <= 38
     failed |= not within_aph
     print(f"{'ok  ' if within_aph else 'FAIL'} routine alert-provider traces with HyperDX server spans kept: {n_aph}/{len(aph_ids)}, expected about 5%")
+
+    n_up = sum(1 for t in rt_up if t in kept)
+    up_ok = n_up == len(rt_up)
+    failed |= not up_ok
+    print(f"{'ok  ' if up_ok else 'FAIL'} v1.14.1 act span in the stamped cdc trace: {n_up}/{len(rt_up)} kept, expected all")
+    n_own = sum(1 for t in rt_own if t in kept)
+    own_ok = 6 <= n_own <= 38
+    failed |= not own_ok
+    print(f"{'ok  ' if own_ok else 'FAIL'} v1.14.1 first-acting pass, its own reconcile trace kept: {n_own}/{len(rt_own)}, expected about 5%")
+    n_later = sum(1 for t in rt_later if t in kept)
+    later_ok = 6 <= n_later <= 38
+    failed |= not later_ok
+    print(f"{'ok  ' if later_ok else 'FAIL'} v1.14.1 later pass (root + link only) kept: {n_later}/{len(rt_later)}, expected about 5%")
+    act_in_up = sum(1 for t in rt_up if any(n == "update" for _, n in kept.get(t, [])))
+    act_ok = act_in_up == len(rt_up)
+    failed |= not act_ok
+    print(f"{'ok  ' if act_ok else 'FAIL'} v1.14.1 act span stored inside R: {act_in_up}/{len(rt_up)}")
 
     n_pr = sum(1 for t in pr_ids if t in kept)
     within_pr = 6 <= n_pr <= 38
