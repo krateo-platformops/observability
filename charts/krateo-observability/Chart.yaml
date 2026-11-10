@@ -118,7 +118,7 @@ type: application
 # 0.1.38: sre-credential-header-in-traces (S1) fires on any span or span-event attribute whose key
 # names authorization or cookie, the case sre-jwt-in-traces can't see (an opaque token, a cookie).
 # Pairs with otel-collector-daemonset 0.1.24, which deletes those keys. Human-only analysis.
-version: 0.1.38
+version: 0.1.39
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack
