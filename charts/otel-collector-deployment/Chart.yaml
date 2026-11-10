@@ -73,8 +73,14 @@ type: application
 # sre-container-not-ready in PENDING on a healthy cluster. job-owner/job-readiness are renamed
 # run-to-completion/run-to-completion-readiness; the label is read into a temporary attribute and
 # deleted after the filter, so no other series changes.
-version: 0.3.16
-appVersion: "1.0.7"
+# 0.3.17: image 1.0.8. compositionresolver also writes krateo.io/composition-name and
+# krateo.io/composition-namespace next to krateo.io/composition-id (name_label_key,
+# namespace_label_key), so the portal's events bell can link to /compositions/<ns>/<name> without
+# listing every composition kind. On krateo-057, 0 of 1,854 live objects carrying a composition-id
+# label lack either label. Requires image 1.0.8: the processor's config is strict, so older images
+# refuse the new keys at startup.
+version: 0.3.17
+appVersion: "1.0.8"
 dependencies:
   - name: opentelemetry-collector
     version: 0.170.0
