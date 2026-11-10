@@ -24,7 +24,10 @@ type: application
 # 0.1.8: comments only: alert-provider 0.2.71 (provider-runtime tracing) replaces alert.observe /
 # alert.reconcile with the runtime's reconcile/connect/observe/update/delete. The policies key on the
 # service and on ^incident\. span names, so they are unchanged; the policy test models the new tree.
-version: 0.1.8
+# 0.1.9: krateo-observability (the HyperDX server) joins the sampled services (Diego, 2026-11-10):
+# its spans ride in alert-provider's traces through the API calls, and as an unsampled service they
+# kept about half of alert-provider's routine traces whole (about 11% stored instead of 5%).
+version: 0.1.9
 # The collector this chart renders: the upstream chart's own appVersion picks the image tag.
 # Keep equal to otel-collector-daemonset's appVersion, so both tiers run the same build.
 appVersion: "0.158.0"
