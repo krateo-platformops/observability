@@ -100,6 +100,16 @@ top-level `global` propagates into clickstack and all its subcharts
   ClickHouse `otelcollector` user** (clickstack provisions it with the same password).
   Created in the release namespace (the collectors' namespace), so no cross-namespace
   replication.
+- **Portal reader users** (`0.1.41`): `sse_proxy` (profile `portal_reader`, SELECT on
+  `otel_logs` and `krateo_audit`) and `snowplow_reader` (profile `portal_reader_snowplow`, SELECT
+  on `otel_logs`, `otel_traces`, `otel_metrics_gauge`, `otel_metrics_sum`,
+  `otel_metrics_histogram` and `krateo_audit`), under
+  `clickstack.clickhouse.cluster.spec.settings.extraUsersConfig`. Both profiles set `readonly: 2`,
+  cancel-on-close, `max_execution_time: 8` and `max_threads: 2`, with constraints so a query can't
+  raise them; `max_concurrent_queries_for_user` is 16 and 8. Each password hash comes from
+  `containerTemplate.env` (`@from_env`), so overriding `containerTemplate.env` through
+  componentValues must repeat the chart's two entries, or the render fails. Grants stay ONE
+  statement per user (see `clickhouse-disk-full.md`).
 - **The `/events` HTTP handler** lives under
   `clickstack.clickhouse.cluster.spec.settings.extraConfig.http_handlers` — NOT a ConfigMap.
   The operator merges `settings.extraConfig` into `/etc/clickhouse-server/config.d/`. The

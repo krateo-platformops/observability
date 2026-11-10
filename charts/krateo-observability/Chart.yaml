@@ -127,7 +127,13 @@ type: application
 # (the disk one keeps "never drop audit partitions"). The runbook follows the description in the
 # notification and reaches the RCA prompt. The template refuses '{{', an @word and a message over
 # HyperDX's 4096 characters.
-version: 0.1.40
+# 0.1.41: ClickHouse users sse_proxy and snowplow_reader for portal reads, so they stop running as
+# `default` (no password, GRANT ALL) once the clients switch (separately). Profiles portal_reader and
+# portal_reader_snowplow: readonly=2, cancel-on-close, max_execution_time 8, max_threads 2, per-user
+# query cap 16 and 8, with constraints. One per-table SELECT grant statement each, never default.* or
+# system.*. The chart generates both credential Secrets and keeps them across upgrades. The new
+# containerTemplate.env ROLLS the ClickHouse StatefulSet once. Decision: Diego 2026-11-10.
+version: 0.1.41
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack
