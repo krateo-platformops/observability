@@ -30,7 +30,11 @@ type: application
 # 0.1.10: HTTP 499 (client closed request) no longer keeps a trace under http-status-400-or-more.
 # sse-proxy 1.5.0 answers 499 when its caller leaves; the caller's own error keeps the trace if it
 # failed (Diego, 2026-11-10: caller cancels are not server errors).
-version: 0.1.10
+# 0.1.11: keep every alert-provider reconcile that ACTED (provider_runtime.acted=true on the root;
+# Diego, 2026-11-11, for provider-runtime#74). Routine alert-provider traces stay at 5%; an acting
+# pass's root is kept whole so its act span's link resolves. Inert until plumbing's
+# tracecontext.AttrActed ships through provider-runtime into alert-provider.
+version: 0.1.11
 # The collector this chart renders: the upstream chart's own appVersion picks the image tag.
 # Keep equal to otel-collector-daemonset's appVersion, so both tiers run the same build.
 appVersion: "0.158.0"

@@ -328,6 +328,14 @@ def main():
         case("alert-provider reconcile whose HyperDX call got 429", True,
              lambda t: alert_provider_reconcile(t, hyperdx_status=429))
         case("alert-provider incident (incident.fire/compare/analyze)", True, alert_provider_incident)
+        # provider-runtime#74: an acting pass's root carries provider_runtime.acted=true and is kept
+        # whole; the same attribute on another sampled provider is NOT kept by this rule (scoped).
+        case("alert-provider reconcile that acted (provider_runtime.acted=true)", True,
+             lambda t: [span(t, "krateo-alert-provider", "reconcile", {"provider_runtime.acted": True}),
+                        span(t, "krateo-alert-provider", "observe", {"provider_runtime.step": "observe"})])
+        case("core-provider reconcile with provider_runtime.acted=true (rule is alert-provider only)", "sampled",
+             lambda t: [span(t, "core-provider", "reconcile", {"provider_runtime.acted": True}),
+                        span(t, "core-provider", "observe", {"provider_runtime.step": "observe"})])
         case("alert-provider reconcile whose HyperDX server answered 500", True,
              lambda t: alert_provider_reconcile(t) + hyperdx_server(t, status_code=500))
         for svc in PROVIDERS:
