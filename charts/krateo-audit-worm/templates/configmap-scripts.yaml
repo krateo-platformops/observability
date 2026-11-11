@@ -119,8 +119,20 @@ data:
     # Shared by seal.sh and verify.sh.
     CHQ() { clickhouse-client --host "$CH_HOST" --port "$CH_PORT" --user "$CH_USER" --password "$CH_PASSWORD" --database "$CH_DB" --history_file=/dev/null "$@"; }
 
-    # has NAME -> 1 if a table, view or materialized view NAME exists in CH_DB.
-    has() { CHQ -q "SELECT count() FROM system.tables WHERE database = currentDatabase() AND name = '$1'"; }
+    # has NAME -> 1 if a table, view or materialized view NAME exists in CH_DB, 0 if not. Any other
+    # answer (a failed query, an empty one) is an error, never "absent".
+    # Always ASSIGN a query's answer (X=$(has ...), X=$(CHQ ...)) before testing it. `set -e` stops
+    # the script when an assignment's command fails, but NOT when the command runs inside a test
+    # (`[ "$(has T)" != "1" ]`): there a failed query reads as an empty answer. That turned a ClickHouse
+    # outage into "does not exist yet" (2026-11-11, during a ClickHouse restart).
+    # tests/verify-docker.sh refuses a query inside a test.
+    has() {
+      _n=$(CHQ -q "SELECT count() FROM system.tables WHERE database = currentDatabase() AND name = '$1'") || return 1
+      case "$_n" in
+        0|1) echo "$_n" ;;
+        *) echo "has $1: unexpected answer '$_n'" >&2; return 1 ;;
+      esac
+    }
 
     # emit SERVICE STATUS SEV_TEXT SEV_NUM BODY [EXTRA_MAP_ENTRIES]
     # Writes ONE OTel-shaped JSON line to stdout; the collector ships it to
@@ -141,7 +153,8 @@ data:
     set -eu
     . /scripts/lib.sh
 
-    if [ "$(has {{ .Values.sourceTable }})" != "1" ]; then
+    HAS_SOURCE=$(has {{ .Values.sourceTable }})
+    if [ "$HAS_SOURCE" != "1" ]; then
       echo "source table {{ .Values.sourceTable }} does not exist yet: the collector's audit pipeline has not created it; retrying next run" >&2
       exit 1
     fi
@@ -158,7 +171,11 @@ data:
     if [ "$PREV_SEQ" = "0" ]; then
       PREV_END="1970-01-01 00:00:00.000000000"
       PREV_HASH="$GENESIS"
-      if [ "$HAD_WORM" = "1" ] && [ "$(CHQ -q "SELECT count() FROM {{ .Values.wormTable }}")" != "0" ]; then
+      WORM_ROWS=0
+      if [ "$HAD_WORM" = "1" ]; then
+        WORM_ROWS=$(CHQ -q "SELECT count() FROM {{ .Values.wormTable }}")
+      fi
+      if [ "$WORM_ROWS" != "0" ]; then
         # The WORM table already held rows but no seal exists: the chain was
         # dropped or truncated. Restart from a RESET genesis, never the canonical
         # one, so verification can never come back green over the lost history.
