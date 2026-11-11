@@ -1,0 +1,51 @@
+# The gateway audit projection (AUDIT-4, observability#138), run in the pinned collector image.
+#
+# `otelcol validate` accepts a config whose OTTL is wrong (it doesn't compile the statements), and
+# the projection is only correct if the audit library's own checker says so. This renders the chart,
+# runs its gateway-audit pipelines on the REAL proxy's access-log output
+# (tests/fixtures/gateway-access-log.otlp.jsonl) plus cases derived from it, and checks every
+# projected record with `auditschema check -writer gateway` (krateo-platformops/audit v0.4.0).
+#
+# A separate workflow on purpose: lint.yaml is the org-wide canonical chart-repo lint.
+
+name: check-gateway-audit
+
+on:
+  pull_request:
+    paths:
+      - "charts/otel-collector-daemonset/**"
+      - "tests/gateway-audit-docker.py"
+      - "tests/fixtures/gateway-access-log.otlp.jsonl"
+      - ".github/workflows/check-gateway-audit.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "charts/otel-collector-daemonset/**"
+      - "tests/gateway-audit-docker.py"
+      - "tests/fixtures/gateway-access-log.otlp.jsonl"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  projection:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Add the dependency repository
+        run: helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+      - name: Project the real proxy's access log and check it with auditschema
+        run: python3 tests/gateway-audit-docker.py .

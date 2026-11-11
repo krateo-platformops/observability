@@ -453,6 +453,207 @@ opentelemetry-collector:
                 set(attributes["krateo.sli.error"], "true")
                 where attributes["http.response.status_code"] == nil
                 and status.code == STATUS_CODE_ERROR
+      # ============================ GATEWAY AUDIT (AUDIT-4, #138) ============================
+      # The agent gateway writes ONE OTLP access-log record per request (installer#716 F7). It keeps
+      # its home in otel_logs (logs/gateway), and logs/gateway-audit below projects an audit copy
+      # of the acting hops into krateo_audit as writer `gateway` (G) of krateo-platformops/audit
+      # schema v1. The facts come from agentgateway-policies >= 0.2.28 (`auditFacts`).
+      #
+      # WHICH RECORDS (snowplow's ruling as AUDIT-4 lead, 2026-11-11). THIS PROCESSOR IS THE ONE
+      # PLACE that decides, and both gateway-audit pipelines run it, so the two can never disagree:
+      #   candidate  = an agentgateway access-log record (scope `request`, a `gateway` field) of
+      #                protocol a2a, mcp or llm;
+      #   PROJECTED  = every candidate that is NOT explicitly excluded. The acting hops are
+      #                A2A JSON-RPC calls (any a2a.method), MCP tools/call, resources/read and
+      #                prompts/get, and LLM completions (POST);
+      #   EXCLUDED   = an EXPLICIT list of hops that name no single target: MCP session plumbing
+      #                (initialize, ping, notifications/*, */list, completion/complete,
+      #                logging/setLevel, and the method-less SSE GET / session DELETE; a method-less
+      #                POST is projected as an unknown method), A2A
+      #                requests with no a2a.method (agent-card fetches), LLM GETs (model listing),
+      #                and a request that matched no route at all (no target exists).
+      # Not a catch-all: an MCP method on neither list (a new one upstream) is PROJECTED, as an
+      # audit record that may be incomplete, never dropped. Excluded hops are COUNTED, per protocol
+      # and method, by count/gateway-audit-excluded, so "not projected" is measurable.
+      transform/gateway-audit-classify:
+        error_mode: ignore
+        log_statements:
+          - context: log
+            statements:
+              # FIRST, whatever its protocol: a request that matched NO route (the gateway's own 404;
+              # the real record is protocol `http`, no `route`) has no target at all. Excluded and
+              # counted before anything is derived, so its backend_host (the proxy's CEL cannot tell
+              # no-route from the catch-all) is never read.
+              - >-
+                set(attributes["krateo.gateway_audit.class"], "excluded")
+                where instrumentation_scope.name == "request" and attributes["gateway"] != nil
+                and (attributes["route"] == nil or attributes["route"] == "")
+              - >-
+                set(attributes["krateo.gateway_audit.class"], "projected")
+                where instrumentation_scope.name == "request" and attributes["gateway"] != nil
+                and attributes["krateo.gateway_audit.class"] == nil
+                and attributes["protocol"] != nil and IsMatch(attributes["protocol"], "^(a2a|mcp|llm)$")
+              - >-
+                set(attributes["krateo.gateway_audit.class"], "excluded")
+                where attributes["krateo.gateway_audit.class"] == "projected" and attributes["protocol"] == "mcp"
+                and attributes["mcp.method.name"] != nil and IsMatch(attributes["mcp.method.name"],
+                "^(initialize|ping|notifications/.+|tools/list|resources/list|resources/templates/list|prompts/list|completion/complete|logging/setLevel)$")
+              # An MCP request with no JSON-RPC method: the SSE stream GET and the session DELETE are
+              # transport, excluded. A POST whose method the proxy could not parse is NOT on this
+              # list: it is projected as an unknown method.
+              - >-
+                set(attributes["krateo.gateway_audit.class"], "excluded")
+                where attributes["krateo.gateway_audit.class"] == "projected" and attributes["protocol"] == "mcp"
+                and (attributes["mcp.method.name"] == nil or attributes["mcp.method.name"] == "")
+                and attributes["http.method"] != nil and IsMatch(attributes["http.method"], "^(GET|DELETE)$")
+              - >-
+                set(attributes["krateo.gateway_audit.class"], "excluded")
+                where attributes["krateo.gateway_audit.class"] == "projected" and attributes["protocol"] == "a2a"
+                and attributes["a2a.method"] == nil
+              - >-
+                set(attributes["krateo.gateway_audit.class"], "excluded")
+                where attributes["krateo.gateway_audit.class"] == "projected" and attributes["protocol"] == "llm"
+                and attributes["http.method"] == "GET"
+      filter/gateway-audit-projected:
+        error_mode: ignore
+        logs:
+          log_record:
+            # DROPS what matches: keeps only the projected hops.
+            - 'attributes["krateo.gateway_audit.class"] != "projected"'
+      filter/gateway-audit-excluded:
+        error_mode: ignore
+        logs:
+          log_record:
+            - 'attributes["krateo.gateway_audit.class"] != "excluded"'
+      # THE PROJECTION: access-log facts -> schema v1 keys for writer `gateway`, then keep_keys to
+      # the closed set. Statement order matters: `cache` holds intermediate values and every
+      # output key is derived before keep_keys removes the inputs. Each mapping, with the schema's
+      # own wording:
+      #   user.name            the outermost actor: act.sub on a delegated token, else `user` (sub)
+      #   user.roles           `team` split on ","
+      #   actor_class          `principal`, only one of human|agent|controller|service
+      #   on_behalf_of.user.name / delegation   only on a delegated token (act present): the
+      #                        subject, and the chain outermost first ending with the subject, each
+      #                        <class>:<sub> (class from act.principal / subject_principal, one of the
+      #                        four; ":sub" for a class the token does not carry or that is unknown;
+      #                        a link with an empty sub is never written)
+      #   krateo.action        gateway.<protocol>
+      #   http.request.method  the proxied method; _OTHER plus method_original if not semconv
+      #   krateo.audit.verb    the lowercase method (non-Kubernetes target)
+      #   krateo.audit.outcome denied = the gateway itself refused (reason JwtAuth, Oidc, BasicAuth,
+      #                        APIKeyAuth, ExtAuth, Authorization, RateLimit, Guardrail, Overload);
+      #                        failure = another gateway-side reason, or the backend answered >=400;
+      #                        success otherwise. `reason` is empty when the upstream answered.
+      #   http.response.status_code   only when the backend answered (no gateway reason)
+      #   server.address       `backend_host`, the matched route's CONFIGURED target (agentgateway-
+      #                        policies >= 0.2.28), on every hop, so a refused hop names what it would
+      #                        have reached and one route names one target; else the dialed `endpoint`
+      #   source_ips           x-forwarded-for entries, then the TCP peer (src.addr without port)
+      #   user_agent.original  cut at 1024 bytes + "...TRUNCATED"; session.id <- baggage_session
+      #   gateway.route / gateway.mcp_tool / asserted.agent_host   route / tool / agent
+      #   krateo.audit.incomplete   the missing markers in the library's order (schema_gen.go
+      #                        schemaMarkers): actor, actor_class, action, verb, method, preview, target
+      # krateo.request.uri is NOT written: the schema allows it for G only once the gateway proves
+      # no credential reaches the URI (#1251), which is not proven yet.
+      transform/gateway-audit:
+        error_mode: ignore
+        log_statements:
+          - context: log
+            statements:
+              - 'set(cache["act"], ParseJSON(attributes["act"])) where attributes["act"] != nil'
+              # --- who
+              - 'set(attributes["user.name"], cache["act"]["sub"]) where cache["act"] != nil and cache["act"]["sub"] != nil and cache["act"]["sub"] != ""'
+              - 'set(attributes["user.name"], attributes["user"]) where cache["act"] == nil and attributes["user"] != nil and attributes["user"] != ""'
+              - 'set(attributes["user.roles"], Split(attributes["team"], ",")) where attributes["team"] != nil and attributes["team"] != ""'
+              - 'set(attributes["krateo.audit.actor_class"], attributes["principal"]) where attributes["principal"] != nil and IsMatch(attributes["principal"], "^(human|agent|controller|service)$")'
+              - 'set(attributes["krateo.audit.on_behalf_of.user.name"], attributes["user"]) where cache["act"] != nil and attributes["user"] != nil and attributes["user"] != ""'
+              # delegation: unrolled to plumbing's MaxActorDepth (8); each level only if present.
+              - 'set(cache["l1"], cache["act"]) where cache["act"] != nil'
+              - 'set(cache["l2"], cache["l1"]["act"]) where cache["l1"] != nil and cache["l1"]["act"] != nil'
+              - 'set(cache["l3"], cache["l2"]["act"]) where cache["l2"] != nil and cache["l2"]["act"] != nil'
+              - 'set(cache["l4"], cache["l3"]["act"]) where cache["l3"] != nil and cache["l3"]["act"] != nil'
+              - 'set(cache["l5"], cache["l4"]["act"]) where cache["l4"] != nil and cache["l4"]["act"] != nil'
+              - 'set(cache["l6"], cache["l5"]["act"]) where cache["l5"] != nil and cache["l5"]["act"] != nil'
+              - 'set(cache["l7"], cache["l6"]["act"]) where cache["l6"] != nil and cache["l6"]["act"] != nil'
+              - 'set(cache["l8"], cache["l7"]["act"]) where cache["l7"] != nil and cache["l7"]["act"] != nil'
+              - 'append(cache["dl"], Concat([cache["l1"]["principal"], ":", cache["l1"]["sub"]], "")) where cache["l1"] != nil and cache["l1"]["sub"] != nil and cache["l1"]["sub"] != "" and cache["l1"]["principal"] != nil and IsMatch(cache["l1"]["principal"], "^(human|agent|controller|service)$")'
+              - 'append(cache["dl"], Concat([":", cache["l1"]["sub"]], "")) where cache["l1"] != nil and cache["l1"]["sub"] != nil and cache["l1"]["sub"] != "" and (cache["l1"]["principal"] == nil or not IsMatch(cache["l1"]["principal"], "^(human|agent|controller|service)$"))'
+              - 'append(cache["dl"], Concat([cache["l2"]["principal"], ":", cache["l2"]["sub"]], "")) where cache["l2"] != nil and cache["l2"]["sub"] != nil and cache["l2"]["sub"] != "" and cache["l2"]["principal"] != nil and IsMatch(cache["l2"]["principal"], "^(human|agent|controller|service)$")'
+              - 'append(cache["dl"], Concat([":", cache["l2"]["sub"]], "")) where cache["l2"] != nil and cache["l2"]["sub"] != nil and cache["l2"]["sub"] != "" and (cache["l2"]["principal"] == nil or not IsMatch(cache["l2"]["principal"], "^(human|agent|controller|service)$"))'
+              - 'append(cache["dl"], Concat([cache["l3"]["principal"], ":", cache["l3"]["sub"]], "")) where cache["l3"] != nil and cache["l3"]["sub"] != nil and cache["l3"]["sub"] != "" and cache["l3"]["principal"] != nil and IsMatch(cache["l3"]["principal"], "^(human|agent|controller|service)$")'
+              - 'append(cache["dl"], Concat([":", cache["l3"]["sub"]], "")) where cache["l3"] != nil and cache["l3"]["sub"] != nil and cache["l3"]["sub"] != "" and (cache["l3"]["principal"] == nil or not IsMatch(cache["l3"]["principal"], "^(human|agent|controller|service)$"))'
+              - 'append(cache["dl"], Concat([cache["l4"]["principal"], ":", cache["l4"]["sub"]], "")) where cache["l4"] != nil and cache["l4"]["sub"] != nil and cache["l4"]["sub"] != "" and cache["l4"]["principal"] != nil and IsMatch(cache["l4"]["principal"], "^(human|agent|controller|service)$")'
+              - 'append(cache["dl"], Concat([":", cache["l4"]["sub"]], "")) where cache["l4"] != nil and cache["l4"]["sub"] != nil and cache["l4"]["sub"] != "" and (cache["l4"]["principal"] == nil or not IsMatch(cache["l4"]["principal"], "^(human|agent|controller|service)$"))'
+              - 'append(cache["dl"], Concat([cache["l5"]["principal"], ":", cache["l5"]["sub"]], "")) where cache["l5"] != nil and cache["l5"]["sub"] != nil and cache["l5"]["sub"] != "" and cache["l5"]["principal"] != nil and IsMatch(cache["l5"]["principal"], "^(human|agent|controller|service)$")'
+              - 'append(cache["dl"], Concat([":", cache["l5"]["sub"]], "")) where cache["l5"] != nil and cache["l5"]["sub"] != nil and cache["l5"]["sub"] != "" and (cache["l5"]["principal"] == nil or not IsMatch(cache["l5"]["principal"], "^(human|agent|controller|service)$"))'
+              - 'append(cache["dl"], Concat([cache["l6"]["principal"], ":", cache["l6"]["sub"]], "")) where cache["l6"] != nil and cache["l6"]["sub"] != nil and cache["l6"]["sub"] != "" and cache["l6"]["principal"] != nil and IsMatch(cache["l6"]["principal"], "^(human|agent|controller|service)$")'
+              - 'append(cache["dl"], Concat([":", cache["l6"]["sub"]], "")) where cache["l6"] != nil and cache["l6"]["sub"] != nil and cache["l6"]["sub"] != "" and (cache["l6"]["principal"] == nil or not IsMatch(cache["l6"]["principal"], "^(human|agent|controller|service)$"))'
+              - 'append(cache["dl"], Concat([cache["l7"]["principal"], ":", cache["l7"]["sub"]], "")) where cache["l7"] != nil and cache["l7"]["sub"] != nil and cache["l7"]["sub"] != "" and cache["l7"]["principal"] != nil and IsMatch(cache["l7"]["principal"], "^(human|agent|controller|service)$")'
+              - 'append(cache["dl"], Concat([":", cache["l7"]["sub"]], "")) where cache["l7"] != nil and cache["l7"]["sub"] != nil and cache["l7"]["sub"] != "" and (cache["l7"]["principal"] == nil or not IsMatch(cache["l7"]["principal"], "^(human|agent|controller|service)$"))'
+              - 'append(cache["dl"], Concat([cache["l8"]["principal"], ":", cache["l8"]["sub"]], "")) where cache["l8"] != nil and cache["l8"]["sub"] != nil and cache["l8"]["sub"] != "" and cache["l8"]["principal"] != nil and IsMatch(cache["l8"]["principal"], "^(human|agent|controller|service)$")'
+              - 'append(cache["dl"], Concat([":", cache["l8"]["sub"]], "")) where cache["l8"] != nil and cache["l8"]["sub"] != nil and cache["l8"]["sub"] != "" and (cache["l8"]["principal"] == nil or not IsMatch(cache["l8"]["principal"], "^(human|agent|controller|service)$"))'
+              - 'append(cache["dl"], Concat([attributes["subject_principal"], ":", attributes["user"]], "")) where cache["act"] != nil and attributes["user"] != nil and attributes["user"] != "" and attributes["subject_principal"] != nil and IsMatch(attributes["subject_principal"], "^(human|agent|controller|service)$")'
+              - 'append(cache["dl"], Concat([":", attributes["user"]], "")) where cache["act"] != nil and attributes["user"] != nil and attributes["user"] != "" and (attributes["subject_principal"] == nil or not IsMatch(attributes["subject_principal"], "^(human|agent|controller|service)$"))'
+              - 'set(attributes["krateo.audit.delegation"], cache["dl"]) where cache["dl"] != nil'
+              # --- what
+              - 'set(attributes["krateo.action"], Concat(["gateway.", attributes["protocol"]], ""))'
+              - 'set(attributes["http.request.method"], attributes["http.method"]) where attributes["http.method"] != nil and IsMatch(attributes["http.method"], "^(CONNECT|DELETE|GET|HEAD|OPTIONS|PATCH|POST|PUT|QUERY|TRACE)$")'
+              - 'set(attributes["http.request.method_original"], attributes["http.method"]) where attributes["http.method"] != nil and not IsMatch(attributes["http.method"], "^(CONNECT|DELETE|GET|HEAD|OPTIONS|PATCH|POST|PUT|QUERY|TRACE)$")'
+              - 'set(attributes["http.request.method"], "_OTHER") where attributes["http.request.method_original"] != nil'
+              - 'set(attributes["krateo.audit.verb"], ToLowerCase(attributes["http.method"])) where attributes["http.method"] != nil and IsMatch(attributes["http.method"], "^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)$")'
+              - 'set(attributes["krateo.audit.gateway.route"], attributes["route"]) where attributes["route"] != nil and attributes["route"] != ""'
+              - 'set(attributes["krateo.audit.gateway.mcp_tool"], attributes["tool"]) where attributes["protocol"] == "mcp" and attributes["tool"] != nil and attributes["tool"] != ""'
+              - 'set(attributes["krateo.audit.asserted.agent_host"], attributes["agent"]) where attributes["agent"] != nil and attributes["agent"] != ""'
+              - 'set(attributes["session.id"], attributes["baggage_session"]) where attributes["baggage_session"] != nil and attributes["baggage_session"] != ""'
+              # --- outcome
+              - 'set(cache["reason"], attributes["reason"]) where attributes["reason"] != nil and attributes["reason"] != "" and attributes["reason"] != "Upstream"'
+              - 'set(attributes["krateo.audit.outcome"], "success") where cache["reason"] == nil'
+              - 'set(attributes["http.response.status_code"], Int(attributes["http.status"])) where cache["reason"] == nil and attributes["http.status"] != nil'
+              - 'set(attributes["krateo.audit.outcome"], "failure") where cache["reason"] == nil and attributes["http.response.status_code"] != nil and attributes["http.response.status_code"] >= 400'
+              - 'set(attributes["krateo.audit.outcome"], "failure") where cache["reason"] != nil'
+              - 'set(attributes["krateo.audit.outcome"], "denied") where cache["reason"] != nil and IsMatch(cache["reason"], "^(JwtAuth|Oidc|BasicAuth|APIKeyAuth|ExtAuth|Authorization|RateLimit|Guardrail|Overload)$")'
+              # --- where
+              # The route's CONFIGURED target whenever there is one, so one route's records always name
+              # one target; the dialed `endpoint` only as a fallback (an older proxy config without
+              # backend_host). The dialed address is transport detail, not the action's target.
+              - 'set(attributes["server.address"], attributes["backend_host"]) where attributes["backend_host"] != nil and attributes["backend_host"] != ""'
+              - 'set(attributes["server.address"], attributes["endpoint"]) where attributes["server.address"] == nil and attributes["endpoint"] != nil and attributes["endpoint"] != ""'
+              - 'set(cache["peer"], attributes["src.addr"]) where attributes["src.addr"] != nil'
+              - 'replace_pattern(cache["peer"], ":[0-9]+$", "") where cache["peer"] != nil'
+              - 'replace_pattern(cache["peer"], "^\\[(.*)\\]$", "$$1") where cache["peer"] != nil'
+              - 'set(cache["xff"], attributes["source_xff"]) where attributes["source_xff"] != nil and attributes["source_xff"] != ""'
+              - 'replace_pattern(cache["xff"], "\\s+", "") where cache["xff"] != nil'
+              - 'set(cache["ips"], Split(cache["xff"], ",")) where cache["xff"] != nil'
+              - 'append(cache["ips"], cache["peer"]) where cache["peer"] != nil'
+              - 'set(attributes["krateo.request.source_ips"], cache["ips"]) where cache["ips"] != nil'
+              - 'set(attributes["user_agent.original"], attributes["user_agent"]) where attributes["user_agent"] != nil and Len(attributes["user_agent"]) <= 1024'
+              - 'set(attributes["user_agent.original"], Concat([Substring(attributes["user_agent"], 0, 1024), "...TRUNCATED"], "")) where attributes["user_agent"] != nil and Len(attributes["user_agent"]) > 1024'
+              - 'set(attributes["krateo.audit.no_trace_context"], true) where trace_id.string == "00000000000000000000000000000000" or trace_id.string == ""'
+              # --- gaps, in the library's marker order
+              # Concat takes only a literal list, so the markers accumulate in a string.
+              - 'set(cache["gaps"], "")'
+              - 'set(cache["gaps"], Concat([cache["gaps"], ",actor"], "")) where attributes["user.name"] == nil'
+              - 'set(cache["gaps"], Concat([cache["gaps"], ",actor_class"], "")) where attributes["krateo.audit.actor_class"] == nil'
+              - 'set(cache["gaps"], Concat([cache["gaps"], ",verb"], "")) where attributes["krateo.audit.verb"] == nil'
+              - 'set(cache["gaps"], Concat([cache["gaps"], ",method"], "")) where attributes["http.request.method"] == nil'
+              - 'set(cache["gaps"], Concat([cache["gaps"], ",target"], "")) where attributes["server.address"] == nil'
+              - 'replace_pattern(cache["gaps"], "^,", "")'
+              - 'set(attributes["krateo.audit.incomplete"], cache["gaps"]) where cache["gaps"] != ""'
+              # --- the record's identity as an audit record
+              - 'set(attributes["event.name"], "audit")'
+              - 'set(event_name, "audit")'
+              - 'set(attributes["krateo.audit.schema_version"], "1")'
+              - 'set(instrumentation_scope.name, "github.com/krateo-platformops/observability/gateway-audit")'
+              - 'set(instrumentation_scope.version, "")'
+              # THE CLOSED SET: only schema keys for writer G survive. Everything else the access
+              # log carried (tokens_in, guardrail_detail, mcp.session.id, ...) stays in otel_logs.
+              - >-
+                keep_keys(attributes, ["event.name", "krateo.audit.schema_version", "user.name", "user.roles",
+                "krateo.audit.actor_class", "krateo.audit.on_behalf_of.user.name", "krateo.audit.delegation",
+                "krateo.action", "krateo.audit.verb", "http.request.method", "http.request.method_original",
+                "krateo.audit.outcome", "http.response.status_code", "server.address", "krateo.request.source_ips",
+                "user_agent.original", "session.id", "krateo.audit.incomplete", "krateo.audit.no_trace_context",
+                "krateo.audit.gateway.route", "krateo.audit.gateway.mcp_tool", "krateo.audit.asserted.agent_host"])
       batch:
         send_batch_size: 10000
         timeout: 5s
@@ -553,6 +754,23 @@ opentelemetry-collector:
             port: "4317"
 
     connectors:
+      # The hops logs/gateway-audit does NOT project (transform/gateway-audit-classify's explicit
+      # exclude list), counted per protocol and method so "not projected" is measurable, and an
+      # acting method that lands on the exclude list by mistake shows up as a count, not as silence.
+      # Lands as krateo.gateway_audit.excluded in otel_metrics_sum through metrics/gateway-audit-excluded.
+      count/gateway-audit-excluded:
+        logs:
+          krateo.gateway_audit.excluded:
+            description: Gateway access-log records not projected into krateo_audit, by protocol and method.
+            attributes:
+              - key: protocol
+                default_value: ""
+              - key: mcp.method.name
+                default_value: ""
+              - key: a2a.method
+                default_value: ""
+              - key: http.method
+                default_value: ""
       # SLO SPAN METRICS (D5). Turns the spans kept by filter/slo-spans into a call counter and a
       # duration histogram, written by the SAME `clickhouse` exporter as every other metric, so they
       # land in otel_metrics_sum / otel_metrics_histogram. `span_metrics` is the name otelcol-contrib
@@ -668,6 +886,27 @@ opentelemetry-collector:
         logs/gateway:
           receivers: [otlp]
           processors: [memory_limiter, k8sattributes, transform, filter/not-audit, batch]
+          exporters: [clickhouse]
+        # THE GATEWAY'S AUDIT COPY (AUDIT-4, #138). A third consumer of the same otlp receiver, so
+        # logs/gateway still writes every access-log record to otel_logs unchanged. This one keeps
+        # the acting hops (transform/gateway-audit-classify), redacts like the others (`transform`
+        # runs BEFORE the projection, so no token reaches a projected value), maps them to schema v1
+        # for writer G, and writes krateo_audit (365 days) through clickhouse/audit. A projected
+        # record carries event.name=audit, so a consumer of krateo_audit sees one population per
+        # ScopeName and never needs to know this pipeline exists.
+        logs/gateway-audit:
+          receivers: [otlp]
+          processors: [memory_limiter, transform, transform/gateway-audit-classify, filter/gateway-audit-projected, transform/gateway-audit, batch]
+          exporters: [clickhouse/audit]
+        # The excluded hops, counted (count/gateway-audit-excluded) and otherwise discarded here:
+        # their record already lives in otel_logs through logs/gateway.
+        logs/gateway-audit-excluded:
+          receivers: [otlp]
+          processors: [memory_limiter, transform/gateway-audit-classify, filter/gateway-audit-excluded]
+          exporters: [count/gateway-audit-excluded]
+        metrics/gateway-audit-excluded:
+          receivers: [count/gateway-audit-excluded]
+          processors: [memory_limiter, batch]
           exporters: [clickhouse]
         # KOS-1 #112 bug #2: wire OTLP metrics -> ClickHouse. The reconcile RED suite
         # (unstructured_runtime.reconcile.*) + the kagent GenAI token metrics arrive as OTLP on the

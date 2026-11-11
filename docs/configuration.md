@@ -304,6 +304,27 @@ Wraps the same upstream chart in `daemonset` mode, stock
   true) turns it off.
 - Same `extraEnvs` Secret wiring and resources as the deployment chart.
 
+### The gateway audit copy (`logs/gateway-audit`, 0.1.27)
+
+The agent gateway's access log feeds three pipelines on the same `otlp` receiver:
+- `logs/gateway`: every record to `otel_logs` (7 days), unchanged;
+- `logs/gateway-audit`: the acting hops to `krateo_audit` (365 days), projected to writer `gateway`
+  of krateo-platformops/audit schema v1, scope `github.com/krateo-platformops/observability/gateway-audit`;
+- `logs/gateway-audit-excluded`: the rest, counted (`krateo.gateway_audit.excluded` in `otel_metrics_sum`,
+  attributes `protocol`, `mcp.method.name`, `a2a.method`, `http.method`).
+
+`transform/gateway-audit-classify` is the one place that decides which records are projected:
+
+| Projected | Excluded (explicit) |
+|---|---|
+| A2A with an `a2a.method`; MCP `tools/call`, `resources/read`, `prompts/get`; LLM `POST`; **any MCP method on neither list** | MCP `initialize`, `ping`, `notifications/*`, `*/list`, `completion/complete`, `logging/setLevel`, method-less SSE GET and session DELETE; A2A without `a2a.method` (agent cards); LLM `GET`; any request that matched no route |
+
+What each schema key comes from is written next to `transform/gateway-audit` in values.yaml. The
+two that need agentgateway-policies >= 0.2.28 are the subject's class in `krateo.audit.delegation`
+(`subject_principal`) and the configured target of a hop refused before dialing (`backend_host`).
+With older facts the record is still written and names what it lacks in `krateo.audit.incomplete`.
+`krateo.request.uri` is not written until the gateway proves no credential can reach the URI (#1251).
+
 ## `charts/otel-collector-tailsampling` — the trace tail sampler
 
 Decides, per finished trace, whether it is stored (installer#402, design in

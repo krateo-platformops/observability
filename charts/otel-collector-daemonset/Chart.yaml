@@ -135,7 +135,19 @@ type: application
 # change: krateo-slo-rollup keeps rows per bounds and reports no p95 over a window that spans both
 # layouts, so a 30-day p95 that includes the change day is unavailable until the window passes
 # (krateo-slo-rollup isn't deployed on krateo-057 today). HyperDX and alert quantiles read bounds per row.
-version: 0.1.26
+# 0.1.27: the gateway's AUDIT COPY (AUDIT-4, observability#138). logs/gateway-audit projects the agent
+# gateway's acting hops (A2A calls, MCP tools/call/resources/read/prompts/get, LLM completions) from
+# its OTLP access log into krateo_audit as writer `gateway` of krateo-platformops/audit schema v1,
+# scope github.com/krateo-platformops/observability/gateway-audit. logs/gateway still writes every
+# access-log record to otel_logs unchanged. Session plumbing (initialize, */list, notifications, SSE,
+# agent cards, model listing) and requests that matched no route are excluded on an EXPLICIT list in
+# transform/gateway-audit-classify and counted (krateo.gateway_audit.excluded in otel_metrics_sum, by
+# protocol and method); an MCP method on neither list is projected, never dropped. Needs the access
+# log's audit facts from agentgateway-policies >= 0.2.28 for complete records; with older facts a
+# record is still written and marks what it lacks. Volume on krateo-057: ~2,260 acting hops a week,
+# ~118K rows a year, ~16 MB a year at krateo_audit's measured 140 B/row (365-day TTL), against
+# 8.3 GiB free; 1 GiB a year would take ~60x today's agent traffic. tests/gateway-audit-docker.py.
+version: 0.1.27
 appVersion: "0.158.0"
 dependencies:
   - name: opentelemetry-collector
