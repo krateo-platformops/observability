@@ -333,9 +333,16 @@ def main():
         case("alert-provider reconcile that acted (provider_runtime.acted=true)", True,
              lambda t: [span(t, "krateo-alert-provider", "reconcile", {"provider_runtime.acted": True}),
                         span(t, "krateo-alert-provider", "observe", {"provider_runtime.step": "observe"})])
-        case("core-provider reconcile with provider_runtime.acted=true (rule is alert-provider only)", "sampled",
-             lambda t: [span(t, "core-provider", "reconcile", {"provider_runtime.acted": True}),
-                        span(t, "core-provider", "observe", {"provider_runtime.step": "observe"})])
+        for _svc in ("core-provider", "git-provider", "incident-provider"):
+            case(f"{_svc} reconcile that acted (provider_runtime.acted=true)", True,
+                 lambda t, _svc=_svc: [span(t, _svc, "reconcile", {"provider_runtime.acted": True}),
+                                       span(t, _svc, "observe", {"provider_runtime.step": "observe"})])
+        # A name outside the sampled list never needs this rule (it is kept at 100% anyway); a
+        # mistyped one must not match it either.
+        case("krateo-core-provider (not the emitted name) acted: matched by no rule, outside the sampled set", True,
+             lambda t: [span(t, "krateo-core-provider", "reconcile", {"provider_runtime.acted": True})])
+        case("core-provider reconcile that did NOT act", "sampled",
+             lambda t: [span(t, "core-provider", "reconcile"), span(t, "core-provider", "observe", {"provider_runtime.step": "observe"})])
         case("alert-provider reconcile whose HyperDX server answered 500", True,
              lambda t: alert_provider_reconcile(t) + hyperdx_server(t, status_code=500))
         for svc in PROVIDERS:

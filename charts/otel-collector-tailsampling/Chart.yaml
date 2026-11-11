@@ -34,7 +34,11 @@ type: application
 # Diego, 2026-11-11, for provider-runtime#74). Routine alert-provider traces stay at 5%; an acting
 # pass's root is kept whole so its act span's link resolves. Inert until plumbing's
 # tracecontext.AttrActed ships through provider-runtime into alert-provider.
-version: 0.1.11
+# 0.1.12: the acted keep rule covers every provider sampled at 5% (Diego, 2026-11-11): krateo-alert-
+# provider, core-provider, git-provider, incident-provider, by the service.name each chart sets
+# (provider-runtime design-tracing.md section 8). Renamed provider-acted. Still inert until each
+# provider's runtime emits provider_runtime.acted.
+version: 0.1.12
 # The collector this chart renders: the upstream chart's own appVersion picks the image tag.
 # Keep equal to otel-collector-daemonset's appVersion, so both tiers run the same build.
 appVersion: "0.158.0"
