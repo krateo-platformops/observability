@@ -40,5 +40,5 @@ jobs:
         run: pip install --quiet pyyaml
       - name: Add the dependency repository
         run: helm repo add clickstack https://clickhouse.github.io/ClickStack-helm-charts
-      - name: Render the users, then load them into ClickHouse 26.8.36.3
+      - name: Render the users, then load them into ClickHouse 26.10.3.7
         run: python3 tests/clickhouse-users-docker.py .

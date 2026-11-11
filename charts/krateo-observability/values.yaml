@@ -485,6 +485,16 @@ clickstack:
     # keys. So container resources MUST live under cluster.spec.containerTemplate.resources
     # to take effect; the old top-level `resources:` here was INERT (ClickHouse ran at the
     # operator default ~1Gi and the bell /notifications poller OOMed — MEMORY_LIMIT_EXCEEDED).
+    # KEEPER IS PINNED THE SAME WAY (0.1.45). Nothing set its image before, so the operator ran
+    # clickhouse-keeper:latest from day one (26.10.3.7 on 057 since 2026-11-08). An exact tag, with
+    # the repository spelled out because upstream's keeper.spec has no containerTemplate at all.
+    # Keep it on the same version as the server.
+    keeper:
+      spec:
+        containerTemplate:
+          image:
+            repository: docker.io/clickhouse/clickhouse-keeper
+            tag: "26.10.3.7"
     cluster:
       spec:
         containerTemplate:
@@ -499,16 +509,18 @@ clickstack:
           # upgrade (25.7->26.8) that ROLLS the StatefulSet — it must be bench-validated
           # and must not ride an unrelated installer reconcile (Keeper lockstep,
           # versionProbe Job, http_handlers/TTL config re-check on 26.8).
-          # PINNED BY DIGEST (0.1.43). The tag `26.8-alpine` floats: every pod restart pulls the
-          # newest 26.8 build, so the S1 lockdown restart on 2026-11-11 silently upgraded 057 from
-          # 26.8.7.19 to 26.8.36.3. The operator (v0.0.7 ContainerImage.String) uses `tag` if it is
-          # set and `hash` only otherwise, so the upstream tag is nulled to make the hash win.
-          # The digest is the multi-arch index of clickhouse/clickhouse-server:26.8.36.3-alpine
-          # (== 26.8-alpine on 2026-10-26), the build 057 runs now, and the digest krateo-slo-rollup
-          # pins for its client. To upgrade, change the digest and say which version it is here.
+          # PINNED BY AN EXACT VERSION TAG (0.1.45). The tag must ALWAYS be set to an exact version:
+          # operator v0.0.7 defaults an empty tag to `latest` (api/v1alpha1/defaults.go,
+          # DefaultClickHouseContainerTag) BEFORE ContainerImage.String() prefers tag over hash, so
+          # a hash-only pin is impossible. 0.1.43/0.1.44 tried exactly that (tag: null + hash) and
+          # the 057 roll on 2026-11-11 17:13Z ran clickhouse-server:latest = 26.10.3.7 instead of
+          # the intended 26.8.36.3. Diego chose to pin what then ran: 26.10.3.7 (index digest
+          # sha256:739e099abd11..., the same build `latest` resolved to). An exact patch tag is
+          # immutable on Docker Hub in practice; tests/clickhouse-image-pin.py fails the build if
+          # this tag is ever empty or not an exact version. To upgrade: change the tag here and in
+          # the Keeper pin above together, and the ClickHouse image the tests run.
           image:
-            tag: null
-            hash: "sha256:f5443f9ffa48f0154cdd50cab39fed732201762574a27f04f1f564bbba81832d"
+            tag: "26.10.3.7"
           # Password hashes of the chart's ClickHouse users (settings.extraUsersConfig below). Each
           # user's password_sha256_hex is read from one of these variables with @from_env, so the hash
           # comes from a Secret and never sits in values, the ClickHouseCluster CR or the operator's

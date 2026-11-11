@@ -20,7 +20,7 @@ import time
 import urllib.parse
 import urllib.request
 
-IMAGE = "clickhouse/clickhouse-server:26.8.36.3"  # SELECT version() on krateo-057
+IMAGE = "clickhouse/clickhouse-server:26.10.3.7"  # SELECT version() on krateo-057 (since 2026-11-11)
 QUERY = "ops/audit-reconcile-join/query.sql"
 WINDOW_S = 600
 T0 = dt.datetime(2026, 11, 9, 10, 0, 0)
