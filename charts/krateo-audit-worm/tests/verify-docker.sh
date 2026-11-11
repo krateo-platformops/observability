@@ -9,7 +9,7 @@
 set -uo pipefail
 CHART="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
-IMAGE="clickhouse/clickhouse-server:24.8-alpine"
+IMAGE="clickhouse/clickhouse-server:24.8.14.39-alpine"  # the chart's image.tag
 NAME="audit-verify-$$"
 LONG_CHAIN="${LONG_CHAIN:-5000}"
 LIMIT=60
@@ -125,6 +125,23 @@ R=$(verify)
 expect "${R#* }" "none " "the chain query errors: no status line, so no false ok"
 [ "${R%% *}" != "0" ] && pass "the chain query errors: the Job fails" || fail "the chain query errored and the Job passed"
 CH -q "DROP VIEW krateo_audit_seal"; CH -q "RENAME TABLE seal_aside TO krateo_audit_seal"
+
+echo "== an unreachable or failing ClickHouse is an error, never 'does not exist yet' =="
+# A query inside a test ([ "$(has T)" != "1" ]) hides its failure from set -e: it reads as an empty
+# answer. The scripts must assign every answer first.
+grep -nE '\[ +"?\$\((has|CHQ)' "$W/scripts/"*.sh | grep -vE '^[^:]+:[0-9]+: *#' && fail "a query runs inside a test, so its failure reads as an answer" || pass "no query runs inside a test"
+noport() { docker exec -e CH_HOST=127.0.0.1 -e CH_PORT=9999 -e CH_DB=default -e CH_USER=e2e -e CH_PASSWORD=e2e -e LAG_SECONDS=0 "$NAME" sh "/scripts/$1.sh" 2>&1; }
+OUT=$(noport seal); RC=$?
+[ "$RC" != "0" ] && pass "seal, ClickHouse unreachable: the Job fails" || fail "seal, ClickHouse unreachable: the Job passed"
+echo "$OUT" | grep -q 'NETWORK_ERROR\|Connection refused' && pass "seal, ClickHouse unreachable: the log names the connection error" || fail "seal, ClickHouse unreachable: no connection error in the log ($OUT)"
+echo "$OUT" | grep -q 'does not exist yet' && fail "seal, ClickHouse unreachable: reported as a missing table" || pass "seal, ClickHouse unreachable: not reported as a missing table"
+OUT=$(noport verify); RC=$?
+[ "$RC" != "0" ] && pass "verify, ClickHouse unreachable: the Job fails" || fail "verify, ClickHouse unreachable: the Job passed"
+echo "$OUT" | grep -q '"krateo.audit.status"' && fail "verify, ClickHouse unreachable: a status line was written" || pass "verify, ClickHouse unreachable: no status line, so no false ok"
+CH -q "CREATE DATABASE IF NOT EXISTS empty_db"
+OUT=$(docker exec -e CH_HOST=127.0.0.1 -e CH_PORT=9000 -e CH_DB=empty_db -e CH_USER=e2e -e CH_PASSWORD=e2e -e LAG_SECONDS=0 "$NAME" sh /scripts/seal.sh 2>&1); RC=$?
+[ "$RC" != "0" ] && echo "$OUT" | grep -q 'does not exist yet' && pass "seal, source table really absent: 'does not exist yet' (control)" || fail "seal, source table really absent: rc=$RC ($OUT)"
+CH -q "DROP DATABASE empty_db"
 
 echo "== a long chain inside the deadline =="
 CH -q "TRUNCATE TABLE krateo_audit_seal"; CH -q "TRUNCATE TABLE krateo_audit_worm"; CH -q "DROP TABLE krateo_audit_worm_mv"

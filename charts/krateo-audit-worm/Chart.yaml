@@ -16,7 +16,14 @@ type: application
 # alert-provider-crds with spec.description: an older CRD drops the field.
 # 0.1.7: the ClickHouse client image is pinned by an exact tag, 24.8.14.39-alpine, the build the
 # floating `24.8-alpine` gave 057's Jobs on 2026-11-11. Same image, so nothing that runs changes.
-version: 0.1.7
+# 0.1.8: a failed ClickHouse query is an error, never an answer. seal.sh tested `[ "$(has T)" != "1" ]`,
+# and `set -e` doesn't see a failure inside a test, so during 057's ClickHouse restart (2026-11-11
+# 19:15Z) a refused connection was logged as "source table krateo_audit does not exist yet". The
+# same shape guarded the chain RESET: one failed count on an unsealed chain would have restarted it
+# from a reset genesis. Every answer is now assigned before it's tested, and has() refuses anything
+# but 0 or 1. tests/verify-docker.sh checks an unreachable ClickHouse for both scripts, a really
+# absent table as a control, and that no query runs inside a test.
+version: 0.1.8
 keywords:
   - audit
   - worm

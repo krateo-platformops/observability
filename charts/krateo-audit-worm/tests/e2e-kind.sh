@@ -17,7 +17,7 @@ set -uo pipefail
 CHART="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
 : "${KUBECONFIG:?point KUBECONFIG at a disposable kind cluster}"
 NS=audit-e2e; REL=krateo-audit-worm
-CH_IMAGE="clickhouse/clickhouse-server:24.8-alpine"
+CH_IMAGE="clickhouse/clickhouse-server:24.8.14.39-alpine"  # the chart's image.tag
 STALE=60
 W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
 export HELM_CONFIG_HOME="$W/helm/config" HELM_CACHE_HOME="$W/helm/cache" HELM_DATA_HOME="$W/helm/data"
