@@ -23,9 +23,14 @@ sourceTable: krateo_audit
 wormTable: krateo_audit_worm
 sealTable: krateo_audit_seal
 
+# PINNED BY AN EXACT VERSION TAG (0.1.7). `24.8-alpine` floats: each new 24.8 build is pulled on the
+# next Job pod, unannounced. 24.8.14.39-alpine is the build `24.8-alpine` resolved to on 2026-11-11
+# (index sha256:b002e56ed5c1..., what 057's seal and verify Jobs ran that day), so pinning it changes
+# nothing that runs. Only clickhouse-client is used, against the ClickHouse server krateo-observability
+# pins. tests/clickhouse-image-pin.py fails on an inexact tag. To upgrade, change it here.
 image:
   repository: clickhouse/clickhouse-server
-  tag: "24.8-alpine"
+  tag: "24.8.14.39-alpine"
   pullPolicy: IfNotPresent
 
 # Sealing: seal rows whose ingestion time is older than lagSeconds (a watermark
