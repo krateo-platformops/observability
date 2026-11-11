@@ -63,8 +63,15 @@ type: application
 # leaves gets 499 (not 500/ERROR) and its ClickHouse span isn't an error. Events carry
 # composition {id, namespace, name} (names need otel-collector-deployment >= 0.3.17). /audit gets the
 # same limits and its empty fields now carry values. Auth 503s are logged. No new env required.
-version: 0.1.24
-appVersion: "1.5.0"
+# 0.1.25: bump the sse-proxy image to 1.5.1 (sse-proxy#46). Concurrent RBAC scope misses for one
+# identity share ONE resolution, so a burst after an idle gap no longer runs a SubjectAccessReview
+# fan-out per request. On krateo-057's load A (2026-11-11), the 25->50 VU step sent 31 /events past
+# snowplow's 10 s page budget (499s) with ClickHouse idle. EVENTS_REQUEST_TIMEOUT (default 8 s) bounds
+# scope resolution plus the query, and the ClickHouse budget shrinks to fit. A scope that misses it
+# answers 200 [] with X-Events-Status: timeout. /audit gets the same (AUDIT_REQUEST_TIMEOUT, 8 s). The
+# scope and SubjectAccessReview calls get spans with no identity attributes. No new env required.
+version: 0.1.25
+appVersion: "1.5.1"
 home: https://krateo.io
 icon: https://github.com/krateoplatformops/krateo/blob/main/docs/media/logo.svg
 keywords:
