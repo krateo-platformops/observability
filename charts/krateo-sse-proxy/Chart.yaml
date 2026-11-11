@@ -70,7 +70,15 @@ type: application
 # scope resolution plus the query, and the ClickHouse budget shrinks to fit. A scope that misses it
 # answers 200 [] with X-Events-Status: timeout. /audit gets the same (AUDIT_REQUEST_TIMEOUT, 8 s). The
 # scope and SubjectAccessReview calls get spans with no identity attributes. No new env required.
-version: 0.1.25
+# 0.1.26: sse-proxy reads ClickHouse as its OWN user, `sse_proxy` (lockdown S2, Diego 2026-11-11).
+# CLICKHOUSE_USER and CLICKHOUSE_PASSWORD both come from the Secret clickhouse-sse-proxy-credentials
+# (keys username, password), which krateo-observability >= 0.1.42 creates with the user. The user's
+# profile portal_reader is readonly=2, with per-table SELECT on what sse-proxy reads. REQUIRES
+# krateo-observability >= 0.1.42 on the same cluster: the Secret is no longer optional. Before this,
+# the chart named a Secret `clickhouse-credentials` that nothing created, optional, so sse-proxy ran
+# as `default` with an empty password. clickhouse.user and clickhouse.passwordSecret are removed;
+# set clickhouse.credentialsSecret instead.
+version: 0.1.26
 appVersion: "1.5.1"
 home: https://krateo.io
 icon: https://github.com/krateoplatformops/krateo/blob/main/docs/media/logo.svg
