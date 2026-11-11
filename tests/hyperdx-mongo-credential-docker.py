@@ -10,10 +10,12 @@
    - mongodb-hyperdx-credentials holds exactly username, password, uri (data, not stringData), a
      generated 32-character password, and a uri with the same scheme, user, host, port, database and
      query as upstream's ConfigMap URI (rendered here from the vendored clickstack chart);
-   - upstream's default MongoDB password, read at run time from the vendored chart's values.yaml so
-     no literal is in this file, is in no rendered object as a URI password, a Secret value or a
-     password-named field, except where it is the ClickHouse `app` user's (same literal, a separate
-     credential, listed in CLICKHOUSE_APP below);
+   - upstream's default MongoDB password (read at run time from the vendored chart's values.yaml, so
+     no literal is in this file) reaches no LIVE consumer: the Secret the MongoDB user's
+     passwordSecretRef resolves to, the uri every MONGO_URI resolves to, and no ConfigMap or pod spec;
+   - the objects that still hold it as a credential are exactly DEAD_AFTER_ROTATION (upstream's,
+     dead once the user is rotated, emptied in the follow-up release) plus CLICKHOUSE_APP (the same
+     literal as the ClickHouse `app` user's password, a separate credential): nothing new;
    - the init container waits with the app container's image, and the generation annotation on the
      pod template is the one on the Secret;
    - each override that would undo the wiring fails the render.
@@ -58,6 +60,14 @@ CLICKHOUSE_APP = {
     "Deployment/krateo-clickstack: env DEFAULT_CONNECTIONS[0].password",
 }
 WORKLOADS = {"Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob", "Pod", "ReplicaSet"}
+
+# Upstream objects that keep the default in 0.1.44. Dead after rotation (MongoDB refuses it, step 2
+# shows it), emptied in the follow-up: changing the Secret MCK still watches in the same upgrade as the
+# switch could set its value as the user's password until the CR update lands.
+DEAD_AFTER_ROTATION = {
+    "Secret/krateo-clickstack-mongodb-password: stringData.password",
+    "Secret/clickstack-secret: stringData.MONGODB_PASSWORD",
+}
 
 failures = []
 
@@ -269,11 +279,30 @@ def check_render(root, docs, default):
     check(list(inits) == ["wait-for-mongodb", INIT], f"init containers: wait-for-mongodb, then {INIT}")
     check(inits.get(INIT, {}).get("image") == app["image"], f"{INIT} runs the app container's image ({app['image']})")
 
+    # (a) No live consumer uses the default: resolve every reference to the rendered Secret it names.
+    def resolve(name, key):
+        sec = by.get(("Secret", name))
+        return None if sec is None else secret_values(sec).get(f"data.{key}", secret_values(sec).get(f"stringData.{key}"))
+    ref = hx.get("passwordSecretRef") or {}
+    live = resolve(ref.get("name"), ref.get("key", "password"))
+    check(live is not None and live != default and ref.get("name") != "krateo-clickstack-mongodb-password",
+          f"live: the MongoDB user's password ({ref.get('name')}/{ref.get('key')}) is not upstream's default")
+    for where, c in consumers:
+        r = (mongo_uri_ref(c) or {}).get("valueFrom", {}).get("secretKeyRef", {})
+        u = resolve(r.get("name"), r.get("key"))
+        check(u is not None and urllib.parse.urlsplit(u).password not in (None, default),
+              f"live: {where} container {c['name']}: MONGO_URI resolves to a uri without upstream's default")
     found = default_password_positions(docs, default)
-    extra = sorted(found - CLICKHOUSE_APP)
-    check(not extra, f"upstream's default MongoDB password is in no rendered object as a credential ({extra or 'none'})")
+    in_specs = sorted(p for p in found - CLICKHOUSE_APP if not p.startswith("Secret/"))
+    check(not in_specs, f"live: no ConfigMap or pod spec holds upstream's default as a credential ({in_specs or 'none'})")
+    # (b) Where it is still held: exactly the two dead upstream objects, nothing new.
+    held = found - CLICKHOUSE_APP
+    check(held == DEAD_AFTER_ROTATION, "upstream's default is held only by the objects dead after rotation "
+          f"({sorted(held - DEAD_AFTER_ROTATION) or 'nothing new'}; missing {sorted(DEAD_AFTER_ROTATION - held) or 'none'})")
+    for p in sorted(found & DEAD_AFTER_ROTATION):
+        print(f"     note: dead after rotation; emptied in the follow-up: {p}")
     for p in sorted(found & CLICKHOUSE_APP):
-        print(f"     note: the same literal is still the ClickHouse app user's password: {p}")
+        print(f"     note: the same literal is still the ClickHouse app user's password (lockdown S9/S10): {p}")
     return pw, uri, inits.get(INIT)
 
 
@@ -285,8 +314,8 @@ def check_guards(root):
          {"clickstack": {"hyperdx": {"deployment": {"initContainers": []}}}}, "must contain wait-for-mongodb-auth"),
         ("MONGO_URI back in clickstack-config",
          {"clickstack": {"hyperdx": {"config": {"MONGO_URI": "mongodb://h/x"}}}}, "MONGO_URI must stay null"),
-        ("a MONGODB_PASSWORD value",
-         {"clickstack": {"hyperdx": {"secrets": {"MONGODB_PASSWORD": secrets.token_hex(8)}}}}, "MONGODB_PASSWORD must stay empty"),
+        ("an emptied MONGODB_PASSWORD (in this release, the Secret MCK still watches)",
+         {"clickstack": {"hyperdx": {"secrets": {"MONGODB_PASSWORD": ""}}}}, "MONGODB_PASSWORD must keep upstream's value"),
         ("hyperdx.tasks enabled (the CronJob has no env hook)",
          {"clickstack": {"hyperdx": {"tasks": {"enabled": True}}}}, "tasks.enabled must stay false"),
         ("a users override back on upstream's password Secret",
@@ -378,7 +407,7 @@ def check_mongo(docs, pw, uri, init, default):
         check(r.returncode == 0 and r.stdout.strip() == "1", "[mongo] the rendered uri logs in and reads/writes hyperdx")
         r = mongosh(mongo, "try { new Mongo(process.env.URI).getDB('hyperdx').cred_probe.countDocuments({}); print('in') }"
                     " catch (e) { print(e.codeName || e.name) }", {"URI": old_uri})
-        check("AuthenticationFailed" in r.stdout, "[mongo] upstream's default password is refused after the change")
+        check("AuthenticationFailed" in r.stdout, "[mongo] upstream's default, the value left in the dead objects, is refused after the change")
     finally:
         for c in (waiter, mongo):
             docker("rm", "-f", c, check_=False)

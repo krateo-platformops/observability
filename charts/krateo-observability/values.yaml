@@ -1044,13 +1044,14 @@ clickstack:
     # in the ConfigMap is left to win over. The template refuses to render if this key comes back.
     config:
       MONGO_URI: null
-    # MONGODB_PASSWORD only fed upstream's MONGO_URI and templates/mongodb/password-secret.yaml, and
-    # neither is used now. Empty, not null: password-secret.yaml renders this value unconditionally
-    # while mongodb is enabled, so a null would put a YAML null in that Secret's stringData. Its
-    # Secret (krateo-clickstack-mongodb-password) still renders, with an empty password, and nothing
-    # references it: the MongoDB user's passwordSecretRef names mongodb-hyperdx-credentials.
-    secrets:
-      MONGODB_PASSWORD: ""
+    # hyperdx.secrets.MONGODB_PASSWORD is deliberately NOT overridden in 0.1.44: upstream's default stays
+    # in krateo-clickstack-mongodb-password and in clickstack-secret's MONGODB_PASSWORD. Nothing live
+    # reads it any more (the MongoDB user's passwordSecretRef names mongodb-hyperdx-credentials, and
+    # HyperDX's MONGO_URI comes from there), and once this upgrade rotates the user MongoDB refuses it:
+    # it is a dead value. It is left alone because MCK watches the Secret the CR references, and Helm
+    # updates Secrets before the CR in the same upgrade: changing that Secret now, to empty or anything
+    # else, could set that value as the user's password until the CR update lands. The follow-up
+    # release empties both once nothing references the old Secret. The template refuses an empty one.
 
     # The HyperDX app flapped 15 times on krateo-057 (2026-10-11), every one a SIGKILL after a
     # failed liveness probe. The decisive evidence is that the PREVIOUS container's log held only

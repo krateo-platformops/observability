@@ -151,10 +151,14 @@ type: application
 # public default, and the whole URI sat in plain text in ConfigMap clickstack-config. Now the chart
 # generates mongodb-hyperdx-credentials once (lookup-kept; keys username, password, uri), the
 # MongoDBCommunity user's passwordSecretRef names it, and HyperDX gets MONGO_URI from it through
-# secretKeyRef. clickstack-config has no MONGO_URI, and upstream's password Secret is empty and
-# unused. The first upgrade gives MongoDB the new password (the operator re-runs SCRAM setup in
-# place, no mongod restart) and ROLLS HyperDX; a new init container holds the new pod until MongoDB
-# accepts the new URI, while the old pod keeps serving. Rotate later by raising
+# secretKeyRef. clickstack-config has no MONGO_URI. Upstream's default stays, unreferenced and DEAD
+# once the user is rotated (MongoDB refuses it), in krateo-clickstack-mongodb-password and in
+# clickstack-secret's MONGODB_PASSWORD. The FOLLOW-UP release empties both, once nothing references the
+# old Secret: MCK watches the Secret the CR references and Helm updates Secrets before the CR, so
+# emptying it in this release could briefly set an empty password. The first upgrade gives MongoDB
+# the new password (the operator re-runs SCRAM setup in place, no mongod restart) and ROLLS HyperDX;
+# a new init container holds the new pod until MongoDB accepts the new URI, while the old pod keeps
+# serving. Rotate later by raising
 # krateo.io/mongodb-credential-generation. The render fails if an override undoes the wiring, or if
 # hyperdx.tasks is enabled (the CronJob has no env hook). Decision: Diego 2026-11-11.
 # CONTAINS 0.1.43's ClickHouse digest pin, which was held for the Thursday node-pool recreate.
