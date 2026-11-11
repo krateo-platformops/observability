@@ -13,9 +13,9 @@
    - upstream's default MongoDB password (read at run time from the vendored chart's values.yaml, so
      no literal is in this file) reaches no LIVE consumer: the Secret the MongoDB user's
      passwordSecretRef resolves to, the uri every MONGO_URI resolves to, and no ConfigMap or pod spec;
-   - the objects that still hold it as a credential are exactly DEAD_AFTER_ROTATION (upstream's,
-     dead once the user is rotated, emptied in the follow-up release) plus CLICKHOUSE_APP (the same
-     literal as the ClickHouse `app` user's password, a separate credential): nothing new;
+   - no object holds it as a MongoDB credential any more (0.1.46 empties upstream's two dead
+     copies, DEAD_AFTER_ROTATION is empty); only CLICKHOUSE_APP still has the same literal (the
+     ClickHouse `app` user's password, a separate credential): nothing new;
    - the init container waits with the app container's image, and the generation annotation on the
      pod template is the one on the Secret;
    - each override that would undo the wiring fails the render.
@@ -61,13 +61,11 @@ CLICKHOUSE_APP = {
 }
 WORKLOADS = {"Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob", "Pod", "ReplicaSet"}
 
-# Upstream objects that keep the default in 0.1.44. Dead after rotation (MongoDB refuses it, step 2
-# shows it), emptied in the follow-up: changing the Secret MCK still watches in the same upgrade as the
-# switch could set its value as the user's password until the CR update lands.
-DEAD_AFTER_ROTATION = {
-    "Secret/krateo-clickstack-mongodb-password: stringData.password",
-    "Secret/clickstack-secret: stringData.MONGODB_PASSWORD",
-}
+# Upstream objects that kept the default in 0.1.44 and 0.1.45, dead after rotation (MongoDB refuses
+# it, step 2 shows it): krateo-clickstack-mongodb-password's password and clickstack-secret's
+# MONGODB_PASSWORD. 0.1.46 empties both, so none is left. The template refuses an upgrade on a
+# cluster that skipped 0.1.44 (tests/mongodb-skip-guard-kind.py).
+DEAD_AFTER_ROTATION = set()
 
 failures = []
 
@@ -297,7 +295,7 @@ def check_render(root, docs, default):
     check(not in_specs, f"live: no ConfigMap or pod spec holds upstream's default as a credential ({in_specs or 'none'})")
     # (b) Where it is still held: exactly the two dead upstream objects, nothing new.
     held = found - CLICKHOUSE_APP
-    check(held == DEAD_AFTER_ROTATION, "upstream's default is held only by the objects dead after rotation "
+    check(held == DEAD_AFTER_ROTATION, "upstream's default is held by no object as a MongoDB credential "
           f"({sorted(held - DEAD_AFTER_ROTATION) or 'nothing new'}; missing {sorted(DEAD_AFTER_ROTATION - held) or 'none'})")
     for p in sorted(found & DEAD_AFTER_ROTATION):
         print(f"     note: dead after rotation; emptied in the follow-up: {p}")
@@ -314,8 +312,9 @@ def check_guards(root):
          {"clickstack": {"hyperdx": {"deployment": {"initContainers": []}}}}, "must contain wait-for-mongodb-auth"),
         ("MONGO_URI back in clickstack-config",
          {"clickstack": {"hyperdx": {"config": {"MONGO_URI": "mongodb://h/x"}}}}, "MONGO_URI must stay null"),
-        ("an emptied MONGODB_PASSWORD (in this release, the Secret MCK still watches)",
-         {"clickstack": {"hyperdx": {"secrets": {"MONGODB_PASSWORD": ""}}}}, "MONGODB_PASSWORD must keep upstream's value"),
+        ("upstream's default MONGODB_PASSWORD put back",
+         {"clickstack": {"hyperdx": {"secrets": {"MONGODB_PASSWORD": upstream_default(root)}}}},
+         "MONGODB_PASSWORD must stay empty"),
         ("hyperdx.tasks enabled (the CronJob has no env hook)",
          {"clickstack": {"hyperdx": {"tasks": {"enabled": True}}}}, "tasks.enabled must stay false"),
         ("a users override back on upstream's password Secret",
