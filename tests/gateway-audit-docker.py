@@ -171,6 +171,11 @@ def build_cases(base):
         lr = add(tid, a2a, "projected")
         for key in keys:
             set_attr(lr, key, None)
+    # A dialed hop whose endpoint DIFFERS from the configured target (on 057 the proxy reports the
+    # resolved pod IP, e.g. 10.40.4.22:8083): server.address must be the configured target. Every
+    # real fixture record has endpoint == backend_host, so without this a swapped precedence passes.
+    lr = add("endpoint-differs", a2a, "projected"); set_attr(lr, "endpoint", "10.40.4.22:8083")
+    set_attr(lr, "user_agent", "facts-test/endpoint-differs")
     # A refused-before-dial hop: no endpoint, so server.address is the route's configured target.
     lr = add("refused-before-dial", a2a, "projected"); set_attr(lr, "endpoint", None)
     set_attr(lr, "reason", "JwtAuth"); set_attr(lr, "http.status", 401)
@@ -343,6 +348,9 @@ def verify(work, cases, binary, logs):
 
     # 3. falsifier + marker order: each case's projection must be flagged by the checker
     check(not recs(lambda a: "krateo.audit.gateway.route" not in a), "a request that matched no route is never projected")
+    ed = recs(lambda a: a.get("user_agent.original") == "facts-test/endpoint-differs")
+    check(len(ed) == 1 and ed[0].get("server.address") == "k8s-agent.krateo-system.svc:8080",
+          f"endpoint != backend_host: server.address is the CONFIGURED target, not the dialed address ({[a.get('server.address') for a in ed]})")
     rbd = recs(lambda a: a.get("krateo.audit.outcome") == "denied" and a.get("server.address") == "k8s-agent.krateo-system.svc:8080"
                and "http.response.status_code" not in a)
     check(len(rbd) >= 1, "refused before dialing (JwtAuth, no endpoint): denied, server.address = the route's configured target")
