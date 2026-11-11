@@ -6,7 +6,8 @@ operator v0.0.7 (ClickHouse/clickhouse-operator api/v1alpha1/defaults.go) defaul
 `hash`. So a hash-only pin silently becomes `latest`: krateo-observability 0.1.43/0.1.44 did exactly
 that, and the 2026-11-11 roll on krateo-057 ran clickhouse-server:latest (26.10.3.7) instead of the
 intended 26.8.36.3. This renders the chart, applies the operator's rule to both CRs, and fails unless
-each resolves to `<repository>:<exact version>`.
+each resolves to `<repository>:<exact version>`. It also checks the ClickHouse client image of
+krateo-audit-worm's Jobs, a plain image whose floating tag pulled each new build.
 
 Run: python3 tests/clickhouse-image-pin.py [repo-root]    Exit 0 = both pinned.
 """
@@ -25,6 +26,34 @@ def operator_image(img, default_repo):
     repo = img.get("repository") or default_repo
     tag = img.get("tag") or "latest"
     return f"{repo}:{tag}", tag
+
+
+def pod_images(doc):
+    """Every container image of a workload or CronJob."""
+    spec = doc.get("spec") or {}
+    if doc.get("kind") == "CronJob":
+        spec = spec["jobTemplate"]["spec"]
+    pod = (spec.get("template") or {}).get("spec") or {}
+    return [c["image"] for k in ("initContainers", "containers") for c in pod.get(k) or []]
+
+
+def check_audit_worm(root):
+    """krateo-audit-worm runs clickhouse-client from the server image in its Jobs: an exact tag, not
+    a floating `24.8-alpine` that pulls each new build on the next pod."""
+    chart = root / "charts" / "krateo-audit-worm"
+    out = subprocess.run(["helm", "template", "x", str(chart), "-n", "krateo-system"],
+                         check=True, capture_output=True, text=True).stdout
+    imgs = sorted({i for d in yaml.safe_load_all(out) if d for i in pod_images(d) if "clickhouse" in i})
+    if not imgs:
+        print("FAIL krateo-audit-worm: no ClickHouse image rendered, so nothing was checked")
+        return 1
+    fails = 0
+    for i in imgs:
+        tag = i.rsplit(":", 1)[1] if ":" in i.rsplit("/", 1)[-1] else ""
+        ok = bool(EXACT.match(tag))
+        print(f"{'ok  ' if ok else 'FAIL'} krateo-audit-worm: {i}" + ("" if ok else " (needs an exact version tag)"))
+        fails += not ok
+    return fails
 
 
 def main():
@@ -50,6 +79,7 @@ def main():
     k = [d for d in docs if d.get("kind") == "KeeperCluster"][0]["spec"].get("containerTemplate", {}).get("image", {}).get("tag")
     same = bool(s) and s == k
     print(f"{'ok  ' if same else 'FAIL'} server and Keeper on the same version ({s} / {k})"); fails += not same
+    fails += check_audit_worm(root)
     print(f"\n{fails} failure(s)")
     sys.exit(1 if fails else 0)
 

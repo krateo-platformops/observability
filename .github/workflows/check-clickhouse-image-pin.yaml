@@ -1,7 +1,8 @@
 # krateo-observability's ClickHouse server and Keeper must be pinned by an exact version tag.
 # ClickHouse operator v0.0.7 defaults an empty `containerTemplate.image.tag` to `latest` and then
 # prefers the tag over `hash`, so a hash-only pin runs `latest` (0.1.43/0.1.44 did, 2026-11-11).
-# The test renders the chart and applies the operator's rule to both CRs.
+# The test renders the chart and applies the operator's rule to both CRs, and checks that
+# krateo-audit-worm's ClickHouse client image has an exact tag too.
 #
 # A separate workflow, like check-tailsampling: lint.yaml is the org-wide canonical chart lint.
 
@@ -11,12 +12,14 @@ on:
   pull_request:
     paths:
       - "charts/krateo-observability/**"
+      - "charts/krateo-audit-worm/**"
       - "tests/clickhouse-image-pin.py"
       - ".github/workflows/check-clickhouse-image-pin.yaml"
   push:
     branches: [main]
     paths:
       - "charts/krateo-observability/**"
+      - "charts/krateo-audit-worm/**"
       - "tests/clickhouse-image-pin.py"
   workflow_dispatch:
 

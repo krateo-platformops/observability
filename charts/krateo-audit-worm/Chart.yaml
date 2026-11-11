@@ -14,7 +14,9 @@ type: application
 # whose contents differ, even by a comment, so this version has to move.
 # 0.1.6: both alerts carry a one-sentence `description` in place of `message`. NEEDS
 # alert-provider-crds with spec.description: an older CRD drops the field.
-version: 0.1.6
+# 0.1.7: the ClickHouse client image is pinned by an exact tag, 24.8.14.39-alpine, the build the
+# floating `24.8-alpine` gave 057's Jobs on 2026-11-11. Same image, so nothing that runs changes.
+version: 0.1.7
 keywords:
   - audit
   - worm
