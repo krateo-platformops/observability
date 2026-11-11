@@ -46,11 +46,20 @@ auth:
 
 clickhouse:
   url: "http://krateo-clickstack-clickhouse-clickhouse-headless.krateo-system.svc:8123"
-  user: "default"
-  passwordSecret:
-    name: clickhouse-credentials
-    key: password
-    optional: true
+  # sse-proxy's OWN ClickHouse user (lockdown S2, Diego 2026-11-11). krateo-observability >= 0.1.42
+  # creates the user `sse_proxy` (profile portal_reader: readonly=2, per-table SELECT on what
+  # /events, /audit and /notifications read) and the Secret below, with keys `username` and
+  # `password`. Both env vars come from that Secret, so the chart never names the user and the
+  # password never sits in values.
+  #
+  # REQUIRED, not optional: until 0.1.25 this pointed at a Secret `clickhouse-credentials` that
+  # nothing created, with optional: true, so sse-proxy connected as `default` with an EMPTY
+  # password and only worked because `default` accepted any. A missing Secret now stops the pod
+  # (CreateContainerConfigError) instead of falling back to the most privileged user.
+  credentialsSecret:
+    name: clickhouse-sse-proxy-credentials
+    userKey: username
+    passwordKey: password
 
 listenAddr: ":8080"
 

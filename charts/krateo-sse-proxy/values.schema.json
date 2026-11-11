@@ -105,21 +105,27 @@
         "url": {
           "type": "string"
         },
-        "user": {
-          "type": "string"
-        },
-        "passwordSecret": {
+        "credentialsSecret": {
           "type": "object",
           "additionalProperties": false,
+          "description": "Secret holding sse-proxy's own ClickHouse user (krateo-observability >= 0.1.42 creates clickhouse-sse-proxy-credentials). Required: a missing Secret stops the pod rather than falling back to `default`.",
+          "required": [
+            "name",
+            "userKey",
+            "passwordKey"
+          ],
           "properties": {
             "name": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1
             },
-            "key": {
-              "type": "string"
+            "userKey": {
+              "type": "string",
+              "minLength": 1
             },
-            "optional": {
-              "type": "boolean"
+            "passwordKey": {
+              "type": "string",
+              "minLength": 1
             }
           }
         }
@@ -153,7 +159,7 @@
         },
         "endpoint": {
           "type": "string",
-          "description": "OTEL_EXPORTER_OTLP_ENDPOINT. Empty resolves to http://$(HOST_IP):4318 \u2014 the collector on this pod's own node, via a HOST_IP env projected from status.hostIP. The previous default used the collector Service's DNS name, which is HEADLESS and therefore resolves to every collector pod, so it was not node-local despite the comment that said it was. Set this only for a collector that is not on the pod's node. There is no `protocol` key: telemetry.go builds the HTTP exporters directly and they ignore OTEL_EXPORTER_OTLP_PROTOCOL."
+          "description": "OTEL_EXPORTER_OTLP_ENDPOINT. Empty resolves to http://$(HOST_IP):4318 — the collector on this pod's own node, via a HOST_IP env projected from status.hostIP. The previous default used the collector Service's DNS name, which is HEADLESS and therefore resolves to every collector pod, so it was not node-local despite the comment that said it was. Set this only for a collector that is not on the pod's node. There is no `protocol` key: telemetry.go builds the HTTP exporters directly and they ignore OTEL_EXPORTER_OTLP_PROTOCOL."
         }
       }
     },

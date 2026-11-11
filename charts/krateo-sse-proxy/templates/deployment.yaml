@@ -37,14 +37,17 @@ spec:
           env:
             - name: CLICKHOUSE_URL
               value: {{ .Values.clickhouse.url | quote }}
+            {{- $cs := required "clickhouse.credentialsSecret.name is required: sse-proxy has its own ClickHouse user (krateo-observability >= 0.1.42 creates the Secret)" .Values.clickhouse.credentialsSecret.name }}
             - name: CLICKHOUSE_USER
-              value: {{ .Values.clickhouse.user | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $cs | quote }}
+                  key: {{ .Values.clickhouse.credentialsSecret.userKey | quote }}
             - name: CLICKHOUSE_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.clickhouse.passwordSecret.name | quote }}
-                  key: {{ .Values.clickhouse.passwordSecret.key | quote }}
-                  optional: {{ .Values.clickhouse.passwordSecret.optional }}
+                  name: {{ $cs | quote }}
+                  key: {{ .Values.clickhouse.credentialsSecret.passwordKey | quote }}
             - name: LISTEN_ADDR
               value: {{ .Values.listenAddr | quote }}
             # authn base URL for RS256/JWKS token verification on /events and
