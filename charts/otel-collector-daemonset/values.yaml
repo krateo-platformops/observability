@@ -514,6 +514,15 @@ opentelemetry-collector:
                 set(attributes["krateo.gateway_audit.class"], "excluded")
                 where attributes["krateo.gateway_audit.class"] == "projected" and attributes["protocol"] == "llm"
                 and attributes["http.method"] == "GET"
+              # LAST: every other gateway access-log record, of any protocol (plain `http`: the kagent
+              # dashboard's REST writes through ui-token-hop to kagent-controller, agent-card fetches,
+              # anything new). Not projected (snowplow's ruling: those writes are audited at kagent,
+              # kagent#31, and the gateway sees only a hop), but COUNTED, so no gateway record is ever
+              # left out without a trace.
+              - >-
+                set(attributes["krateo.gateway_audit.class"], "excluded")
+                where instrumentation_scope.name == "request" and attributes["gateway"] != nil
+                and attributes["krateo.gateway_audit.class"] == nil
       filter/gateway-audit-projected:
         error_mode: ignore
         logs:
@@ -754,8 +763,9 @@ opentelemetry-collector:
             port: "4317"
 
     connectors:
-      # The hops logs/gateway-audit does NOT project (transform/gateway-audit-classify's explicit
-      # exclude list), counted per protocol and method so "not projected" is measurable, and an
+      # The gateway records logs/gateway-audit does NOT project (transform/gateway-audit-classify's
+      # explicit exclude list, and every non-candidate protocol), counted per protocol, route and
+      # method so "not projected" is measurable, and an
       # acting method that lands on the exclude list by mistake shows up as a count, not as silence.
       # Lands as krateo.gateway_audit.excluded in otel_metrics_sum through metrics/gateway-audit-excluded.
       count/gateway-audit-excluded:
@@ -764,6 +774,8 @@ opentelemetry-collector:
             description: Gateway access-log records not projected into krateo_audit, by protocol and method.
             attributes:
               - key: protocol
+                default_value: ""
+              - key: route
                 default_value: ""
               - key: mcp.method.name
                 default_value: ""

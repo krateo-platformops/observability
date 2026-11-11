@@ -147,7 +147,12 @@ type: application
 # record is still written and marks what it lacks. Volume on krateo-057: ~2,260 acting hops a week,
 # ~118K rows a year, ~16 MB a year at krateo_audit's measured 140 B/row (365-day TTL), against
 # 8.3 GiB free; 1 GiB a year would take ~60x today's agent traffic. tests/gateway-audit-docker.py.
-version: 0.1.27
+# 0.1.28: gateway-audit COUNTS every gateway record it does not project, not only the explicit
+# exclude list. The kagent dashboard's REST writes cross the gateway as protocol `http` on the
+# kagent-controller route and were neither projected nor counted. They stay unprojected (audited at
+# kagent, kagent#31, snowplow's ruling) but now land in krateo.gateway_audit.excluded, which also
+# gains a `route` attribute. No record changes in krateo_audit or otel_logs.
+version: 0.1.28
 appVersion: "0.158.0"
 dependencies:
   - name: opentelemetry-collector
