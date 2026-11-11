@@ -1,0 +1,43 @@
+# krateo-observability's ClickHouse server and Keeper must be pinned by an exact version tag.
+# ClickHouse operator v0.0.7 defaults an empty `containerTemplate.image.tag` to `latest` and then
+# prefers the tag over `hash`, so a hash-only pin runs `latest` (0.1.43/0.1.44 did, 2026-11-11).
+# The test renders the chart and applies the operator's rule to both CRs.
+#
+# A separate workflow, like check-tailsampling: lint.yaml is the org-wide canonical chart lint.
+
+name: check-clickhouse-image-pin
+
+on:
+  pull_request:
+    paths:
+      - "charts/krateo-observability/**"
+      - "tests/clickhouse-image-pin.py"
+      - ".github/workflows/check-clickhouse-image-pin.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "charts/krateo-observability/**"
+      - "tests/clickhouse-image-pin.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Add the dependency repository
+        run: helm repo add clickstack https://clickhouse.github.io/ClickStack-helm-charts
+      - name: Render both CRs and resolve their images the way the operator does
+        run: python3 tests/clickhouse-image-pin.py .

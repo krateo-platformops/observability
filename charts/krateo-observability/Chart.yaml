@@ -164,7 +164,15 @@ type: application
 # CONTAINS 0.1.43's ClickHouse digest pin, which was held for the Thursday node-pool recreate.
 # Rolling this version therefore ALSO ROLLS ClickHouse ONCE (the pin changes its pod spec), when this
 # rolls and not on Thursday. Schedule it with that in mind.
-version: 0.1.44
+# 0.1.45: ClickHouse AND Keeper pinned by an exact version TAG, 26.10.3.7 (Diego, 2026-11-11). 0.1.43's
+# hash-only pin did not work: operator v0.0.7 defaults an empty tag to `latest` before it prefers tag
+# over hash, so the 0.1.44 roll on 057 (17:13Z) ran clickhouse-server:latest = 26.10.3.7, an unplanned
+# move from 26.8.36.3. 057 was healthy on it (0 failed queries, 15 users, ingestion), and the pin keeps
+# exactly that build. Keeper had floated on `latest` since install (26.10.3.7). Same binaries, so it
+# restarts ClickHouse and Keeper once each with no version change. tests/clickhouse-image-pin.py
+# applies the operator's defaulting to the rendered CRs and fails on an empty or inexact tag. The repo's
+# ClickHouse test images move to 26.10.3.7 to match production.
+version: 0.1.45
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack

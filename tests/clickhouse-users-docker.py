@@ -41,7 +41,7 @@ import urllib.request
 import yaml
 
 CHART = "charts/krateo-observability"
-IMAGE = "clickhouse/clickhouse-server:26.8.36.3"  # SELECT version() on krateo-057
+IMAGE = "clickhouse/clickhouse-server:26.10.3.7"  # SELECT version() on krateo-057 (since 2026-11-11)
 
 TELEMETRY6 = ["otel_logs", "otel_traces", "otel_metrics_gauge", "otel_metrics_sum",
               "otel_metrics_histogram", "krateo_audit"]
