@@ -172,7 +172,15 @@ type: application
 # restarts ClickHouse and Keeper once each with no version change. tests/clickhouse-image-pin.py
 # applies the operator's defaulting to the rendered CRs and fails on an empty or inexact tag. The repo's
 # ClickHouse test images move to 26.10.3.7 to match production.
-version: 0.1.45
+# 0.1.46: upstream's dead MongoDB default is emptied: hyperdx.secrets.MONGODB_PASSWORD: "", so
+# krateo-clickstack-mongodb-password's password and clickstack-secret's MONGODB_PASSWORD are empty.
+# Nothing has read either since 0.1.44 moved the MongoDB user and HyperDX onto
+# mongodb-hyperdx-credentials. Safe only where 0.1.44 has run (MCK watches the Secret the CR
+# references, and Helm updates Secrets before the CR), so an UPGRADE on a cluster without
+# mongodb-hyperdx-credentials/uri is refused: roll 0.1.44 or 0.1.45 first. The guard reads that
+# Secret, not the MongoDBCommunity: the composition controller may get Secrets but not
+# MongoDBCommunity objects (installer, 2026-11-11). No restart: no pod reads either Secret.
+version: 0.1.46
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack
