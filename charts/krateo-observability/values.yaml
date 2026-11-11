@@ -1034,6 +1034,24 @@ clickstack:
     ingress:
       enabled: false
 
+    # HyperDX's MongoDB credential lives in ONE Secret, mongodb-hyperdx-credentials, which
+    # templates/mongodb-hyperdx-credentials.yaml generates once and keeps (0.1.44). Upstream rendered
+    # the full URI, with its public default password, into this ConfigMap in plain text, and the same
+    # password into clickstack-secret and the MongoDB user's password Secret.
+    #
+    # MONGO_URI: null deletes upstream's key, so clickstack-config holds no credential at all. HyperDX
+    # gets MONGO_URI from the Secret through deployment.env below; env wins over envFrom, but nothing
+    # in the ConfigMap is left to win over. The template refuses to render if this key comes back.
+    config:
+      MONGO_URI: null
+    # MONGODB_PASSWORD only fed upstream's MONGO_URI and templates/mongodb/password-secret.yaml, and
+    # neither is used now. Empty, not null: password-secret.yaml renders this value unconditionally
+    # while mongodb is enabled, so a null would put a YAML null in that Secret's stringData. Its
+    # Secret (krateo-clickstack-mongodb-password) still renders, with an empty password, and nothing
+    # references it: the MongoDB user's passwordSecretRef names mongodb-hyperdx-credentials.
+    secrets:
+      MONGODB_PASSWORD: ""
+
     # The HyperDX app flapped 15 times on krateo-057 (2026-10-11), every one a SIGKILL after a
     # failed liveness probe. The decisive evidence is that the PREVIOUS container's log held only
     # the OpenTelemetry startup banner and nothing after it: it was being killed DURING BOOT, not
@@ -1096,6 +1114,68 @@ clickstack:
           value: traceidratio
         - name: OTEL_TRACES_SAMPLER_ARG
           value: "0.05"
+        # MongoDB, from the generated Secret (see hyperdx.config above). The ConfigMap no longer
+        # carries MONGO_URI. The template refuses to render without this entry: a componentValues
+        # override of env replaces the whole list, so repeat it there.
+        - name: MONGO_URI
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-hyperdx-credentials
+              key: uri
+      # The pod restart trigger for the MongoDB credential. Upstream templates podAnnotations with
+      # toYaml, not tpl, so a checksum of the generated Secret cannot be put here; this number is the
+      # equivalent. templates/mongodb-hyperdx-credentials.yaml keeps the Secret's password only while
+      # the Secret was made for this same generation. To rotate, raise it by one: that one upgrade
+      # generates a new password (the MongoDB operator re-runs SCRAM setup for the user) and rolls
+      # HyperDX, whose new pod reads the new URI. Do not rotate by deleting the Secret: a password made
+      # that way reaches MongoDB but not the running HyperDX pod.
+      podAnnotations:
+        krateo.io/mongodb-credential-generation: "1"
+      # HyperDX 2.35.0 starts its HTTP server, then connects to MongoDB once (packages/api/src/server.ts).
+      # If that connect is refused, it logs "Server start failed" and keeps running, /health still
+      # answers 200 and mongoose does not retry an initial connect: a Ready pod with no database. The
+      # upstream init container (wait-for-mongodb) only waits for the TCP port, which is open long
+      # before a new password is in force. So this one waits until MongoDB accepts the URI itself, with
+      # the same driver the app uses (/app/node_modules/mongodb in the HyperDX image, so no extra image
+      # pull). On a credential change the old pod keeps serving until the new one passes this. The image
+      # must be the app container's image: the template refuses to render otherwise.
+      initContainers:
+        - name: wait-for-mongodb-auth
+          image: docker.hyperdx.io/hyperdx/hyperdx:2.35.0
+          imagePullPolicy: IfNotPresent
+          workingDir: /app
+          command:
+            - node
+            - -e
+            - |
+              const { MongoClient } = require('mongodb');
+              (async () => {
+                for (;;) {
+                  const client = new MongoClient(process.env.MONGO_URI, { serverSelectionTimeoutMS: 5000 });
+                  try {
+                    await client.connect();
+                    await client.db().command({ ping: 1 });
+                    console.log('MongoDB accepts the hyperdx credentials');
+                    await client.close();
+                    return;
+                  } catch (err) {
+                    // The error's name only: never the URI, which holds the password.
+                    console.log('waiting for MongoDB to accept the hyperdx credentials: ' + (err.codeName || err.name));
+                    await client.close().catch(() => {});
+                  }
+                  await new Promise((resolve) => setTimeout(resolve, 2000));
+                }
+              })();
+          env:
+            - name: MONGO_URI
+              valueFrom:
+                secretKeyRef:
+                  name: mongodb-hyperdx-credentials
+                  key: uri
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
 
   mongodb:
     enabled: true
@@ -1111,6 +1191,24 @@ clickstack:
           persistentVolumeClaimRetentionPolicy:
             whenDeleted: Delete
             whenScaled: Retain
+      # Upstream's one user, repeated whole because a list override replaces the list. The only
+      # change is passwordSecretRef: the generated Secret, key `password` (MCK's default key, named
+      # explicitly). The operator watches that Secret: when its password changes it computes new
+      # SCRAM-SHA-1/256 credentials, stores them in the scram Secret below and pushes the user to the
+      # automation agent, which updates it in place without restarting mongod. The template refuses
+      # to render if this user stops pointing at the Secret.
+      users:
+        - name: hyperdx
+          db: hyperdx
+          passwordSecretRef:
+            name: mongodb-hyperdx-credentials
+            key: password
+          roles:
+            - name: dbOwner
+              db: hyperdx
+            - name: clusterMonitor
+              db: admin
+          scramCredentialsSecretName: '{{ include "clickstack.mongodb.fullname" . }}-scram'
 # NOTE (#93): the ClickHouse/Keeper orphaned-PVC reaper is NOT a chart hook — a composition-chart
 # post-delete hook doesn't run reliably (cdc uninstall) and would race the operator's async STS
 # teardown. It lives in the installer's ordered-teardown pre-delete path instead (installer >= 0.2.191).

@@ -147,7 +147,20 @@ type: application
 # (26.8.7.19 -> 26.8.36.3) and left the operator's VersionInSync=False. Same binary, but the pod
 # spec changes, so this ROLLS ClickHouse ONCE. It rides the 057 node-pool recreate (Thu 12 Nov
 # 07:00Z, Diego 2026-11-11) rather than adding a restart of its own.
-version: 0.1.43
+# 0.1.44: HyperDX's MongoDB credential moves to a generated Secret and is ROTATED. It was upstream's
+# public default, and the whole URI sat in plain text in ConfigMap clickstack-config. Now the chart
+# generates mongodb-hyperdx-credentials once (lookup-kept; keys username, password, uri), the
+# MongoDBCommunity user's passwordSecretRef names it, and HyperDX gets MONGO_URI from it through
+# secretKeyRef. clickstack-config has no MONGO_URI, and upstream's password Secret is empty and
+# unused. The first upgrade gives MongoDB the new password (the operator re-runs SCRAM setup in
+# place, no mongod restart) and ROLLS HyperDX; a new init container holds the new pod until MongoDB
+# accepts the new URI, while the old pod keeps serving. Rotate later by raising
+# krateo.io/mongodb-credential-generation. The render fails if an override undoes the wiring, or if
+# hyperdx.tasks is enabled (the CronJob has no env hook). Decision: Diego 2026-11-11.
+# CONTAINS 0.1.43's ClickHouse digest pin, which was held for the Thursday node-pool recreate.
+# Rolling this version therefore ALSO ROLLS ClickHouse ONCE (the pin changes its pod spec), when this
+# rolls and not on Thursday. Schedule it with that in mind.
+version: 0.1.44
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack
