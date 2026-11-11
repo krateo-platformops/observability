@@ -148,7 +148,7 @@ def build_cases(base):
         elif proto == "llm":
             want = "excluded" if hm == "GET" else "projected"
         else:
-            want = "ignored"
+            want = "excluded"  # any other protocol: counted, never dropped without a trace
         add(f"real-{i}", r, want)
 
     tc = find(lambda a: a.get("mcp.method.name") == "tools/call" and a.get("principal") == "human" and "act" not in a)
@@ -176,6 +176,11 @@ def build_cases(base):
     # real fixture record has endpoint == backend_host, so without this a swapped precedence passes.
     lr = add("endpoint-differs", a2a, "projected"); set_attr(lr, "endpoint", "10.40.4.22:8083")
     set_attr(lr, "user_agent", "facts-test/endpoint-differs")
+    # The kagent dashboard's REST write, through ui-token-hop to kagent-controller: protocol http on
+    # the catch-all A2A route, a POST. Counted with its route, never projected (audited at kagent).
+    lr = add("dashboard-rest-write", a2a, "excluded"); set_attr(lr, "protocol", "http"); set_attr(lr, "a2a.method", None)
+    set_attr(lr, "route", "krateo-system/agentgateway-policies-a2a"); set_attr(lr, "http.method", "POST")
+    set_attr(lr, "user_agent", "facts-test/dashboard-rest")
     # A refused-before-dial hop: no endpoint, so server.address is the route's configured target.
     lr = add("refused-before-dial", a2a, "projected"); set_attr(lr, "endpoint", None)
     set_attr(lr, "reason", "JwtAuth"); set_attr(lr, "http.status", 401)
@@ -393,8 +398,13 @@ def verify(work, cases, binary, logs):
                             counts[k] = counts.get(k, 0) + int(dp.get("asInt", 0))
     excluded = [c for c in cases if c[2] == "excluded"]
     check(sum(counts.values()) == len(excluded), f"every excluded hop is counted ({sum(counts.values())} counted, {len(excluded)} excluded)")
-    check(sum(v for k, v in counts.items() if dict(k).get("protocol") == "http") == 2,
+    check(sum(v for k, v in counts.items() if dict(k).get("protocol") == "http" and not dict(k).get("route")) == 2,
           "the real no-route records (protocol http, the gateway's 404) are excluded AND counted")
+    check(not recs(lambda a: a.get("user_agent.original") == "facts-test/dashboard-rest"),
+          "the dashboard's REST write (protocol http) is NOT projected")
+    dash = sum(v for k, v in counts.items() if dict(k).get("protocol") == "http"
+               and dict(k).get("route") == "krateo-system/agentgateway-policies-a2a" and dict(k).get("http.method") == "POST")
+    check(dash == 1, f"the dashboard's REST write is COUNTED with its protocol, route and method ({dash})")
     nm = recs(lambda a: a.get("krateo.action") == "gateway.mcp" and "krateo.audit.gateway.mcp_tool" not in a
               and a.get("http.request.method") == "POST")
     check(len(nm) >= 1, "the real MCP POST with no parsable method is PROJECTED")
