@@ -204,6 +204,21 @@ opentelemetry-collector:
               error_mode: ignore
               span:
                 - 'IsMatch(span.name, "^incident\\.")'
+          # An alert-provider pass that ACTED (Diego, 2026-11-11, provider-runtime#74): provider-runtime
+          # sets provider_runtime.acted=true on the `reconcile` root of any pass that starts an act
+          # step (create, update, delete, or a declared StartAct), before the root ends. Acting passes
+          # are rare (a handful per release apply), and they are the ones whose act span joins the
+          # upstream trace: keeping their root at 100% means every act's link resolves, where the 5%
+          # below would drop most of them. Scoped to alert-provider, as decided. The constant is
+          # tracecontext.AttrActed in plumbing; until a release emits it, this rule matches nothing.
+          - name: alert-provider-acted
+            type: ottl_condition
+            ottl_condition:
+              error_mode: ignore
+              span:
+                - >-
+                  resource.attributes["service.name"] == "krateo-alert-provider" and span.name == "reconcile"
+                  and span.attributes["provider_runtime.acted"] == true
           # An audited write (AUDIT-9, installer#415; Diego): the shared krateo-platformops/audit library
           # (v0.4.0, used by snowplow and rest-dynamic-controller) sets krateo.audit.recorded=true on the
           # request's Server span once the audit record is handed to the log pipeline. Keeping those
