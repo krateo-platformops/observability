@@ -142,7 +142,12 @@ type: application
 # unused until `default` is closed later as a hot reload. Grants and profiles as tested on kind
 # (S0, 2026-11-10). The new containerTemplate.env ROLLS ClickHouse ONCE. NO client is switched, and
 # default, app and otelcollector are unchanged. Decision: Diego 2026-11-10.
-version: 0.1.42
+# 0.1.43: PIN the ClickHouse server image by digest (multi-arch index of 26.8.36.3-alpine, the build
+# 057 runs since S1). The floating tag `26.8-alpine` made the S1 restart an unplanned minor upgrade
+# (26.8.7.19 -> 26.8.36.3) and left the operator's VersionInSync=False. Same binary, but the pod
+# spec changes, so this ROLLS ClickHouse ONCE. It rides the 057 node-pool recreate (Thu 12 Nov
+# 07:00Z, Diego 2026-11-11) rather than adding a restart of its own.
+version: 0.1.43
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack

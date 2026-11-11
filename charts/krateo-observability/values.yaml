@@ -499,8 +499,16 @@ clickstack:
           # upgrade (25.7->26.8) that ROLLS the StatefulSet — it must be bench-validated
           # and must not ride an unrelated installer reconcile (Keeper lockstep,
           # versionProbe Job, http_handlers/TTL config re-check on 26.8).
+          # PINNED BY DIGEST (0.1.43). The tag `26.8-alpine` floats: every pod restart pulls the
+          # newest 26.8 build, so the S1 lockdown restart on 2026-11-11 silently upgraded 057 from
+          # 26.8.7.19 to 26.8.36.3. The operator (v0.0.7 ContainerImage.String) uses `tag` if it is
+          # set and `hash` only otherwise, so the upstream tag is nulled to make the hash win.
+          # The digest is the multi-arch index of clickhouse/clickhouse-server:26.8.36.3-alpine
+          # (== 26.8-alpine on 2026-10-26), the build 057 runs now, and the digest krateo-slo-rollup
+          # pins for its client. To upgrade, change the digest and say which version it is here.
           image:
-            tag: "26.8-alpine"
+            tag: null
+            hash: "sha256:f5443f9ffa48f0154cdd50cab39fed732201762574a27f04f1f564bbba81832d"
           # Password hashes of the chart's ClickHouse users (settings.extraUsersConfig below). Each
           # user's password_sha256_hex is read from one of these variables with @from_env, so the hash
           # comes from a Secret and never sits in values, the ClickHouseCluster CR or the operator's
