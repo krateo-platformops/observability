@@ -110,6 +110,29 @@ top-level `global` propagates into clickstack and all its subcharts
   `containerTemplate.env` (`@from_env`), so overriding `containerTemplate.env` through
   componentValues must repeat the chart's two entries, or the render fails. Grants stay ONE
   statement per user (see `clickhouse-disk-full.md`).
+- **Lockdown users** (`0.1.42`): one user per remaining client of `default`, `app` and
+  `otelcollector`, added beside the portal readers, each with a profile, ONE per-table GRANT
+  statement, a generated Secret `clickhouse-<user>-credentials` (keys `username`, `password`,
+  `password_sha256_hex`) and its `containerTemplate.env` entry. No client uses them yet; each moves
+  in its own change.
+
+  | User | Profile | Grants |
+  |---|---|---|
+  | `analyst` (ad-hoc queries) | `analyst`: readonly=2, 30 s, 4 threads, 4 GiB, 4 at a time | SELECT on the seven `otel_*` tables and `krateo_audit` |
+  | `mcp_reader` (clickhouse-mcp-server) | `mcp_reader`: readonly=0 (the client sends readonly=1 per query), 30 s, 2 threads, 2 GiB, 4 at a time | SELECT on `otel_logs`, `otel_traces`, `otel_metrics_gauge/sum/histogram`, `krateo_audit` |
+  | `nightly_reader` (nightly-review) | `batch_reader`: readonly=2, 60 s, 2 threads, 2 at a time | SELECT on `otel_logs` |
+  | `audit_sealer` (audit-worm seal) | `default` | SELECT on `krateo_audit`; SELECT, INSERT, CREATE TABLE on `krateo_audit_worm` and `krateo_audit_seal`; CREATE VIEW on `krateo_audit_worm_mv` |
+  | `audit_verifier` (audit-worm verify) | `audit_readonly`: readonly=2 | SELECT on the three audit tables; SHOW TABLES on `krateo_audit_worm_mv` |
+  | `otel_writer` (the collectors) | `default` | SELECT, INSERT, CREATE TABLE on the eight `otel_*` tables (with `otel_traces_trace_id_ts`) and `krateo_audit`; CREATE VIEW on `otel_traces_trace_id_ts_mv`. Nothing on `krateo_audit_worm`/`_seal` |
+  | `hyperdx` (HyperDX UI and alerts) | `hyperdx`: readonly=2, 60 s | SELECT on the six tables `mcp_reader` reads, and on `system.data_skipping_indices` |
+  | `slo_rollup` (krateo-slo-rollup, off by default) | `default` | SELECT on `otel_metrics_sum/histogram`; SELECT, INSERT, CREATE TABLE, ALTER MODIFY TTL on `krateo_slo_daily`; CREATE VIEW on `krateo_slo_daily_mv` |
+
+  `otel_writer` needs SELECT on `otel_traces` and `krateo_audit`: the two materialized views have no
+  definer and push with the inserter's rights, so without it the source row commits and the view's
+  copy is refused. `clickhouse-default-password` and `CLICKHOUSE_USER_DEFAULT_SHA256` are shipped
+  unused, so closing `default` later is a hot reload rather than a ClickHouse restart.
+  `tests/clickhouse-users-docker.py` (workflow `check-clickhouse-users`) checks the rendered config
+  and loads it into ClickHouse 26.8.36.3.
 - **The `/events` HTTP handler** lives under
   `clickstack.clickhouse.cluster.spec.settings.extraConfig.http_handlers` — NOT a ConfigMap.
   The operator merges `settings.extraConfig` into `/etc/clickhouse-server/config.d/`. The

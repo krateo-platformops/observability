@@ -501,14 +501,15 @@ clickstack:
           # versionProbe Job, http_handlers/TTL config re-check on 26.8).
           image:
             tag: "26.8-alpine"
-          # Password hashes of the portal reader users (settings.extraUsersConfig below). Each user's
-          # password_sha256_hex is read from one of these variables with @from_env, so the hash comes
-          # from a Secret and never sits in values, the ClickHouseCluster CR or the operator's
-          # ConfigMap. templates/clickhouse-reader-credentials.yaml creates both Secrets and refuses
-          # to render if either entry is missing here: a componentValues override of this list
+          # Password hashes of the chart's ClickHouse users (settings.extraUsersConfig below). Each
+          # user's password_sha256_hex is read from one of these variables with @from_env, so the hash
+          # comes from a Secret and never sits in values, the ClickHouseCluster CR or the operator's
+          # ConfigMap. templates/clickhouse-user-credentials.yaml creates every Secret named here and
+          # refuses to render if any entry is missing: a componentValues override of this list
           # replaces it whole, and without the variable the user has no valid password.
-          # The variables are read when the pod starts. Changing a Secret's password needs a restart
-          # of the ClickHouse pod before the new one works.
+          # The variables are read when the pod starts, so adding one ROLLS the ClickHouse pod, and
+          # changing a Secret's password needs a restart before the new one works. That is why every
+          # user of the lockdown (and default's future hash) is here at once: one restart (0.1.42).
           env:
             - name: CLICKHOUSE_USER_SSE_PROXY_SHA256
               valueFrom:
@@ -519,6 +520,55 @@ clickstack:
               valueFrom:
                 secretKeyRef:
                   name: clickhouse-snowplow-reader-credentials
+                  key: password_sha256_hex
+            - name: CLICKHOUSE_USER_ANALYST_SHA256
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-analyst-credentials
+                  key: password_sha256_hex
+            - name: CLICKHOUSE_USER_MCP_READER_SHA256
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-mcp-reader-credentials
+                  key: password_sha256_hex
+            - name: CLICKHOUSE_USER_NIGHTLY_READER_SHA256
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-nightly-reader-credentials
+                  key: password_sha256_hex
+            - name: CLICKHOUSE_USER_AUDIT_SEALER_SHA256
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-audit-sealer-credentials
+                  key: password_sha256_hex
+            - name: CLICKHOUSE_USER_AUDIT_VERIFIER_SHA256
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-audit-verifier-credentials
+                  key: password_sha256_hex
+            - name: CLICKHOUSE_USER_OTEL_WRITER_SHA256
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-otel-writer-credentials
+                  key: password_sha256_hex
+            - name: CLICKHOUSE_USER_HYPERDX_SHA256
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-hyperdx-credentials
+                  key: password_sha256_hex
+            - name: CLICKHOUSE_USER_SLO_ROLLUP_SHA256
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-slo-rollup-credentials
+                  key: password_sha256_hex
+            # `default`'s future hash. NOTHING reads it yet: `default` keeps the operator's
+            # no_password until the lockdown's last step, which then only edits users.default in
+            # extraUsersConfig (a hot reload, no restart) to read this variable. Shipping the
+            # variable now is what saves that step a restart.
+            - name: CLICKHOUSE_USER_DEFAULT_SHA256
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-default-password
                   key: password_sha256_hex
           resources:
             limits:
@@ -599,6 +649,13 @@ clickstack:
           # them is a separate, coordinated change (sse-proxy's CLICKHOUSE_USER/PASSWORD, and the
           # portal's clickhouse-endpoint Secret for snowplow).
           #
+          # LOCKDOWN USERS (0.1.42). One user per remaining client of `default`, `app` and
+          # `otelcollector`: analyst, mcp_reader, nightly_reader, audit_sealer, audit_verifier,
+          # otel_writer, hyperdx, slo_rollup. Same pattern: a chart-generated Secret, the hash via
+          # @from_env, one per-table GRANT statement. 0.1.42 only ADDS them; each client moves onto
+          # its user in its own later change. Grants and profiles as tested on kind against 057's
+          # DDL with ClickHouse 26.8.36.3 and operator 0.0.7 (2026-11-10).
+          #
           # Helm deep-merges this map with upstream clickstack's (app, otelcollector) and with any
           # componentValues users (chops). Keys are ClickHouse users.d YAML, written by the operator
           # to users.d/99-extra-users-config.yaml.
@@ -641,6 +698,74 @@ clickstack:
                     max: 2
                   max_concurrent_queries_for_user:
                     const: true
+              # analyst: people and agent sessions running ad-hoc queries (port-forward scripts,
+              # in-cluster curl, `kubectl exec ... clickhouse-client --user analyst`). readonly=2 so
+              # per-query settings (log_comment, max_block_size, ...) are accepted; a client that
+              # passes `--readonly=1` is refused (164) and has to drop the flag. 30 s, 4 threads,
+              # 4 GiB and 4 queries at a time, none raisable.
+              analyst:
+                readonly: 2
+                cancel_http_readonly_queries_on_client_close: 1
+                max_execution_time: 30
+                max_threads: 4
+                max_concurrent_queries_for_user: 4
+                max_memory_usage: 4294967296
+                constraints:
+                  max_execution_time:
+                    max: 30
+                  max_threads:
+                    max: 4
+                  max_concurrent_queries_for_user:
+                    const: true
+                  max_memory_usage:
+                    max: 4294967296
+              # mcp_reader: clickhouse-mcp-server (mcp-clickhouse 0.5.0) sends readonly=1 with EVERY
+              # query, and a profile with readonly 1 or 2 refuses that (164, measured on kind). So
+              # this profile is readonly=0 and the per-query readonly=1 is what applies; the grant
+              # (SELECT only) is the write boundary either way. The caps can't be raised per query.
+              mcp_reader:
+                readonly: 0
+                max_execution_time: 30
+                max_threads: 2
+                max_concurrent_queries_for_user: 4
+                max_memory_usage: 2147483648
+                constraints:
+                  max_execution_time:
+                    max: 30
+                  max_threads:
+                    max: 2
+                  max_concurrent_queries_for_user:
+                    const: true
+                  max_memory_usage:
+                    max: 2147483648
+              # batch_reader: nightly-review's 02:00 run (max 1.6 s seen); it sets max_result_rows
+              # and result_overflow_mode per query, which readonly=2 accepts.
+              batch_reader:
+                readonly: 2
+                cancel_http_readonly_queries_on_client_close: 1
+                max_execution_time: 60
+                max_threads: 2
+                max_concurrent_queries_for_user: 2
+                constraints:
+                  max_execution_time:
+                    max: 60
+                  max_threads:
+                    max: 2
+                  max_concurrent_queries_for_user:
+                    const: true
+              # hyperdx: the HyperDX UI and its alert checks (alert p99 0.5 s, max 4.1 s). HyperDX
+              # sends its own settings per query, which readonly=2 accepts.
+              hyperdx:
+                readonly: 2
+                cancel_http_readonly_queries_on_client_close: 1
+                max_execution_time: 60
+                constraints:
+                  max_execution_time:
+                    max: 60
+              # audit_readonly: the krateo-audit-worm verify Job. readonly=2, not 1: its
+              # `clickhouse-client --queries-file` sets log_comment, which readonly=1 refuses (164).
+              audit_readonly:
+                readonly: 2
             users:
               # Grants: ONE statement per user. users.d YAML applies only the FIRST `grants` item
               # and drops the rest without a word (docs/clickhouse-disk-full.md). Per table, never
@@ -666,6 +791,114 @@ clickstack:
                       GRANT SELECT ON default.otel_logs, SELECT ON default.otel_traces,
                       SELECT ON default.otel_metrics_gauge, SELECT ON default.otel_metrics_sum,
                       SELECT ON default.otel_metrics_histogram, SELECT ON default.krateo_audit
+              # analyst: every telemetry table and krateo_audit, nothing else. No sealing tables and
+              # no system.query_log (it holds every user's query text) unless Diego adds them.
+              # system.tables and system.columns are readable without a grant, filtered to the
+              # tables the user can see.
+              analyst:
+                password_sha256_hex:
+                  "@from_env": CLICKHOUSE_USER_ANALYST_SHA256
+                profile: analyst
+                grants:
+                  - query: >-
+                      GRANT SELECT ON default.otel_logs, SELECT ON default.otel_traces,
+                      SELECT ON default.otel_metrics_gauge, SELECT ON default.otel_metrics_sum,
+                      SELECT ON default.otel_metrics_histogram,
+                      SELECT ON default.otel_metrics_exponential_histogram,
+                      SELECT ON default.otel_metrics_summary, SELECT ON default.krateo_audit
+              # mcp_reader: clickhouse-mcp-server's run_query for clickstack-agent and incident-agent.
+              mcp_reader:
+                password_sha256_hex:
+                  "@from_env": CLICKHOUSE_USER_MCP_READER_SHA256
+                profile: mcp_reader
+                grants:
+                  - query: >-
+                      GRANT SELECT ON default.otel_logs, SELECT ON default.otel_traces,
+                      SELECT ON default.otel_metrics_gauge, SELECT ON default.otel_metrics_sum,
+                      SELECT ON default.otel_metrics_histogram, SELECT ON default.krateo_audit
+              # nightly_reader: nightly-review reads otel_logs only (057 query_log, 3 days).
+              nightly_reader:
+                password_sha256_hex:
+                  "@from_env": CLICKHOUSE_USER_NIGHTLY_READER_SHA256
+                profile: batch_reader
+                grants:
+                  - query: "GRANT SELECT ON default.otel_logs"
+              # audit_sealer: the krateo-audit-worm seal CronJob. Every run executes schema.sql's
+              # CREATE ... IF NOT EXISTS, and CREATE MATERIALIZED VIEW IF NOT EXISTS checks SELECT and
+              # INSERT on its TO table (krateo_audit_worm) even when the view exists, so the sealer
+              # can write WORM rows; it can already write seals. NEVER ALTER, DELETE, DROP or TRUNCATE.
+              audit_sealer:
+                password_sha256_hex:
+                  "@from_env": CLICKHOUSE_USER_AUDIT_SEALER_SHA256
+                profile: default
+                grants:
+                  - query: >-
+                      GRANT SELECT ON default.krateo_audit,
+                      SELECT, INSERT, CREATE TABLE ON default.krateo_audit_worm,
+                      SELECT, INSERT, CREATE TABLE ON default.krateo_audit_seal,
+                      CREATE VIEW ON default.krateo_audit_worm_mv
+              # audit_verifier: the krateo-audit-worm verify CronJob. SHOW TABLES on the view: without
+              # it the view is invisible to the user and verify reports `unprotected`.
+              audit_verifier:
+                password_sha256_hex:
+                  "@from_env": CLICKHOUSE_USER_AUDIT_VERIFIER_SHA256
+                profile: audit_readonly
+                grants:
+                  - query: >-
+                      GRANT SELECT ON default.krateo_audit, SELECT ON default.krateo_audit_worm,
+                      SELECT ON default.krateo_audit_seal, SHOW TABLES ON default.krateo_audit_worm_mv
+              # otel_writer: the three collectors, in place of otelcollector. Per table:
+              # - INSERT, the rows;
+              # - CREATE TABLE, because CREATE TABLE IF NOT EXISTS on an existing table still checks it;
+              # - SELECT, because the two materialized views have no definer and push with the
+              #   INSERTER's rights: without SELECT on otel_traces / krateo_audit the source insert
+              #   commits and the view's copy is refused (497), a silent gap in the WORM trail.
+              # otel_traces_trace_id_ts needs SELECT and INSERT for tailsampling's
+              # CREATE MATERIALIZED VIEW IF NOT EXISTS. NO grant at all on krateo_audit_worm or
+              # krateo_audit_seal: the view feeds the WORM table without one, and with INSERT the
+              # collectors' credential could forge WORM rows.
+              otel_writer:
+                password_sha256_hex:
+                  "@from_env": CLICKHOUSE_USER_OTEL_WRITER_SHA256
+                profile: default
+                grants:
+                  - query: >-
+                      GRANT SELECT, INSERT, CREATE TABLE ON default.otel_logs,
+                      SELECT, INSERT, CREATE TABLE ON default.otel_traces,
+                      SELECT, INSERT, CREATE TABLE ON default.otel_traces_trace_id_ts,
+                      SELECT, INSERT, CREATE TABLE ON default.otel_metrics_gauge,
+                      SELECT, INSERT, CREATE TABLE ON default.otel_metrics_sum,
+                      SELECT, INSERT, CREATE TABLE ON default.otel_metrics_histogram,
+                      SELECT, INSERT, CREATE TABLE ON default.otel_metrics_exponential_histogram,
+                      SELECT, INSERT, CREATE TABLE ON default.otel_metrics_summary,
+                      SELECT, INSERT, CREATE TABLE ON default.krateo_audit,
+                      CREATE VIEW ON default.otel_traces_trace_id_ts_mv
+              # hyperdx: the HyperDX UI and alerts, in place of app. The one system table HyperDX
+              # needs a grant for is data_skipping_indices; system.tables, columns, settings,
+              # table_engines and one are readable without one.
+              hyperdx:
+                password_sha256_hex:
+                  "@from_env": CLICKHOUSE_USER_HYPERDX_SHA256
+                profile: hyperdx
+                grants:
+                  - query: >-
+                      GRANT SELECT ON default.otel_logs, SELECT ON default.otel_traces,
+                      SELECT ON default.otel_metrics_gauge, SELECT ON default.otel_metrics_sum,
+                      SELECT ON default.otel_metrics_histogram, SELECT ON default.krateo_audit,
+                      SELECT ON system.data_skipping_indices
+              # slo_rollup: krateo-slo-rollup, off by default. Here so enabling it later neither
+              # needs otelcollector nor restarts ClickHouse. (SHOW GRANTS names ALTER MODIFY TTL
+              # `ALTER TTL`.)
+              slo_rollup:
+                password_sha256_hex:
+                  "@from_env": CLICKHOUSE_USER_SLO_ROLLUP_SHA256
+                profile: default
+                grants:
+                  - query: >-
+                      GRANT SELECT ON default.otel_metrics_sum, SELECT ON default.otel_metrics_histogram,
+                      SELECT, INSERT, CREATE TABLE, ALTER MODIFY TTL ON default.krateo_slo_daily,
+                      CREATE VIEW ON default.krateo_slo_daily_mv
+              # `default`, `app` and `otelcollector` are NOT changed here (0.1.42 switches no client).
           extraConfig:
             # SERVER LOG FILES — the other half of the retention incident below.
             # That fix bounded the system.* log TABLES with a 3-day ttl, but the server's own

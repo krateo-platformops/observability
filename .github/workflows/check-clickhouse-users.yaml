@@ -1,0 +1,44 @@
+# krateo-observability's ClickHouse users: the rendered users.d config (one GRANT statement per user,
+# per-table grants, @from_env hashes, generated Secrets, no client switched), then that config loaded
+# into the ClickHouse version krateo-057 runs, checked with SHOW GRANTS, CHECK GRANT and getSetting.
+# users.d applies only the first `grants` item and drops the rest silently, so only the database
+# tells the truth.
+#
+# A separate workflow, like check-tailsampling: lint.yaml is the org-wide canonical chart lint.
+
+name: check-clickhouse-users
+
+on:
+  pull_request:
+    paths:
+      - "charts/krateo-observability/**"
+      - "tests/clickhouse-users-docker.py"
+      - ".github/workflows/check-clickhouse-users.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "charts/krateo-observability/**"
+      - "tests/clickhouse-users-docker.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  users:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Add the dependency repository
+        run: helm repo add clickstack https://clickhouse.github.io/ClickStack-helm-charts
+      - name: Render the users, then load them into ClickHouse 26.8.36.3
+        run: python3 tests/clickhouse-users-docker.py .

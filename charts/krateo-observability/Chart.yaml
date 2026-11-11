@@ -133,7 +133,16 @@ type: application
 # query cap 16 and 8, with constraints. One per-table SELECT grant statement each, never default.* or
 # system.*. The chart generates both credential Secrets and keeps them across upgrades. The new
 # containerTemplate.env ROLLS the ClickHouse StatefulSet once. Decision: Diego 2026-11-10.
-version: 0.1.41
+# 0.1.42: CONTAINS 0.1.41's users (sse_proxy, snowplow_reader; 0.1.41 was held, not rolled) and ADDS
+# the rest of the ClickHouse lockdown's users: analyst, mcp_reader, nightly_reader, audit_sealer,
+# audit_verifier, otel_writer, hyperdx, slo_rollup. Each has a chart-generated, lookup-kept Secret
+# (clickhouse-<user>-credentials: username, password, password_sha256_hex), its hash read with
+# @from_env, a profile and ONE per-table GRANT statement (never default.* or system.*; hyperdx's one
+# system table is data_skipping_indices). Also clickhouse-default-password and its env variable,
+# unused until `default` is closed later as a hot reload. Grants and profiles as tested on kind
+# (S0, 2026-11-10). The new containerTemplate.env ROLLS ClickHouse ONCE. NO client is switched, and
+# default, app and otelcollector are unchanged. Decision: Diego 2026-11-10.
+version: 0.1.42
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack
