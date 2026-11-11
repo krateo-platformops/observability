@@ -468,7 +468,8 @@ opentelemetry-collector:
       #                prompts/get, and LLM completions (POST);
       #   EXCLUDED   = an EXPLICIT list of hops that name no single target: MCP session plumbing
       #                (initialize, ping, notifications/*, */list, completion/complete,
-      #                logging/setLevel, and the method-less SSE GET / session DELETE), A2A
+      #                logging/setLevel, and the method-less SSE GET / session DELETE; a method-less
+      #                POST is projected as an unknown method), A2A
       #                requests with no a2a.method (agent-card fetches), LLM GETs (model listing),
       #                and a request that matched no route at all (no target exists).
       # Not a catch-all: an MCP method on neither list (a new one upstream) is PROJECTED, as an
@@ -479,20 +480,32 @@ opentelemetry-collector:
         log_statements:
           - context: log
             statements:
+              # FIRST, whatever its protocol: a request that matched NO route (the gateway's own 404;
+              # the real record is protocol `http`, no `route`) has no target at all. Excluded and
+              # counted before anything is derived, so its backend_host (the proxy's CEL cannot tell
+              # no-route from the catch-all) is never read.
+              - >-
+                set(attributes["krateo.gateway_audit.class"], "excluded")
+                where instrumentation_scope.name == "request" and attributes["gateway"] != nil
+                and (attributes["route"] == nil or attributes["route"] == "")
               - >-
                 set(attributes["krateo.gateway_audit.class"], "projected")
                 where instrumentation_scope.name == "request" and attributes["gateway"] != nil
+                and attributes["krateo.gateway_audit.class"] == nil
                 and attributes["protocol"] != nil and IsMatch(attributes["protocol"], "^(a2a|mcp|llm)$")
               - >-
                 set(attributes["krateo.gateway_audit.class"], "excluded")
                 where attributes["krateo.gateway_audit.class"] == "projected" and attributes["protocol"] == "mcp"
-                and (attributes["mcp.method.name"] == nil or IsMatch(attributes["mcp.method.name"],
-                "^(initialize|ping|notifications/.+|tools/list|resources/list|resources/templates/list|prompts/list|completion/complete|logging/setLevel)$"))
-              # A request that matched NO route (the gateway's own 404) has no target at all.
+                and attributes["mcp.method.name"] != nil and IsMatch(attributes["mcp.method.name"],
+                "^(initialize|ping|notifications/.+|tools/list|resources/list|resources/templates/list|prompts/list|completion/complete|logging/setLevel)$")
+              # An MCP request with no JSON-RPC method: the SSE stream GET and the session DELETE are
+              # transport, excluded. A POST whose method the proxy could not parse is NOT on this
+              # list: it is projected as an unknown method.
               - >-
                 set(attributes["krateo.gateway_audit.class"], "excluded")
-                where attributes["krateo.gateway_audit.class"] == "projected"
-                and (attributes["route"] == nil or attributes["route"] == "")
+                where attributes["krateo.gateway_audit.class"] == "projected" and attributes["protocol"] == "mcp"
+                and (attributes["mcp.method.name"] == nil or attributes["mcp.method.name"] == "")
+                and attributes["http.method"] != nil and IsMatch(attributes["http.method"], "^(GET|DELETE)$")
               - >-
                 set(attributes["krateo.gateway_audit.class"], "excluded")
                 where attributes["krateo.gateway_audit.class"] == "projected" and attributes["protocol"] == "a2a"
@@ -521,8 +534,9 @@ opentelemetry-collector:
       #   actor_class          `principal`, only one of human|agent|controller|service
       #   on_behalf_of.user.name / delegation   only on a delegated token (act present): the
       #                        subject, and the chain outermost first ending with the subject, each
-      #                        <class>:<sub> (class from act.principal / subject_principal; ":sub"
-      #                        only for a class the token itself does not carry)
+      #                        <class>:<sub> (class from act.principal / subject_principal, one of the
+      #                        four; ":sub" for a class the token does not carry or that is unknown;
+      #                        a link with an empty sub is never written)
       #   krateo.action        gateway.<protocol>
       #   http.request.method  the proxied method; _OTHER plus method_original if not semconv
       #   krateo.audit.verb    the lowercase method (non-Kubernetes target)
@@ -531,9 +545,9 @@ opentelemetry-collector:
       #                        failure = another gateway-side reason, or the backend answered >=400;
       #                        success otherwise. `reason` is empty when the upstream answered.
       #   http.response.status_code   only when the backend answered (no gateway reason)
-      #   server.address       the proxy's `endpoint` (the host:port it dialed), else `backend_host`
-      #                        (the matched route's CONFIGURED target, agentgateway-policies >= 0.2.28),
-      #                        so a hop refused before dialing still names what it would have reached
+      #   server.address       `backend_host`, the matched route's CONFIGURED target (agentgateway-
+      #                        policies >= 0.2.28), on every hop, so a refused hop names what it would
+      #                        have reached and one route names one target; else the dialed `endpoint`
       #   source_ips           x-forwarded-for entries, then the TCP peer (src.addr without port)
       #   user_agent.original  cut at 1024 bytes + "...TRUNCATED"; session.id <- baggage_session
       #   gateway.route / gateway.mcp_tool / asserted.agent_host   route / tool / agent
@@ -548,7 +562,7 @@ opentelemetry-collector:
             statements:
               - 'set(cache["act"], ParseJSON(attributes["act"])) where attributes["act"] != nil'
               # --- who
-              - 'set(attributes["user.name"], cache["act"]["sub"]) where cache["act"] != nil and cache["act"]["sub"] != nil'
+              - 'set(attributes["user.name"], cache["act"]["sub"]) where cache["act"] != nil and cache["act"]["sub"] != nil and cache["act"]["sub"] != ""'
               - 'set(attributes["user.name"], attributes["user"]) where cache["act"] == nil and attributes["user"] != nil and attributes["user"] != ""'
               - 'set(attributes["user.roles"], Split(attributes["team"], ",")) where attributes["team"] != nil and attributes["team"] != ""'
               - 'set(attributes["krateo.audit.actor_class"], attributes["principal"]) where attributes["principal"] != nil and IsMatch(attributes["principal"], "^(human|agent|controller|service)$")'
@@ -562,24 +576,24 @@ opentelemetry-collector:
               - 'set(cache["l6"], cache["l5"]["act"]) where cache["l5"] != nil and cache["l5"]["act"] != nil'
               - 'set(cache["l7"], cache["l6"]["act"]) where cache["l6"] != nil and cache["l6"]["act"] != nil'
               - 'set(cache["l8"], cache["l7"]["act"]) where cache["l7"] != nil and cache["l7"]["act"] != nil'
-              - 'append(cache["dl"], Concat([cache["l1"]["principal"], ":", cache["l1"]["sub"]], "")) where cache["l1"] != nil and cache["l1"]["principal"] != nil'
-              - 'append(cache["dl"], Concat([":", cache["l1"]["sub"]], "")) where cache["l1"] != nil and cache["l1"]["principal"] == nil'
-              - 'append(cache["dl"], Concat([cache["l2"]["principal"], ":", cache["l2"]["sub"]], "")) where cache["l2"] != nil and cache["l2"]["principal"] != nil'
-              - 'append(cache["dl"], Concat([":", cache["l2"]["sub"]], "")) where cache["l2"] != nil and cache["l2"]["principal"] == nil'
-              - 'append(cache["dl"], Concat([cache["l3"]["principal"], ":", cache["l3"]["sub"]], "")) where cache["l3"] != nil and cache["l3"]["principal"] != nil'
-              - 'append(cache["dl"], Concat([":", cache["l3"]["sub"]], "")) where cache["l3"] != nil and cache["l3"]["principal"] == nil'
-              - 'append(cache["dl"], Concat([cache["l4"]["principal"], ":", cache["l4"]["sub"]], "")) where cache["l4"] != nil and cache["l4"]["principal"] != nil'
-              - 'append(cache["dl"], Concat([":", cache["l4"]["sub"]], "")) where cache["l4"] != nil and cache["l4"]["principal"] == nil'
-              - 'append(cache["dl"], Concat([cache["l5"]["principal"], ":", cache["l5"]["sub"]], "")) where cache["l5"] != nil and cache["l5"]["principal"] != nil'
-              - 'append(cache["dl"], Concat([":", cache["l5"]["sub"]], "")) where cache["l5"] != nil and cache["l5"]["principal"] == nil'
-              - 'append(cache["dl"], Concat([cache["l6"]["principal"], ":", cache["l6"]["sub"]], "")) where cache["l6"] != nil and cache["l6"]["principal"] != nil'
-              - 'append(cache["dl"], Concat([":", cache["l6"]["sub"]], "")) where cache["l6"] != nil and cache["l6"]["principal"] == nil'
-              - 'append(cache["dl"], Concat([cache["l7"]["principal"], ":", cache["l7"]["sub"]], "")) where cache["l7"] != nil and cache["l7"]["principal"] != nil'
-              - 'append(cache["dl"], Concat([":", cache["l7"]["sub"]], "")) where cache["l7"] != nil and cache["l7"]["principal"] == nil'
-              - 'append(cache["dl"], Concat([cache["l8"]["principal"], ":", cache["l8"]["sub"]], "")) where cache["l8"] != nil and cache["l8"]["principal"] != nil'
-              - 'append(cache["dl"], Concat([":", cache["l8"]["sub"]], "")) where cache["l8"] != nil and cache["l8"]["principal"] == nil'
-              - 'append(cache["dl"], Concat([attributes["subject_principal"], ":", attributes["user"]], "")) where cache["act"] != nil and attributes["subject_principal"] != nil and attributes["user"] != nil'
-              - 'append(cache["dl"], Concat([":", attributes["user"]], "")) where cache["act"] != nil and attributes["subject_principal"] == nil and attributes["user"] != nil'
+              - 'append(cache["dl"], Concat([cache["l1"]["principal"], ":", cache["l1"]["sub"]], "")) where cache["l1"] != nil and cache["l1"]["sub"] != nil and cache["l1"]["sub"] != "" and cache["l1"]["principal"] != nil and IsMatch(cache["l1"]["principal"], "^(human|agent|controller|service)$")'
+              - 'append(cache["dl"], Concat([":", cache["l1"]["sub"]], "")) where cache["l1"] != nil and cache["l1"]["sub"] != nil and cache["l1"]["sub"] != "" and (cache["l1"]["principal"] == nil or not IsMatch(cache["l1"]["principal"], "^(human|agent|controller|service)$"))'
+              - 'append(cache["dl"], Concat([cache["l2"]["principal"], ":", cache["l2"]["sub"]], "")) where cache["l2"] != nil and cache["l2"]["sub"] != nil and cache["l2"]["sub"] != "" and cache["l2"]["principal"] != nil and IsMatch(cache["l2"]["principal"], "^(human|agent|controller|service)$")'
+              - 'append(cache["dl"], Concat([":", cache["l2"]["sub"]], "")) where cache["l2"] != nil and cache["l2"]["sub"] != nil and cache["l2"]["sub"] != "" and (cache["l2"]["principal"] == nil or not IsMatch(cache["l2"]["principal"], "^(human|agent|controller|service)$"))'
+              - 'append(cache["dl"], Concat([cache["l3"]["principal"], ":", cache["l3"]["sub"]], "")) where cache["l3"] != nil and cache["l3"]["sub"] != nil and cache["l3"]["sub"] != "" and cache["l3"]["principal"] != nil and IsMatch(cache["l3"]["principal"], "^(human|agent|controller|service)$")'
+              - 'append(cache["dl"], Concat([":", cache["l3"]["sub"]], "")) where cache["l3"] != nil and cache["l3"]["sub"] != nil and cache["l3"]["sub"] != "" and (cache["l3"]["principal"] == nil or not IsMatch(cache["l3"]["principal"], "^(human|agent|controller|service)$"))'
+              - 'append(cache["dl"], Concat([cache["l4"]["principal"], ":", cache["l4"]["sub"]], "")) where cache["l4"] != nil and cache["l4"]["sub"] != nil and cache["l4"]["sub"] != "" and cache["l4"]["principal"] != nil and IsMatch(cache["l4"]["principal"], "^(human|agent|controller|service)$")'
+              - 'append(cache["dl"], Concat([":", cache["l4"]["sub"]], "")) where cache["l4"] != nil and cache["l4"]["sub"] != nil and cache["l4"]["sub"] != "" and (cache["l4"]["principal"] == nil or not IsMatch(cache["l4"]["principal"], "^(human|agent|controller|service)$"))'
+              - 'append(cache["dl"], Concat([cache["l5"]["principal"], ":", cache["l5"]["sub"]], "")) where cache["l5"] != nil and cache["l5"]["sub"] != nil and cache["l5"]["sub"] != "" and cache["l5"]["principal"] != nil and IsMatch(cache["l5"]["principal"], "^(human|agent|controller|service)$")'
+              - 'append(cache["dl"], Concat([":", cache["l5"]["sub"]], "")) where cache["l5"] != nil and cache["l5"]["sub"] != nil and cache["l5"]["sub"] != "" and (cache["l5"]["principal"] == nil or not IsMatch(cache["l5"]["principal"], "^(human|agent|controller|service)$"))'
+              - 'append(cache["dl"], Concat([cache["l6"]["principal"], ":", cache["l6"]["sub"]], "")) where cache["l6"] != nil and cache["l6"]["sub"] != nil and cache["l6"]["sub"] != "" and cache["l6"]["principal"] != nil and IsMatch(cache["l6"]["principal"], "^(human|agent|controller|service)$")'
+              - 'append(cache["dl"], Concat([":", cache["l6"]["sub"]], "")) where cache["l6"] != nil and cache["l6"]["sub"] != nil and cache["l6"]["sub"] != "" and (cache["l6"]["principal"] == nil or not IsMatch(cache["l6"]["principal"], "^(human|agent|controller|service)$"))'
+              - 'append(cache["dl"], Concat([cache["l7"]["principal"], ":", cache["l7"]["sub"]], "")) where cache["l7"] != nil and cache["l7"]["sub"] != nil and cache["l7"]["sub"] != "" and cache["l7"]["principal"] != nil and IsMatch(cache["l7"]["principal"], "^(human|agent|controller|service)$")'
+              - 'append(cache["dl"], Concat([":", cache["l7"]["sub"]], "")) where cache["l7"] != nil and cache["l7"]["sub"] != nil and cache["l7"]["sub"] != "" and (cache["l7"]["principal"] == nil or not IsMatch(cache["l7"]["principal"], "^(human|agent|controller|service)$"))'
+              - 'append(cache["dl"], Concat([cache["l8"]["principal"], ":", cache["l8"]["sub"]], "")) where cache["l8"] != nil and cache["l8"]["sub"] != nil and cache["l8"]["sub"] != "" and cache["l8"]["principal"] != nil and IsMatch(cache["l8"]["principal"], "^(human|agent|controller|service)$")'
+              - 'append(cache["dl"], Concat([":", cache["l8"]["sub"]], "")) where cache["l8"] != nil and cache["l8"]["sub"] != nil and cache["l8"]["sub"] != "" and (cache["l8"]["principal"] == nil or not IsMatch(cache["l8"]["principal"], "^(human|agent|controller|service)$"))'
+              - 'append(cache["dl"], Concat([attributes["subject_principal"], ":", attributes["user"]], "")) where cache["act"] != nil and attributes["user"] != nil and attributes["user"] != "" and attributes["subject_principal"] != nil and IsMatch(attributes["subject_principal"], "^(human|agent|controller|service)$")'
+              - 'append(cache["dl"], Concat([":", attributes["user"]], "")) where cache["act"] != nil and attributes["user"] != nil and attributes["user"] != "" and (attributes["subject_principal"] == nil or not IsMatch(attributes["subject_principal"], "^(human|agent|controller|service)$"))'
               - 'set(attributes["krateo.audit.delegation"], cache["dl"]) where cache["dl"] != nil'
               # --- what
               - 'set(attributes["krateo.action"], Concat(["gateway.", attributes["protocol"]], ""))'
@@ -590,7 +604,7 @@ opentelemetry-collector:
               - 'set(attributes["krateo.audit.gateway.route"], attributes["route"]) where attributes["route"] != nil and attributes["route"] != ""'
               - 'set(attributes["krateo.audit.gateway.mcp_tool"], attributes["tool"]) where attributes["protocol"] == "mcp" and attributes["tool"] != nil and attributes["tool"] != ""'
               - 'set(attributes["krateo.audit.asserted.agent_host"], attributes["agent"]) where attributes["agent"] != nil and attributes["agent"] != ""'
-              - 'set(attributes["session.id"], attributes["baggage_session"]) where attributes["baggage_session"] != nil'
+              - 'set(attributes["session.id"], attributes["baggage_session"]) where attributes["baggage_session"] != nil and attributes["baggage_session"] != ""'
               # --- outcome
               - 'set(cache["reason"], attributes["reason"]) where attributes["reason"] != nil and attributes["reason"] != "" and attributes["reason"] != "Upstream"'
               - 'set(attributes["krateo.audit.outcome"], "success") where cache["reason"] == nil'
@@ -599,8 +613,11 @@ opentelemetry-collector:
               - 'set(attributes["krateo.audit.outcome"], "failure") where cache["reason"] != nil'
               - 'set(attributes["krateo.audit.outcome"], "denied") where cache["reason"] != nil and IsMatch(cache["reason"], "^(JwtAuth|Oidc|BasicAuth|APIKeyAuth|ExtAuth|Authorization|RateLimit|Guardrail|Overload)$")'
               # --- where
-              - 'set(attributes["server.address"], attributes["endpoint"]) where attributes["endpoint"] != nil and attributes["endpoint"] != ""'
-              - 'set(attributes["server.address"], attributes["backend_host"]) where attributes["server.address"] == nil and attributes["backend_host"] != nil'
+              # The route's CONFIGURED target whenever there is one, so one route's records always name
+              # one target; the dialed `endpoint` only as a fallback (an older proxy config without
+              # backend_host). The dialed address is transport detail, not the action's target.
+              - 'set(attributes["server.address"], attributes["backend_host"]) where attributes["backend_host"] != nil and attributes["backend_host"] != ""'
+              - 'set(attributes["server.address"], attributes["endpoint"]) where attributes["server.address"] == nil and attributes["endpoint"] != nil and attributes["endpoint"] != ""'
               - 'set(cache["peer"], attributes["src.addr"]) where attributes["src.addr"] != nil'
               - 'replace_pattern(cache["peer"], ":[0-9]+$", "") where cache["peer"] != nil'
               - 'replace_pattern(cache["peer"], "^\\[(.*)\\]$", "$$1") where cache["peer"] != nil'

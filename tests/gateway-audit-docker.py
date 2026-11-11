@@ -15,7 +15,7 @@ Docker: the clickhouse exporters become file exporters, and k8sattributes (which
 server) is left out of the pipelines that have it. The records are sent to the collector over
 OTLP/HTTP, and the checks run on what it writes:
   * every projected record passes `auditschema check -writer gateway` (krateo-platformops/audit
-    v0.4.0, the library's own checker);
+    v0.5.0, the library's own checker);
   * which records are projected: the acting hops, and an MCP method on neither list; and which
     are excluded and COUNTED (krateo.gateway_audit.excluded, per protocol and method);
   * each mapping: actor, class, delegation chain ending with the subject's class, outcome, target,
@@ -42,7 +42,7 @@ import uuid
 import yaml
 
 CHART = "charts/otel-collector-daemonset"
-AUDIT_LIB = "github.com/krateo-platformops/audit/cmd/auditschema@v0.4.0"
+AUDIT_LIB = "github.com/krateo-platformops/audit/cmd/auditschema@v0.5.0"
 SCOPE = "github.com/krateo-platformops/observability/gateway-audit"
 PIPES = ["logs/gateway-audit", "logs/gateway-audit-excluded", "metrics/gateway-audit-excluded"]
 FAILS = []
@@ -133,12 +133,23 @@ def build_cases(base):
                 return r
         raise SystemExit("fixture lacks a record the test needs")
 
+    excluded_mcp = ("initialize", "ping", "tools/list", "resources/list", "resources/templates/list", "prompts/list",
+                    "completion/complete", "logging/setLevel")
     for i, r in enumerate(base):
         a = attrs_of(r[2])
-        proto, mm = a.get("protocol"), a.get("mcp.method.name")
-        projected = (proto == "a2a" and a.get("a2a.method")) or (proto == "llm" and a.get("http.method") == "POST") \
-            or (proto == "mcp" and mm in ("tools/call", "resources/read", "prompts/get"))
-        add(f"real-{i}", r, "projected" if projected else ("excluded" if proto in ("a2a", "mcp", "llm") else "ignored"))
+        proto, mm, hm = a.get("protocol"), a.get("mcp.method.name"), a.get("http.method")
+        if not a.get("route"):
+            want = "excluded"  # matched no route, whatever its protocol (the real record is `http`)
+        elif proto == "mcp":
+            plumbing = (mm and (mm in excluded_mcp or mm.startswith("notifications/"))) or (not mm and hm in ("GET", "DELETE"))
+            want = "excluded" if plumbing else "projected"  # incl. a POST with no parsable method
+        elif proto == "a2a":
+            want = "projected" if a.get("a2a.method") else "excluded"
+        elif proto == "llm":
+            want = "excluded" if hm == "GET" else "projected"
+        else:
+            want = "ignored"
+        add(f"real-{i}", r, want)
 
     tc = find(lambda a: a.get("mcp.method.name") == "tools/call" and a.get("principal") == "human" and "act" not in a)
     lr = add("unknown-mcp-method", tc, "projected"); set_attr(lr, "mcp.method.name", "tools/frobnicate")
@@ -153,7 +164,7 @@ def build_cases(base):
     dele = find(lambda a: a.get("protocol") == "a2a" and a.get("principal") == "agent" and a.get("subject_principal"))
     lr = add("deep-chain", dele, "projected")
     set_attr(lr, "act", json.dumps({"sub": "sa:one", "principal": "agent", "act": {"sub": "sa:two", "principal": "service",
-                                    "act": {"sub": "sa:three"}}}))
+                                    "act": {"sub": "sa:three", "act": {"sub": "sa:four", "principal": "superuser"}}}}))
     # Falsifier: remove the input each required G key is built from.
     for tid, keys in (("drop-method", ["http.method"]), ("drop-target", ["endpoint", "backend_host"]),
                       ("drop-user", ["user"]), ("drop-src", ["src.addr"])):
@@ -163,9 +174,7 @@ def build_cases(base):
     # A refused-before-dial hop: no endpoint, so server.address is the route's configured target.
     lr = add("refused-before-dial", a2a, "projected"); set_attr(lr, "endpoint", None)
     set_attr(lr, "reason", "JwtAuth"); set_attr(lr, "http.status", 401)
-    # A request that matched no route is excluded (and counted), and a falsifier for the route key
-    # is no longer possible through the pipeline: route absent means excluded.
-    lr = add("no-route", a2a, "excluded"); set_attr(lr, "route", None); set_attr(lr, "http.status", 404)
+
     return cases
 
 
@@ -295,10 +304,11 @@ def verify(work, cases, binary, logs):
     if dele:
         chain = [v["stringValue"] for v in dele[0]["krateo.audit.delegation"]["values"]]
         check(chain[0].startswith("agent:") and chain[-1] == "human:alice", f"delegation outermost first, ends with the subject's class ({chain})")
-    deep = recs(lambda a: a.get("krateo.audit.delegation") and len(a["krateo.audit.delegation"]["values"]) == 4)
+    deep = recs(lambda a: a.get("krateo.audit.delegation") and len(a["krateo.audit.delegation"]["values"]) == 5)
     if deep:
         chain = [v["stringValue"] for v in deep[0]["krateo.audit.delegation"]["values"]]
-        check(chain == ["agent:sa:one", "service:sa:two", ":sa:three", "human:alice"], f"deep chain, unknown actor class as :<sub> ({chain})")
+        check(chain == ["agent:sa:one", "service:sa:two", ":sa:three", ":sa:four", "human:alice"],
+              f"deep chain: no class and an UNKNOWN class (superuser) both as :<sub> ({chain})")
     else:
         check(False, "deep chain record projected")
     nocls = recs(lambda a: a.get("krateo.audit.delegation") and "krateo.audit.actor_class" not in a)
@@ -375,6 +385,11 @@ def verify(work, cases, binary, logs):
                             counts[k] = counts.get(k, 0) + int(dp.get("asInt", 0))
     excluded = [c for c in cases if c[2] == "excluded"]
     check(sum(counts.values()) == len(excluded), f"every excluded hop is counted ({sum(counts.values())} counted, {len(excluded)} excluded)")
+    check(sum(v for k, v in counts.items() if dict(k).get("protocol") == "http") == 2,
+          "the real no-route records (protocol http, the gateway's 404) are excluded AND counted")
+    nm = recs(lambda a: a.get("krateo.action") == "gateway.mcp" and "krateo.audit.gateway.mcp_tool" not in a
+              and a.get("http.request.method") == "POST")
+    check(len(nm) >= 1, "the real MCP POST with no parsable method is PROJECTED")
     check(any(dict(k).get("mcp.method.name") == "initialize" for k in counts), "the count is per method (initialize seen)")
 
 
