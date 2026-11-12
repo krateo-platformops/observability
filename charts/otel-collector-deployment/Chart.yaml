@@ -79,8 +79,12 @@ type: application
 # listing every composition kind. On krateo-057, 0 of 1,854 live objects carrying a composition-id
 # label lack either label. Requires image 1.0.8: the processor's config is strict, so older images
 # refuse the new keys at startup.
-version: 0.3.17
-appVersion: "1.0.8"
+# 0.3.18: image 1.0.9, a dependency-only release: every Dependabot alert on the collector cleared,
+# Go 1.26.11, govulncheck clean (otel-collector#30). Collector core stays v0.118.0, so no config key
+# changes. One behaviour change in the collector's own telemetry: a service.telemetry.resource
+# schema_url is now ignored instead of rejected (this chart sets none).
+version: 0.3.18
+appVersion: "1.0.9"
 dependencies:
   - name: opentelemetry-collector
     version: 0.170.0
