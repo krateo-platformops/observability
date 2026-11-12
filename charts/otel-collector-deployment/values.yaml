@@ -45,6 +45,8 @@ opentelemetry-collector:
     # Renamed otelcol-krateo -> krateo-otel-collector when the custom collector was split
     # into its own single-image repo (krateo-platformops/otel-collector) on the canonical CI.
     repository: ghcr.io/krateo-platformops/otel-collector
+    # 1.0.9: dependency-only: every Dependabot alert cleared, Go 1.26.11, govulncheck clean
+    #        (otel-collector#30). Core stays v0.118.0; no config change.
     # 1.0.8: compositionresolver also writes krateo.io/composition-name and
     #        krateo.io/composition-namespace next to the id (otel-collector#40). Needed by the
     #        name_label_key/namespace_label_key keys below: the processor's config is strict, so
@@ -64,7 +66,7 @@ opentelemetry-collector:
     # 1.0.2: + patched clickhouseexporter — recreate the otel_* schema and retry on UNKNOWN_TABLE
     #        (ClickHouse re-provisioned with a fresh DB) instead of dropping data until a restart.
     # 1.0.1: patched k8sobjectsreceiver (recycle timer + restart-on-close) — KOS-1 #112 bug #2
-    tag: "1.0.8"
+    tag: "1.0.9"
     pullPolicy: IfNotPresent
 
   # The container binary is still named otelcol-krateo (OTel builder dist.name / Dockerfile
