@@ -184,6 +184,12 @@ def build_cases(base):
     # A refused-before-dial hop: no endpoint, so server.address is the route's configured target.
     lr = add("refused-before-dial", a2a, "projected"); set_attr(lr, "endpoint", None)
     set_attr(lr, "reason", "JwtAuth"); set_attr(lr, "http.status", 401)
+    # session.id comes from client-set baggage: only a value of format session_id (audit v0.11.0,
+    # ^[A-Za-z0-9._-]{1,128}$) is written; any other shape is refused (no session.id, no marker).
+    for i, (val, ok) in enumerate((("a:b", False), ("a+b=c", False), ("a%20b", False), ("x/y@z", False),
+                                   ("s" * 129, False), ("", False), ("s" * 128, True), ("Ab9._-z", True))):
+        lr = add(f"session-{i}", a2a, "projected"); set_attr(lr, "baggage_session", val)
+        set_attr(lr, "user_agent", f"facts-test/session-{i}-{'ok' if ok else 'bad'}")
 
     return cases
 
@@ -350,6 +356,13 @@ def verify(work, cases, binary, logs):
           "non-semconv method -> _OTHER + method_original, verb marked")
     sess = recs(lambda a: a.get("session.id") == "sess-42")
     check(bool(sess), "session.id from baggage")
+    sc = recs(lambda a: (a.get("user_agent.original") or "").startswith("facts-test/session-"))
+    check(len(sc) == 8, f"all 8 session.id format cases projected ({len(sc)})")
+    for a in sc:
+        ok = a["user_agent.original"].endswith("-ok")
+        has = "session.id" in a
+        check(has == ok, f"{a['user_agent.original']}: session.id {'written' if has else 'refused'}")
+        check("session" not in a.get("krateo.audit.incomplete", ""), f"{a['user_agent.original']}: no marker for session.id")
 
     # 3. falsifier + marker order: each case's projection must be flagged by the checker
     check(not recs(lambda a: "krateo.audit.gateway.route" not in a), "a request that matched no route is never projected")
