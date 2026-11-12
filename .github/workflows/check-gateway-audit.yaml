@@ -4,7 +4,7 @@
 # the projection is only correct if the audit library's own checker says so. This renders the chart,
 # runs its gateway-audit pipelines on the REAL proxy's access-log output
 # (tests/fixtures/gateway-access-log.otlp.jsonl) plus cases derived from it, and checks every
-# projected record with `auditschema check -writer gateway` (krateo-platformops/audit v0.6.0).
+# projected record with `auditschema check -writer gateway` (krateo-platformops/audit v0.11.0).
 #
 # A separate workflow on purpose: lint.yaml is the org-wide canonical chart-repo lint.
 
