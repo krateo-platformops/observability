@@ -152,7 +152,7 @@ type: application
 # kagent-controller route and were neither projected nor counted. They stay unprojected (audited at
 # kagent, kagent#31, snowplow's ruling) but now land in krateo.gateway_audit.excluded, which also
 # gains a `route` attribute. No record changes in krateo_audit or otel_logs.
-version: 0.1.28
+version: 0.1.29
 appVersion: "0.158.0"
 dependencies:
   - name: opentelemetry-collector

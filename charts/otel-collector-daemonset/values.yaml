@@ -558,7 +558,8 @@ opentelemetry-collector:
       #                        policies >= 0.2.28), on every hop, so a refused hop names what it would
       #                        have reached and one route names one target; else the dialed `endpoint`
       #   source_ips           x-forwarded-for entries, then the TCP peer (src.addr without port)
-      #   user_agent.original  cut at 1024 bytes + "...TRUNCATED"; session.id <- baggage_session
+      #   user_agent.original  cut at 1024 bytes + "...TRUNCATED"
+      #   session.id           <- baggage_session, only if of format session_id (^[A-Za-z0-9._-]{1,128}$)
       #   gateway.route / gateway.mcp_tool / asserted.agent_host   route / tool / agent
       #   krateo.audit.incomplete   the missing markers in the library's order (schema_gen.go
       #                        schemaMarkers): actor, actor_class, action, verb, method, preview, target
@@ -613,7 +614,11 @@ opentelemetry-collector:
               - 'set(attributes["krateo.audit.gateway.route"], attributes["route"]) where attributes["route"] != nil and attributes["route"] != ""'
               - 'set(attributes["krateo.audit.gateway.mcp_tool"], attributes["tool"]) where attributes["protocol"] == "mcp" and attributes["tool"] != nil and attributes["tool"] != ""'
               - 'set(attributes["krateo.audit.asserted.agent_host"], attributes["agent"]) where attributes["agent"] != nil and attributes["agent"] != ""'
-              - 'set(attributes["session.id"], attributes["baggage_session"]) where attributes["baggage_session"] != nil and attributes["baggage_session"] != ""'
+              # session.id is a correlation key the CLIENT sets in baggage, so it is refused unless it is
+              # of format session_id (audit v0.11.0, audit.ValidSessionID): 1 to 128 of [A-Za-z0-9._-].
+              # A value of any other shape is not written, and no marker is set (session.id is
+              # conditional, not in the marker list).
+              - 'set(attributes["session.id"], attributes["baggage_session"]) where attributes["baggage_session"] != nil and IsMatch(attributes["baggage_session"], "^[A-Za-z0-9._-]{1,128}$")'
               # --- outcome
               - 'set(cache["reason"], attributes["reason"]) where attributes["reason"] != nil and attributes["reason"] != "" and attributes["reason"] != "Upstream"'
               - 'set(attributes["krateo.audit.outcome"], "success") where cache["reason"] == nil'
