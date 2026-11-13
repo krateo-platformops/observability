@@ -15,7 +15,7 @@ Docker: the clickhouse exporters become file exporters, and k8sattributes (which
 server) is left out of the pipelines that have it. The records are sent to the collector over
 OTLP/HTTP, and the checks run on what it writes:
   * every projected record passes `auditschema check -writer gateway` (krateo-platformops/audit
-    v0.11.0, the library's own checker, which also refuses a status code on a denied record);
+    v0.13.0, the library's own checker, which also refuses a status code on a denied record);
   * which records are projected: the acting hops, and an MCP method on neither list; and which
     are excluded and COUNTED (krateo.gateway_audit.excluded, per protocol and method);
   * each mapping: actor, class, delegation chain ending with the subject's class, outcome, target,
@@ -42,7 +42,7 @@ import uuid
 import yaml
 
 CHART = "charts/otel-collector-daemonset"
-AUDIT_LIB = "github.com/krateo-platformops/audit/cmd/auditschema@v0.11.0"
+AUDIT_LIB = "github.com/krateo-platformops/audit/cmd/auditschema@v0.13.0"
 SCOPE = "github.com/krateo-platformops/observability/gateway-audit"
 PIPES = ["logs/gateway-audit", "logs/gateway-audit-excluded", "metrics/gateway-audit-excluded"]
 FAILS = []
