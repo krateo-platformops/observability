@@ -1,0 +1,48 @@
+# Where otel-collector-daemonset sends each OTLP log record, run in the pinned collector image.
+#
+# The otlp receiver feeds logs/audit (krateo_audit) and logs/gateway (otel_logs). This renders the
+# chart and sends a real gateway access-log record, audit records shaped as
+# krateo-platformops/audit emits them, and plain controller slog records (what core-provider and
+# every composition controller export once core-provider.otel.logs is on), then checks each one
+# lands in exactly the table it belongs in, or in neither.
+#
+# A separate workflow on purpose: lint.yaml is the org-wide canonical chart-repo lint.
+
+name: check-otlp-log-routing
+
+on:
+  pull_request:
+    paths:
+      - "charts/otel-collector-daemonset/**"
+      - "tests/otlp-log-routing-docker.py"
+      - "tests/fixtures/gateway-access-log.otlp.jsonl"
+      - ".github/workflows/check-otlp-log-routing.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "charts/otel-collector-daemonset/**"
+      - "tests/otlp-log-routing-docker.py"
+      - "tests/fixtures/gateway-access-log.otlp.jsonl"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  routing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Add the dependency repository
+        run: helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+      - name: Route audit, gateway and controller OTLP logs and check each table
+        run: python3 tests/otlp-log-routing-docker.py .
