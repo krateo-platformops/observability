@@ -186,6 +186,30 @@ a clause matching 2,538 rows fired correctly.
 
 A threshold is therefore **the smallest count that should fire**. `1` means "any occurrence".
 
+## Reading an Alert's state
+
+alert-provider writes these four fields on each `Alert`'s `.status`. They answer different
+questions, and two of them are easy to confuse:
+
+| field | what it means | moves when |
+|---|---|---|
+| `state` | HyperDX's raw state: `OK`, `ALERT` or `PENDING`. Empty means not evaluated yet | every read |
+| `stateSince` | when `state` last **changed** to its current value (a `lastTransitionTime`) | only when a read finds a different `state`, never on a re-read |
+| `stateObservedAt` | when the provider last **read** the state | every read |
+| `okSince` | when the alert last turned `OK`; unset while it is anything else | on the transition to `OK` |
+
+- **"Firing since"** is `stateSince` on an `ALERT` alert. `stateObservedAt` is not a firing time:
+  an alert ALERTing for three days has a `stateObservedAt` from the last minute.
+- For an `OK` alert, `stateSince` equals `okSince`.
+- **Empty `stateSince` means unknown, never now.** An alert that was already `ALERT` or `PENDING`
+  when its cluster upgraded to an alert-provider with the field (0.2.83, PR #119) has an empty
+  `stateSince` until its next transition, because the provider never saw when that state began.
+- A stale `stateObservedAt` means the provider stopped reading, not that the alert stopped firing.
+  `Ready` stays as it was.
+
+The field exists from alert-provider 0.2.83 (charts `alert-provider` and `alert-provider-crds`). A
+cluster on an older release has no `stateSince` at all.
+
 ## Threshold calibration
 
 Non-zero thresholds were checked against the share of **673 fifteen-minute windows** each would be
