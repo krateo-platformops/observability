@@ -328,8 +328,9 @@ opentelemetry-collector:
       # WHY TWO FILTERS AND A THIRD PIPELINE, not one filter: dropping the gateway records
       # would lose them, and they are useful -- they are the only per-request record of the LLM
       # and MCP hops. A receiver feeds every pipeline that NAMES it, so otlp fans out to both
-      # `logs/audit` and `logs/gateway` and each keeps the complement of the other. The
-      # partition is exact and total: a record either has event.name=="audit" or it does not.
+      # `logs/audit` and `logs/gateway`. Until 0.1.30 each kept the complement of the other;
+      # since 0.1.30 logs/gateway keeps only the gateway's access log (filter/gateway-access-log
+      # below), so an OTLP log that is neither audit nor gateway lands in neither table.
       # Cost is k8s_attributes + transform running twice over the OTLP log stream (~1.2k
       # records/day), NOT over the filelog firehose, which is why the pair-of-filters objection
       # in the `logs/audit` comment does not apply here -- that objection was about adding otlp
@@ -347,11 +348,27 @@ opentelemetry-collector:
             # has no event.name key at all: OTTL resolves the missing key to nil, nil != "audit"
             # is true, and the record is dropped here -- which is the intent.
             - 'attributes["event.name"] != "audit"'
-      filter/not-audit:
+      # logs/gateway keeps ONLY the agent gateway's access log: a record of scope `request` with a
+      # `gateway` field, the same identity transform/gateway-audit-classify uses for a candidate.
+      # DROPS everything else on the OTLP log stream, audit records included (their home is
+      # logs/audit). Until 0.1.30 this was the complement of filter/audit-only, "every OTLP log
+      # that is not audit". That was safe only while the gateway was the sole non-audit OTLP log
+      # producer (measured on krateo-057 2026-11-14: krateo-agent-gateway, scope `request`, is
+      # the ONLY one over otel_logs' 7 days). It stops being true the moment
+      # core-provider.otel.logs is turned on: from code at core-provider 2.13.95,
+      # OTEL_LOGS_ENABLED installs the OTLP LoggerProvider and the otelslog bridge tees EVERY
+      # slog record of core-provider and of every composition controller to it (77 processes on
+      # 057), with the audit records among them. The complement would have copied those whole
+      # log streams into otel_logs, which already holds them from filelog. A new OTLP log
+      # producer now lands nowhere until it is named here, which is the safe default for a
+      # stream whose pod logs filelog already collects.
+      # error_mode:ignore RETAINS a record whose condition errors; neither operand can error
+      # (a missing attribute resolves to nil).
+      filter/gateway-access-log:
         error_mode: ignore
         logs:
           log_record:
-            - 'attributes["event.name"] == "audit"'
+            - 'not (instrumentation_scope.name == "request" and attributes["gateway"] != nil)'
       # DROPS what matches. kubeletstats reports every pod volume, and nearly all of them are
       # projected service-account tokens, configmaps and emptyDirs: 431 volumes on krateo-057, 7 of
       # them claims. The rest would add series with no use, so only claims are kept. Other kubelet
@@ -429,7 +446,10 @@ opentelemetry-collector:
       # error):
       #   "true"  when http.response.status_code >= 500;
       #   "true"  when the span has NO http.response.status_code and its status is ERROR (no
-      #           response at all: abort, network failure, CORS);
+      #           response at all: network failure, CORS, an agent turn broken mid-stream). An
+      #           ABORTED widget fetch is not in that set: from frontend 1.8.44 the browser does
+      #           not export a krateo.widget.fetch the page itself cancelled (Diego, 2026-11-13),
+      #           so a navigation away never counts as an error;
       #   "false" otherwise, a 4xx included. This matters for RUM: the browser's fetch
       #           instrumentation sets status ERROR at >= 400, so status.code alone would count a
       #           404 as an error.
@@ -890,7 +910,8 @@ opentelemetry-collector:
           receivers: [otlp]
           processors: [memory_limiter, k8sattributes, transform, filter/audit-only, batch]
           exporters: [clickhouse/audit]
-        # The gateway access logs' own home: same otlp receiver, inverse filter, and the 7-day
+        # The gateway access logs' own home: same otlp receiver, a filter that keeps ONLY the
+        # gateway's access log (filter/gateway-access-log, 0.1.30), and the 7-day
         # `clickhouse` exporter (otel_logs) rather than the 365-day krateo_audit. Without this
         # pipeline the filter above would DELETE them; they are the only per-request record of
         # the LLM and MCP hops, carrying jwt.sub, team, gen_ai.* token counts, mcp.* and the
@@ -902,7 +923,7 @@ opentelemetry-collector:
         # as harmless.
         logs/gateway:
           receivers: [otlp]
-          processors: [memory_limiter, k8sattributes, transform, filter/not-audit, batch]
+          processors: [memory_limiter, k8sattributes, transform, filter/gateway-access-log, batch]
           exporters: [clickhouse]
         # THE GATEWAY'S AUDIT COPY (AUDIT-4, #138). A third consumer of the same otlp receiver, so
         # logs/gateway still writes every access-log record to otel_logs unchanged. This one keeps

@@ -152,7 +152,17 @@ type: application
 # kagent-controller route and were neither projected nor counted. They stay unprojected (audited at
 # kagent, kagent#31, snowplow's ruling) but now land in krateo.gateway_audit.excluded, which also
 # gains a `route` attribute. No record changes in krateo_audit or otel_logs.
-version: 0.1.29
+# 0.1.30: logs/gateway keeps ONLY the agent gateway's access log (filter/gateway-access-log: scope
+# `request` with a `gateway` field) instead of every non-audit OTLP log. core-provider 2.13.95 with
+# core-provider.otel.logs on exports the WHOLE slog stream of core-provider and of every
+# composition controller over OTLP, audit records among them; the old complement filter would have
+# copied those pod logs into otel_logs a second time (filelog already has them). Audit records still
+# reach krateo_audit through logs/audit (attribute event.name == "audit", which audit v0.13.0+ sets
+# alongside the LogRecord EventName). No change today: the gateway is the only non-audit OTLP log
+# producer on krateo-057 (otel_logs, 7 days). tests/otlp-log-routing-docker.py.
+# Also a comment fix in transform/slo-error: an aborted widget fetch is no longer exported (frontend
+# 1.8.44), so it is no longer listed among the no-status ERROR spans; the rule is unchanged.
+version: 0.1.30
 appVersion: "0.158.0"
 dependencies:
   - name: opentelemetry-collector
