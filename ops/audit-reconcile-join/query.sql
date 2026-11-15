@@ -5,8 +5,9 @@
 -- it. A write no reconcile followed still gets a row (reconciles = 0).
 --
 -- Join key, all exact (see README.md for why each part holds):
---   audit  concat(k8s.resource.resource, '-', k8s.resource.version, '-controller')
---     =    span resource k8s.deployment.name, which core-provider sets to "<resource>-<version>-controller"
+--   audit  concat(k8s.resource.group, '/', k8s.resource.version, '/', k8s.resource.resource)
+--     =    the span's composition GVR: span attribute krateo.composition.gvr (cdc >= 2.13.100),
+--          else resource attribute krateo.io/composition-gvr (same "<group>/<version>/<plural>")
 --   audit  k8s.resource.name   = span k8s.object.name
 --   audit  k8s.namespace.name  = span k8s.object.namespace   ('' on both sides for a cluster-scoped object)
 --
@@ -34,7 +35,7 @@ writes AS
         LogAttributes['k8s.resource.resource'] AS res_resource,
         LogAttributes['k8s.resource.name'] AS obj_name,
         LogAttributes['k8s.namespace.name'] AS obj_namespace,
-        concat(res_resource, '-', res_version, '-controller') AS controller
+        concat(res_group, '/', res_version, '/', res_resource) AS gvr
     FROM default.krateo_audit
     WHERE Timestamp >= {from:DateTime64(9)} AND Timestamp < {to:DateTime64(9)}
       AND LogAttributes['event.name'] = 'audit'
@@ -52,7 +53,10 @@ reconciles AS
         SpanId AS rec_span_id,
         Duration AS rec_duration_ns,
         StatusCode AS rec_status,
-        ResourceAttributes['k8s.deployment.name'] AS controller,
+        -- The point attribute names the controller of THIS span; the resource attribute names the
+        -- process, which in a pooled cdc hosts several Kinds. Prefer the point attribute.
+        if(SpanAttributes['krateo.composition.gvr'] != '', SpanAttributes['krateo.composition.gvr'],
+           ResourceAttributes['krateo.io/composition-gvr']) AS gvr,
         SpanAttributes['k8s.object.kind'] AS obj_kind,
         SpanAttributes['k8s.object.name'] AS obj_name,
         SpanAttributes['k8s.object.namespace'] AS obj_namespace
@@ -68,7 +72,7 @@ pairs AS
     SELECT w.*, r.rec_ts, r.rec_trace_id, r.rec_span_id, r.rec_duration_ns, r.rec_status, r.obj_kind
     FROM writes AS w
     INNER JOIN reconciles AS r
-        ON w.controller = r.controller AND w.obj_name = r.obj_name AND w.obj_namespace = r.obj_namespace
+        ON w.gvr = r.gvr AND w.obj_name = r.obj_name AND w.obj_namespace = r.obj_namespace
     WHERE r.rec_ts >= w.write_ts AND r.rec_ts < w.write_ts + toIntervalSecond({window_s:UInt32})
 ),
 -- How many writes, and which actors, claim each reconcile.
@@ -103,7 +107,7 @@ SELECT
     w.res_resource,
     w.obj_namespace,
     w.obj_name,
-    w.controller,
+    w.gvr,
     pw.obj_kind,
     pw.reconciles,
     if(pw.reconciles = 0, NULL, dateDiff('millisecond', w.write_ts, pw.first_rec_ts)) AS first_reconcile_after_ms,
