@@ -77,13 +77,13 @@ def attr(key, value):
     return {"key": key, "value": {"stringValue": value}}
 
 
-def span(trace_id, service, name, attrs=None, status=0, message="", events=None, links=None, span_id=None, parent=None):
+def span(trace_id, service, name, attrs=None, status=0, message="", events=None, links=None, span_id=None, parent=None, kind=2):
     now = time.time_ns()
     s = {
         "traceId": trace_id,
         "spanId": span_id or "%016x" % random.getrandbits(64),
         "name": name,
-        "kind": 2,
+        "kind": kind,
         "startTimeUnixNano": str(now - 5_000_000),
         "endTimeUnixNano": str(now),
         "attributes": [attr(k, v) for k, v in (attrs or {}).items()],
@@ -325,15 +325,28 @@ def main():
              lambda t: portal_trace(t, attrs={"krateo.audit.recorded": True}))
         case("snowplow call not audited (krateo.audit.recorded=false)", "sampled",
              lambda t: portal_trace(t, attrs={"krateo.audit.recorded": False}))
-        # snowplow #1322: the shared upstream CLIENT span carries snowplow.upstream.joiners (> 0 only).
-        case("shared snowplow upstream request (snowplow.upstream.joiners=2)", True,
-             lambda t: portal_trace(t) + [span(t, "snowplow", "GET upstream", {"snowplow.upstream.joiners": 2})])
-        case("snowplow upstream request not shared (no joiners attribute)", "sampled",
-             lambda t: portal_trace(t) + [span(t, "snowplow", "GET upstream", {"http.response.status_code": 200})])
+        # snowplow #1322, in the shape of the PR's own in-memory-exporter test (one starter, two
+        # joiners): the marker sits on the shared request's CLIENT span (kind 3), a CHILD inside the
+        # starter's trace, not on its root; a joiner is an internal span (kind 1) whose only tie to
+        # the shared request is a link with no attributes. The OTTL span condition is evaluated on
+        # every span of a trace, so a marker on a child keeps the whole trace.
+        def shared_upstream(t, joiners=None):
+            root = "%016x" % random.getrandbits(64)
+            attrs = {"http.request.method": "GET", "url.full": "http://127.0.0.1:44387/events",
+                     "server.address": "127.0.0.1", "server.port": 44387,
+                     "network.protocol.version": "1.1", "http.response.status_code": 200}
+            if joiners is not None:
+                attrs["snowplow.upstream.joiners"] = joiners
+            return [span(t, "snowplow", "GET /call", {"http.response.status_code": 200, "http.route": "/call"},
+                         span_id=root),
+                    span(t, "snowplow", "HTTP GET", attrs, parent=root, kind=3)]
+        case("shared snowplow upstream request (client child span, snowplow.upstream.joiners=2)", True,
+             lambda t: shared_upstream(t, 2))
+        case("snowplow upstream request not shared (no joiners attribute)", "sampled", lambda t: shared_upstream(t))
         case("snowplow upstream request with joiners=0 (never emitted; guard)", "sampled",
-             lambda t: portal_trace(t) + [span(t, "snowplow", "GET upstream", {"snowplow.upstream.joiners": 0})])
-        case("joiner trace: a link to a shared request, no marker (stays sampled)", "sampled",
-             lambda t: [span(t, "snowplow", "GET /call", {"http.response.status_code": 200, "http.route": "/call"},
+             lambda t: shared_upstream(t, 0))
+        case("joiner trace: an internal span linking to the shared request (stays sampled)", "sampled",
+             lambda t: [span(t, "snowplow", "request joiner-1", kind=1,
                              links=[(tid(), "%016x" % random.getrandbits(64))])])
         case("alert-provider reconcile whose HyperDX call got 429", True,
              lambda t: alert_provider_reconcile(t, hyperdx_status=429))
@@ -446,6 +459,13 @@ def main():
             if label.startswith("portal") and not {"krateo-agent-gateway-platform", "snowplow"} <= services:
                 failed = True
                 print(f"FAIL {label}: kept but incomplete, services {sorted(services)}")
+
+    # The marker is on a CHILD span: the whole trace, root included, must be kept, not just the child.
+    t_shared = cases["shared snowplow upstream request (client child span, snowplow.upstream.joiners=2)"][0]
+    names = sorted(n for _, n in kept.get(t_shared, []))
+    ok = names == ["GET /call", "HTTP GET"]
+    failed |= not ok
+    print(f"{'ok  ' if ok else 'FAIL'} shared upstream trace kept whole (root + client child): {names}")
 
     n_ok = sum(1 for t in ok_ids if t in kept)
     share = 100 * n_ok / len(ok_ids)
