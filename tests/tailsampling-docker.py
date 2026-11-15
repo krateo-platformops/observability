@@ -325,6 +325,16 @@ def main():
              lambda t: portal_trace(t, attrs={"krateo.audit.recorded": True}))
         case("snowplow call not audited (krateo.audit.recorded=false)", "sampled",
              lambda t: portal_trace(t, attrs={"krateo.audit.recorded": False}))
+        # snowplow #1322: the shared upstream CLIENT span carries snowplow.upstream.joiners (> 0 only).
+        case("shared snowplow upstream request (snowplow.upstream.joiners=2)", True,
+             lambda t: portal_trace(t) + [span(t, "snowplow", "GET upstream", {"snowplow.upstream.joiners": 2})])
+        case("snowplow upstream request not shared (no joiners attribute)", "sampled",
+             lambda t: portal_trace(t) + [span(t, "snowplow", "GET upstream", {"http.response.status_code": 200})])
+        case("snowplow upstream request with joiners=0 (never emitted; guard)", "sampled",
+             lambda t: portal_trace(t) + [span(t, "snowplow", "GET upstream", {"snowplow.upstream.joiners": 0})])
+        case("joiner trace: a link to a shared request, no marker (stays sampled)", "sampled",
+             lambda t: [span(t, "snowplow", "GET /call", {"http.response.status_code": 200, "http.route": "/call"},
+                             links=[(tid(), "%016x" % random.getrandbits(64))])])
         case("alert-provider reconcile whose HyperDX call got 429", True,
              lambda t: alert_provider_reconcile(t, hyperdx_status=429))
         case("alert-provider incident (incident.fire/compare/analyze)", True, alert_provider_incident)
