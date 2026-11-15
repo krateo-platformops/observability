@@ -38,7 +38,11 @@ type: application
 # provider, core-provider, git-provider, incident-provider, by the service.name each chart sets
 # (provider-runtime design-tracing.md section 8). Renamed provider-acted. Still inert until each
 # provider's runtime emits provider_runtime.acted.
-version: 0.1.12
+# 0.1.13: keep rule snowplow-shared-upstream: a trace whose snowplow upstream CLIENT span carries
+# snowplow.upstream.joiners > 0 (a wire request that answered other concurrent readers, snowplow #1322)
+# is kept whole, so the joiners' span links resolve instead of only for the 5% sample. Matches nothing
+# until snowplow ships #1322. tests/tailsampling-docker.py.
+version: 0.1.13
 # The collector this chart renders: the upstream chart's own appVersion picks the image tag.
 # Keep equal to otel-collector-daemonset's appVersion, so both tiers run the same build.
 appVersion: "0.158.0"

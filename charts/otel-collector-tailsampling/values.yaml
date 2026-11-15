@@ -234,6 +234,26 @@ opentelemetry-collector:
               error_mode: ignore
               span:
                 - 'span.attributes["krateo.audit.recorded"] == true'
+          # A SHARED snowplow upstream request (snowplow #1322, Diego's ruling via snowplow, 2026-11-15):
+          # concurrent readers of the same upstream call with the same credential share one wire
+          # request. Each reader that was answered by someone else's request gets a span LINK, on its
+          # own request span, to the shared request's CLIENT span (trace and span id only). snowplow is
+          # sampled at 5% below, and the joiner's trace and the shared request's trace are sampled
+          # independently, so without this rule a kept joiner's link would resolve only ~5% of the
+          # time. snowplow sets snowplow.upstream.joiners (int, the number of other readers answered;
+          # present only when > 0) on the shared CLIENT span before it ends, and this keeps that trace
+          # whole: every link points at a trace that exists. The joiners themselves stay sampled
+          # (option (a): keep the target of the link, not every reader). Matches nothing until a
+          # snowplow release carries #1322; its rate is on snowplow's /debug/vars counters from the
+          # first hour, and if it is high, revisit this against a sampled keep.
+          - name: snowplow-shared-upstream
+            type: ottl_condition
+            ottl_condition:
+              error_mode: ignore
+              span:
+                - >-
+                  span.attributes["snowplow.upstream.joiners"] != nil
+                  and Int(span.attributes["snowplow.upstream.joiners"]) > 0
           # Everything else from the sampled services: a fixed 5%, hashed on TraceId so every replica
           # agrees. Diego, 2026-10-24 (installer#402); alert-provider added 2026-11-09.
           - name: sample-5pct
