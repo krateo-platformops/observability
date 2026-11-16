@@ -817,8 +817,12 @@ clickstack:
                       GRANT SELECT ON default.otel_logs, SELECT ON default.otel_traces,
                       SELECT ON default.otel_metrics_gauge, SELECT ON default.otel_metrics_sum,
                       SELECT ON default.otel_metrics_histogram, SELECT ON default.krateo_audit
-              # analyst: every telemetry table and krateo_audit, nothing else. No sealing tables and
-              # no system.query_log (it holds every user's query text) unless Diego adds them.
+              # analyst: every telemetry table, krateo_audit, and two CMP contract tables, for ops
+              # reading per-tenant health and usage: cmp.health_records (cmp-usage-collector's health
+              # rows) and showback.usage_records (showback's usage). Nothing else in cmp or showback,
+              # no sealing tables and no system.query_log (it holds every user's query text) unless
+              # Diego adds them. `showback` exists only where the showback component is installed;
+              # ClickHouse accepts the grant without it, and it applies once the table is created.
               # system.tables and system.columns are readable without a grant, filtered to the
               # tables the user can see.
               analyst:
@@ -831,7 +835,8 @@ clickstack:
                       SELECT ON default.otel_metrics_gauge, SELECT ON default.otel_metrics_sum,
                       SELECT ON default.otel_metrics_histogram,
                       SELECT ON default.otel_metrics_exponential_histogram,
-                      SELECT ON default.otel_metrics_summary, SELECT ON default.krateo_audit
+                      SELECT ON default.otel_metrics_summary, SELECT ON default.krateo_audit,
+                      SELECT ON cmp.health_records, SELECT ON showback.usage_records
               # mcp_reader: clickhouse-mcp-server's run_query for clickstack-agent and incident-agent.
               mcp_reader:
                 password_sha256_hex:

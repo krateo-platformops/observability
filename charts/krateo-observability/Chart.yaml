@@ -191,7 +191,16 @@ type: application
 # reads that user's Secret. No new settable values key: user, Secret and database are platform
 # constants. The new containerTemplate.env entry ROLLS ClickHouse ONCE (the extraConfig change would
 # restart it anyway). No client is switched. Decision: Diego 2026-11-16.
-version: 0.1.47
+# 0.1.48: analyst also reads the CMP contract tables, for ops reading per-tenant health and usage:
+# its ONE grant statement adds SELECT ON cmp.health_records (cmp-usage-collector's health rows) and
+# SELECT ON showback.usage_records (showback's usage), and nothing else in cmp or showback. Still no
+# sealing tables and no system.query_log. `showback` exists only where the showback component is
+# installed; ClickHouse 26.10.3.7 loads the grant without the database and applies it once the table
+# is created (tests/clickhouse-users-docker.py, both states). Every other user's grants are
+# byte-identical (tests/fixtures/clickhouse-users-grants.json). Only extraUsersConfig changes (no new
+# env entry, no extraConfig change), which ClickHouse reloads without a restart. Decision: Diego
+# 2026-11-16.
+version: 0.1.48
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack
