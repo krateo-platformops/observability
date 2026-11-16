@@ -1,0 +1,23 @@
+# Published versions of this repo's charts that must not be pinned.
+#
+# A tag cannot be withdrawn: it stays in the registry and looks like any other release. This list is
+# how a release is marked bad where a pinning session will see it. installer's CI reads it on every
+# PR, over every pin, and refuses a pin on a listed version, so a bad pin fails CI whether or not
+# anyone was told.
+#
+# Same schema as krateo-platformops/frontend's and portal's. `charts` names the chart, as in the
+# `chart:` field of installer's component-pins.yaml (the `name:` of a charts/<dir>/Chart.yaml here),
+# never a chart this repo does not publish. `use` is the version to pin instead and must already be
+# published when the entry lands. Superseded is not retracted: a version is listed only when pinning
+# it would put something wrong on a cluster. tests/retracted-versions.py guards all of this.
+retracted:
+  - version: 0.1.1
+    charts: [krateo-slo-rollup]
+    use: 0.1.2
+    reason: >-
+      Defaults clickhouse.credentialsSecret to otel-clickhouse-credentials, the OTel collector's write
+      identity, so enabling the rollup ran it with write access to every table in `default` instead
+      of as the platform's least-privilege slo_rollup user. Nothing failed: the Job worked, and only
+      the Secret it mounted showed the wrong principal. 0.1.2 (#177) defaults to
+      clickhouse-slo-rollup-credentials, and its e2e asserts the view's definer and every write are
+      slo_rollup's. Never enabled on any cluster.

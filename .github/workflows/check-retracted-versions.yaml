@@ -1,0 +1,34 @@
+name: check-retracted-versions
+
+# retracted-versions.yaml is read by installer's CI to refuse pins on listed versions. A broken entry
+# (a chart this repo does not publish, an unpublished version, a replacement that does not exist)
+# would either block installer or silently retract nothing, so every change to it is checked here.
+on:
+  pull_request:
+    paths:
+      - retracted-versions.yaml
+      - tests/retracted-versions.py
+      - .github/workflows/check-retracted-versions.yaml
+      - charts/*/Chart.yaml
+  push:
+    branches: [main]
+    paths:
+      - retracted-versions.yaml
+      - tests/retracted-versions.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  retracted:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml
+      - name: retracted-versions.yaml
+        run: python3 tests/retracted-versions.py
