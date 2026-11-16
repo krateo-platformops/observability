@@ -1,7 +1,7 @@
 ---
 type: Configuration
 title: observability — the default alert set
-description: The 32 Alert CRs the chart seeds, the measured evidence behind every filter and threshold, and the three rules that decide whether an Alert can fire at all — `where` is ClickHouse SQL and not the Lucene the CRD advertises, severity needs `otel-collector-daemonset` ≥ 0.1.17 and JSON logs, and log alerts must exclude the observability stack or they diagnose themselves. Event alerts skip the DELETED copy of an expired Event.
+description: The 33 Alert CRs the chart seeds, the measured evidence behind every filter and threshold, and the three rules that decide whether an Alert can fire at all — `where` is ClickHouse SQL and not the Lucene the CRD advertises, severity needs `otel-collector-daemonset` ≥ 0.1.17 and JSON logs, and log alerts must exclude the observability stack or they diagnose themselves. Event alerts skip the DELETED copy of an expired Event.
 resource: oci://ghcr.io/krateo-platformops/charts/krateo-observability
 tags: [alerting, alerts, observability, clickhouse, hyperdx, sre, runbook]
 timestamp: 2026-09-18T00:00:00Z
@@ -123,6 +123,7 @@ about whether your cluster has that problem.
 | `sre-krateo-composition-reconcile-error` | core | logs | above 2 | 15m | 59,811 |
 | `sre-krateo-provider-connection-failure` | core | events | above 10 | 15m | 1,706 |
 | `sre-rest-controller-vendor-5xx` | core | logs, generated REST controllers' failed observes with a vendor 5xx | above 19 for 2 consecutive windows | 15m | 328 (1 firing run, the 2026-11-12 outage) |
+| `sre-rest-controller-vendor-5xx-persistent` | core | logs, the same rows | above 3 for 4 consecutive windows | 15m | 328 (1 firing run, the 2026-11-12 outage) |
 | `sre-app-panic` | core | logs | above 0 | 15m | 0 |
 | `sre-app-out-of-memory` | core | logs | above 0 | 15m | 0 |
 | `sre-certificate-expiry-warning` | core | logs | above 0 | 1h | 7,434 |
@@ -223,6 +224,7 @@ boundary case is where the difference lives:
 | `sre-volume-attach-failure` | >= 4 | 0.6%  (**at `>= 3` it is 9.4%** — a 15x difference) |
 | `sre-krateo-provider-connection-failure` | >= 11 | 1.6% |
 | `sre-rest-controller-vendor-5xx` | >= 20, 2 windows in a row | 3 of 678 windows ALERT (0.4%), all in one outage |
+| `sre-rest-controller-vendor-5xx-persistent` | >= 4, 4 windows in a row | 1 of 678 windows ALERT (0.1%), the same outage |
 | `sre-telemetry-pipeline-stalled` | < 100 | 0.0%  (observed floor: 67,081 rows/window) |
 
 `below` is exclusive, so the dead-man's switch reads correctly as "fewer than 100 rows".
@@ -346,11 +348,14 @@ which the `msg` filter leaves out so a failure counts once. 4xx is left out on p
 404 mean credentials, permissions or a missing object, and each resource reports those on its own
 status. In the 7 days to 2026-11-16 there were no 4xx observe failures on krateo-057 at all.
 
-**Not per kind.** alert-provider's `groupBy` is for metric alerts only. Its CRD refuses it on a log
-alert (`!has(self.groupBy) || has(self.metricRef)`, `helm/alert-provider-crds/templates/crd.alert.yaml`,
-the same rule live on krateo-057 with alert-provider 0.2.85), and `rest-dynamic-controller` exports no
-metrics or spans to build a `Metric` from. So the alert counts all kinds together, and the kind is
-named in two places instead:
+**Not per kind.** Grouping is out on both sides. alert-provider's `groupBy` is for metric alerts
+only: its CRD refuses it on a log alert (`!has(self.groupBy) || has(self.metricRef)`,
+`helm/alert-provider-crds/templates/crd.alert.yaml`, the same rule live on krateo-057 with
+alert-provider 0.2.85). And the metric a `Metric` could group,
+`rest_dynamic_controller.external.request.count` (with `http.response.status_code`), is off on
+krateo-057: `rest-dynamic-controller` exports it only with `OTEL_ENABLED`, and none of the 34
+controllers' ConfigMaps sets that key (0.1.51). So the alert counts all kinds together, and the kind
+is named in two places instead:
 
 - the Incident's records, which alert-provider groups by `ServiceName` and pod for a container log,
   so they name the failing controller (`github-provider-kog-pullrequest-controller`);
@@ -382,14 +387,65 @@ were non-empty:
 - Two windows in a row keeps a single failed resync from firing: the 13:37 burst was every
   PullRequest failing once, then 57 minutes of successes. It goes PENDING, which notifies nothing.
   It also keeps the outage to one firing instead of two.
-- 20 is about two resources failing every resync. On krateo-057 a resource resyncs every 3 minutes
-  and a failed resync logs two rows for it, about 10 rows per resource per window, so one resource
-  failing on its own stays below the threshold: that resource's own status shows it.
+- **The floor (corrected in 0.1.51; 0.1.50 said "about 10 rows per resource").** A resource resyncs
+  every 3 minutes (`REST_CONTROLLER_RESYNC_INTERVAL`, unset on all 34 controllers on 057), so a
+  window holds up to 5 failed passes per resource, fewer when the vendor fails intermittently. A
+  failed pass logs 1 to 6 rows: the pass, then one per error retry (1 s base, doubling, at most 5)
+  until a retry succeeds. On 057 that was 2 rows in the 11-12 outage (a retry about 1.4 s later
+  failed too) and 6 rows in 31 s for one hard failure on 11-10. So one resource gives 5 to 30 rows
+  a window, and 20 rows needs:
+
+  | rows per failed pass | resources needed, every pass failing |
+  |---|---|
+  | 1 (the failure clears on its first retry) | at least 4 |
+  | 2 (the 11-12 outage) | at least 2 |
+  | 6 (hard down, every retry fails) | 1 |
+
+  It needs more resources against an intermittent failure or a longer resync. At a 5-minute resync
+  a window holds 3 passes, so it needs at least 7 resources at 1 row a pass.
+  `sre-rest-controller-vendor-5xx-persistent` catches the 1-to-3-resource outage that this alert
+  misses.
 - A kind that resyncs less often than every 15 minutes leaves empty windows, and an empty window
   restarts the count, so this alert can't see a vendor outage on such a kind.
 
-`tests/vendor-5xx-alert-docker.py` (workflow `check-vendor-5xx-alert`) renders the Alert, checks its
-spec, and replays these counts (`tests/fixtures/vendor-5xx-krateo-057.json`, counts only) as synthetic
+`tests/vendor-5xx-alert-docker.py` (workflow `check-vendor-5xx-alert`) renders both Alerts, checks their
+specs, and replays these counts (`tests/fixtures/vendor-5xx-krateo-057.json`, counts only) as synthetic
 rows through the rendered `where` in ClickHouse 26.10.3.7, with the 4xx, non-status, other-controller
 and HyperDX-echo controls left out. Needs alert-provider 0.2.69 (`runbook`; `consecutiveWindows` on a
 log alert since 0.2.64).
+
+## `sre-rest-controller-vendor-5xx-persistent` (0.1.51)
+
+This alert uses the same `where` as `sre-rest-controller-vendor-5xx`. It fires on **at least 4 rows in
+each of 4 consecutive 15-minute windows**: a vendor 5xx that has persisted for an hour, however few
+resources it hits. Diego asked for it on 2026-11-16, after the fast alert's floor turned out to be 4
+resources, not 2.
+
+- **Why 4 rows, not 5.** One resource has up to 5 failed passes a window. client-go jitters the
+  resync, and an intermittent vendor fails only some passes. A threshold of 5 would let one window
+  of 4 break the streak, in exactly the outage this alert is for.
+- **Why 4 windows.** A failure has to last an hour. Every isolated failure on 057 sat in a single
+  window. The 4 rows of 500 on 11-10 reach the threshold and go PENDING, which notifies nothing.
+
+Replay on krateo-057's counts:
+
+| case | fast (>= 20 x 2) | persistent (>= 4 x 4) |
+|---|---|---|
+| (a) 11-12 outage, 17 PullRequests, 503 | ALERT 15:00 to 15:45 | ALERT 15:30 to 15:45 (the 15:15 window is its 4th), the same outage |
+| (b) isolated 500 x4, 502 x2, 503 x1, 504 x1 | OK | OK, the 500s PENDING for one window |
+| (e) quiet day 11-15 | OK | OK |
+| (c) one resource, 75 min, 1 or 2 rows a pass, 5 start phases | never | fires in every phase |
+| (d) one resource, 45 min, 1 row a pass, 5 start phases | never | never |
+| (f) one resource, 75 min, resync jittered +-20 s | never | fires |
+| (g) one resource, 75 min, failing 4 of every 5 passes | never | fires (4 rows a window) |
+| (h) a single 4-row window, then quiet | never | never |
+| (i) one resource hard down (6 rows a pass), 45 min | fires | never (3 windows) |
+
+**Limit.** With 2 or more rows a pass, as in the 11-12 outage, 2 failed passes reach 4 rows. A
+45-minute failure that starts 7 minutes into a window touches 4 windows (6, 10, 10 and 4 rows), so it
+fires. The test asserts this so the behaviour stays visible. The "an hour" in the description holds
+at 1 row a pass. With more rows a pass, it's 45 to 60 minutes, depending on where the failure starts
+relative to the window boundaries.
+
+When both alerts fire, they open two incidents for one outage. The persistent alert's runbook says to
+work the outage under the fast alert.

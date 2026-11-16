@@ -224,7 +224,16 @@ type: application
 # stays silent on the isolated 500/502/503/504 failures. Not per kind: groupBy is metric-only in
 # alert-provider, so the incident's records name the controller and the runbook names kind and
 # status. Adds one Alert CR; nothing else in the render changes.
-version: 0.1.50
+# 0.1.51: a second vendor 5xx alert, sre-rest-controller-vendor-5xx-persistent (Diego, 2026-11-16): the
+# same where, at least 4 rows in each of 4 consecutive 15-minute windows, so a vendor 5xx on even one
+# resource fires once it persists for an hour. 0.1.50's alert (20 rows, 2 windows) misses a 1-3
+# resource outage: a resource has up to 5 failed passes a window at the 3-minute resync. Its comment
+# and runbook now state that floor (each failed pass logs 1 to 6 rows, the pass plus its error
+# retries; 2 in the 11-12 outage) in place of "about 10 rows per resource", and why groupBy is out
+# on both sides (alert-provider refuses it on log alerts; rest-dynamic-controller's request metric is
+# off without OTEL_ENABLED, unset on 057). Replay on 057's counts: the persistent alert fires once in
+# the 11-12 outage (15:30-15:45), silent on the isolated failures. Adds one Alert CR.
+version: 0.1.51
 appVersion: "3.5.0"
 dependencies:
   - name: clickstack
