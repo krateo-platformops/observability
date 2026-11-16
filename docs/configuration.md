@@ -163,6 +163,44 @@ top-level `global` propagates into clickstack and all its subcharts
   (`query_log`/`text_log`/`metric_log`/`part_log`/`asynchronous_metric_log`/`trace_log`) —
   retention-incident fix, do not remove (see Gotchas).
 
+### clickstack 3.5.0 and HyperDX's dashboard provisioner (`0.1.49`)
+
+`0.1.49` moves the subchart to clickstack 3.5.0 (HyperDX 2.39.1). Its new dashboard provisioner,
+`clickstack.hyperdx.dashboards.enabled`, **stays `false`**, and
+`templates/hyperdx-dashboards-guard.yaml` fails the render if a value turns it on.
+
+Why: upstream's `effectiveNamespaces` helper always adds the release namespace to the provisioner's
+scope, whatever `dashboards.namespaces` says. On, it grants HyperDX's ServiceAccount get/list/watch
+on every ConfigMap in `krateo-system` (319 on krateo-057, authn's config among them): a Role there
+with `namespaces: []`, a ClusterRole bound by a RoleBinding there and in each listed namespace with
+`[ns, ...]`, a ClusterRoleBinding with `[ALL]`. RBAC can't select by label. Granting only a dedicated
+namespace (`rbac.create: false`, the grant made elsewhere) fails too: the `dashboard-watcher`
+sidecar is refused (403) on its first sync of `krateo-system`, exits and crash-loops, and the HyperDX
+pod goes NotReady (kind, 2026-11-16). It comes on in a dedicated namespace once an upstream release
+can leave the release namespace out (Diego, 2026-11-16); the guard then changes in the same version.
+
+Off, upstream renders no ServiceAccount, Role, RoleBinding, ClusterRole or sidecar, and the HyperDX
+pod keeps the namespace's `default` ServiceAccount, as in `0.1.48`.
+
+For later, what upstream provides once on: a `dashboard-watcher` sidecar
+(`kiwigrid/k8s-sidecar:2.10.1`) copies the `*.json` keys of ConfigMaps labelled
+`hyperdx.io/dashboard: "true"` into an emptyDir at `/dashboards`, and HyperDX's `provision-dashboards`
+task, a process in the app container, upserts each by `name` into every team each minute
+(`DASHBOARD_PROVISIONER_ALL_TEAMS=true`; `DASHBOARD_PROVISIONER_TEAM_ID` in `deployment.env` would
+pick one team), flagged `provisioned: true`, with the app's own `MONGO_URI`. It never deletes. Knobs:
+`dashboards.{enabled, namespaces, rbac.create, sidecarImage, sidecarPullPolicy, configMaps,
+resources}`; upstream also refuses `enabled` without `hyperdx.serviceAccount.create` or `.name`.
+Upstream's sidecar limit, 64Mi, OOMKilled it within a minute of each start on kind (peak 95Mi,
+steady 72-79Mi): raise it when turning it on.
+
+Also from clickstack 3.5.0: the readiness probe reads `/ready` (503 until MongoDB is connected)
+where it read `/health`; the default sources changed, which HyperDX applies only where none exist.
+Two upstream additions are nulled to keep what runs unchanged:
+`clickhouse.cluster.spec.settings.logger` (`extraConfig.logger` stays the bound) and
+`hyperdx.config.HYPERDX_OTEL_EXPORTER_TABLES_TTL` (read only by the disabled bundled collector).
+The `wait-for-mongodb-auth` init container must run the app's image; the render now fails if it
+doesn't.
+
 ### ClickHouse resources & storage (the load-bearing path)
 
 - `clickstack.clickhouse.cluster.spec.containerTemplate.resources`: limits `cpu 4 / memory

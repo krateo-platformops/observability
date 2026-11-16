@@ -45,7 +45,10 @@ import urllib.parse
 import yaml
 
 CHART = "charts/krateo-observability"
-SUBCHART_TGZ = "charts/krateo-observability/charts/clickstack-3.2.0.tgz"
+# The vendored clickstack chart at the version Chart.yaml pins (3.5.0 since 0.1.49).
+_CLICKSTACK = next(d for d in yaml.safe_load(open(pathlib.Path(__file__).resolve().parent.parent / CHART / "Chart.yaml"))["dependencies"]
+                   if d["name"] == "clickstack")["version"]
+SUBCHART_TGZ = f"{CHART}/charts/clickstack-{_CLICKSTACK}.tgz"
 SECRET = "mongodb-hyperdx-credentials"
 GEN_KEY = "krateo.io/mongodb-credential-generation"
 INIT = "wait-for-mongodb-auth"
@@ -239,6 +242,18 @@ def check_render(root, docs, default):
     for where, c in consumers:
         check(mongo_uri_ref(c) == want, f"{where} container {c['name']}: MONGO_URI from secretKeyRef {SECRET}/uri")
     check(not [d for d in docs if d["kind"] == "CronJob"], "no check-alerts CronJob renders (hyperdx.tasks stays off)")
+    # HyperDX's dashboard provisioner stays off (0.1.49): clickstack 3.5.0 always puts the release
+    # namespace in its scope, i.e. read on every ConfigMap in krateo-system. Off, nothing of it renders.
+    rbac = sorted(f"{d['kind']}/{d['metadata']['name']}" for d in docs
+                  if d["kind"] in ("ServiceAccount", "Role", "RoleBinding", "ClusterRole", "ClusterRoleBinding"))
+    check(not rbac, f"no ServiceAccount, Role, RoleBinding, ClusterRole or ClusterRoleBinding renders ({rbac or 'none'})")
+    hx_pod = next(d for d in docs if d["kind"] == "Deployment"
+                  and d["metadata"]["name"] == "krateo-clickstack")["spec"]["template"]["spec"]
+    names = [c["name"] for c in hx_pod["containers"]]
+    check(names == ["app"], f"HyperDX runs one container, no dashboard-watcher ({names})")
+    check("serviceAccountName" not in hx_pod, "HyperDX keeps the namespace's default ServiceAccount (no serviceAccountName)")
+    env_names = {e["name"] for c in hx_pod["containers"] for e in c.get("env", [])}
+    check(not {"DASHBOARD_PROVISIONER_DIR", "DASHBOARD_PROVISIONER_ALL_TEAMS"} & env_names, "no DASHBOARD_PROVISIONER_* variable")
 
     mdb = next((d for d in docs if d["kind"] == "MongoDBCommunity"), None)
     users = {u["name"]: u for u in ((mdb or {}).get("spec") or {}).get("users", [])}
@@ -325,6 +340,19 @@ def check_guards(root):
          "passwordSecretRef {name: mongodb-hyperdx-credentials, key: password}"),
         ("the generation annotation removed",
          {"clickstack": {"hyperdx": {"deployment": {"podAnnotations": {GEN_KEY: None}}}}}, f"must carry {GEN_KEY}"),
+        # A clickstack bump moves the app's tag (its appVersion); the auth wait must move with it.
+        ("the app image moved without the auth wait",
+         {"clickstack": {"hyperdx": {"deployment": {"image": {"tag": "0.0.0-not-the-wait"}}}}},
+         "wait-for-mongodb-auth must run the HyperDX app image"),
+        # With a ServiceAccount supplied upstream's own check passes, so only this chart's guard stands.
+        ("the dashboard provisioner turned on",
+         {"clickstack": {"hyperdx": {"dashboards": {"enabled": True}, "serviceAccount": {"create": True}}}},
+         "dashboards.enabled must stay false"),
+        ("the dashboard provisioner on, its RBAC made elsewhere",
+         {"clickstack": {"hyperdx": {"dashboards": {"enabled": True, "rbac": {"create": False},
+                                                    "namespaces": ["krateo-dashboards"]},
+                                     "serviceAccount": {"name": "default"}}}},
+         "dashboards.enabled must stay false"),
     ]
     for label, overlay, needle in cases:
         r = render_with(root, overlay, expect_fail=True)
