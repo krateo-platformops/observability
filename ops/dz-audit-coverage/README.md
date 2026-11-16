@@ -22,6 +22,13 @@ clickhouse-client --readonly=1 --param_start='…' --param_end='…' --queries-f
 | snowplow | 224 | **missing on all rows** |
 | composition-dynamic-controller | 45 | 1 (flip window only) |
 | authn | 35 (+2 as `auth`, 11-12) | 1 |
-| rest-dynamic-controller (`rest-dynamic-controller/audit`) | 24 | **missing on all rows** |
+| rest-dynamic-controller (`rest-dynamic-controller/audit`) | 24 | missing, see below |
 
 Leakage: none. WORM: 3,744 = 3,744.
+
+**Correction (same day).** The 24 rest-dynamic-controller rows are all from builds **0.48.0 and 0.56.0**
+(`service.version`, 2026-11-09 10:02Z → 11-10 09:40Z): the pre-v0.4 audit shape (an `outcome` key, no
+EventName), from before the library stamped `krateo.audit.schema_version` (stamped by `Emit` since
+krateo-platformops/audit v0.4.0). The build on krateo-057 (0.71.0) uses audit v0.6.0 and has written no
+audit row since, so it is unobserved, not missing. Its scope is still the non-canonical
+`rest-dynamic-controller/audit`. The check reads the current build once it writes.
