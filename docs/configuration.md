@@ -163,6 +163,45 @@ top-level `global` propagates into clickstack and all its subcharts
   (`query_log`/`text_log`/`metric_log`/`part_log`/`asynchronous_metric_log`/`trace_log`) —
   retention-incident fix, do not remove (see Gotchas).
 
+### HyperDX's dashboard provisioner (`0.1.49`, clickstack 3.5.0)
+
+`clickstack.hyperdx.dashboards.enabled: true`, with no dashboards yet. Two parts in the HyperDX
+pod: the `dashboard-watcher` sidecar (`kiwigrid/k8s-sidecar:2.10.1`) copies the `*.json` keys of
+every ConfigMap labelled `hyperdx.io/dashboard: "true"` in the release namespace into an emptyDir at
+`/dashboards`, and HyperDX's own `provision-dashboards` task, a process in the app container, reads
+that directory every minute and upserts each dashboard by `name` into every team
+(`DASHBOARD_PROVISIONER_ALL_TEAMS=true`, set by upstream), flagged `provisioned: true`. It never
+deletes, and a user's dashboard with the same name stays beside the provisioned one. It uses the
+app container's `MONGO_URI`, so `mongodb-hyperdx-credentials`. With an empty directory each run is a
+no-op.
+
+| Key | Here | Upstream default |
+|---|---|---|
+| `clickstack.hyperdx.dashboards.enabled` | `true` | `false` |
+| `clickstack.hyperdx.dashboards.namespaces` | `[]`: the release namespace only, a Role | `[]` (`[ns, ...]`: a ClusterRole bound by RoleBindings; `[ALL]`: ClusterRoleBinding) |
+| `clickstack.hyperdx.dashboards.rbac.create` | `true` | `true` |
+| `clickstack.hyperdx.dashboards.configMaps` | `{}` (`<file>.json: <dashboard JSON>` renders ConfigMap `krateo-clickstack-dashboards`) | `{}` |
+| `clickstack.hyperdx.dashboards.sidecarImage` / `sidecarPullPolicy` | upstream's | `kiwigrid/k8s-sidecar:2.10.1`, `IfNotPresent` |
+| `clickstack.hyperdx.dashboards.resources` | 10m/96Mi request, 50m/192Mi limit | 10m/32Mi request, 50m/64Mi limit, which OOMKilled the watcher within a minute of each start on kind (peak 95Mi, steady 72-79Mi) and so took the HyperDX pod out of its Service |
+| `clickstack.hyperdx.serviceAccount.create` | `true` (ServiceAccount `krateo-clickstack`; the pod ran as `default` before) | `false` |
+
+A dashboard is a ConfigMap in `krateo-system` with label `hyperdx.io/dashboard: "true"` and one
+key per dashboard, ending in `.json`, holding the dashboard as HyperDX exports it (`name`, `tiles`,
+optional `tags`, `filters`, `containers`, ...). A file that doesn't parse is skipped with a warning.
+The Role grants `get`, `list` and `watch` on ConfigMaps in `krateo-system`; RBAC can't select by
+label, so that is every ConfigMap there, readable by the sidecar and by the app container (one
+ServiceAccount). There is no values key for the team mode. One team only would take
+`DASHBOARD_PROVISIONER_TEAM_ID` (a 24-hex team id) in `deployment.env`: HyperDX then uses it over
+`ALL_TEAMS`, with a warning. Remember that an `env` override replaces the chart's whole list.
+
+Also from clickstack 3.5.0: HyperDX 2.39.1; the readiness probe reads `/ready` (503 until MongoDB is
+connected) where it read `/health`; the default sources changed, which HyperDX applies only where
+they don't exist yet. Two upstream additions are nulled to keep what runs unchanged:
+`clickhouse.cluster.spec.settings.logger` (`extraConfig.logger` stays the bound) and
+`hyperdx.config.HYPERDX_OTEL_EXPORTER_TABLES_TTL` (read only by the disabled bundled collector).
+The `wait-for-mongodb-auth` init container must run the app's image; the render now fails if it
+doesn't.
+
 ### ClickHouse resources & storage (the load-bearing path)
 
 - `clickstack.clickhouse.cluster.spec.containerTemplate.resources`: limits `cpu 4 / memory

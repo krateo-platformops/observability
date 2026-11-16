@@ -45,7 +45,10 @@ import urllib.parse
 import yaml
 
 CHART = "charts/krateo-observability"
-SUBCHART_TGZ = "charts/krateo-observability/charts/clickstack-3.2.0.tgz"
+# The vendored clickstack chart at the version Chart.yaml pins (3.5.0 since 0.1.49).
+_CLICKSTACK = next(d for d in yaml.safe_load(open(pathlib.Path(__file__).resolve().parent.parent / CHART / "Chart.yaml"))["dependencies"]
+                   if d["name"] == "clickstack")["version"]
+SUBCHART_TGZ = f"{CHART}/charts/clickstack-{_CLICKSTACK}.tgz"
 SECRET = "mongodb-hyperdx-credentials"
 GEN_KEY = "krateo.io/mongodb-credential-generation"
 INIT = "wait-for-mongodb-auth"
@@ -325,6 +328,10 @@ def check_guards(root):
          "passwordSecretRef {name: mongodb-hyperdx-credentials, key: password}"),
         ("the generation annotation removed",
          {"clickstack": {"hyperdx": {"deployment": {"podAnnotations": {GEN_KEY: None}}}}}, f"must carry {GEN_KEY}"),
+        # A clickstack bump moves the app's tag (its appVersion); the auth wait must move with it.
+        ("the app image moved without the auth wait",
+         {"clickstack": {"hyperdx": {"deployment": {"image": {"tag": "0.0.0-not-the-wait"}}}}},
+         "wait-for-mongodb-auth must run the HyperDX app image"),
     ]
     for label, overlay, needle in cases:
         r = render_with(root, overlay, expect_fail=True)

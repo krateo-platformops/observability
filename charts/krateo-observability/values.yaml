@@ -33,7 +33,7 @@ otelCredentials:
 # (krateo-clickstack-app); enabling this renders an ADDITIONAL LoadBalancer Service
 # for the HyperDX UI (no hardcoded IP — the cloud assigns one).
 #
-# DISABLED BY DEFAULT (secure-by-default). HyperDX 2.35.0 OSS has ONLY its own built-in
+# DISABLED BY DEFAULT (secure-by-default). HyperDX OSS (2.35.0, still 2.39.1) has ONLY its own built-in
 # email+password login — no external JWT/OIDC/SSO federation — so a public LoadBalancer
 # puts an internet-facing app guarded solely by that login on a raw cloud IP, outside the
 # platform authn/agentgateway edge. Leave this false and reach the UI in-cluster
@@ -86,7 +86,7 @@ defaultAlerts:
   # set replaces were all of the second kind.
   #
   # `above N` MEANS `count >= N`, NOT `count > N`. Read from the running HyperDX build
-  # (2.35.0, packages/api/build/tasks/checkAlerts/index.js):
+  # (2.35.0, packages/api/build/tasks/checkAlerts/index.js; doesExceedThreshold unchanged in 2.39.1):
   #
   #     ABOVE -> value >= threshold        ABOVE_EXCLUSIVE -> value > threshold
   #     BELOW -> value <  threshold        BELOW_OR_EQUAL  -> value <= threshold
@@ -498,10 +498,13 @@ clickstack:
     cluster:
       spec:
         containerTemplate:
-          # ClickHouse server image. Upstream clickstack 3.2.0 defaults this to
+          # ClickHouse server image. Upstream clickstack 3.2.0 defaulted this to
           # clickhouse/clickhouse-server:25.7-alpine (a MAP: image.repository +
           # image.tag — see charts/clickstack/values.yaml cluster.spec.containerTemplate.image),
-          # which is now EOL. Override only the tag to 26.8-alpine (newest ClickHouse
+          # which is now EOL; 3.5.0 defaults it to 26.8.36.3-alpine and pins Keeper to
+          # clickhouse/clickhouse-keeper:26.8.36.3-alpine. The tag below and the Keeper pin above
+          # (repository and tag both) override those, so the rendered CRs keep 26.10.3.7.
+          # Override only the tag (originally to 26.8-alpine, the newest ClickHouse
           # LTS); repository deep-merges from upstream (clickhouse/clickhouse-server).
           # This is the REAL, live image now (it lands in the ClickHouseCluster CR spec
           # the operator reads), NOT the old inert top-level clickhouse.image placeholder
@@ -668,6 +671,12 @@ clickstack:
         # dynamic_query_handler rules are required: once http_handlers is defined ClickHouse stops
         # serving its default routes, so the operator probes + native query API must be re-declared.
         settings:
+          # Upstream clickstack 3.5.0 adds the operator's own logger field (information, 100M x 10).
+          # The server log files are already bounded by extraConfig.logger below (information,
+          # 100M x 5, 0.1.22), and that is the one this chart keeps. null deletes upstream's key, so
+          # the ClickHouseCluster spec stays as it was and the clickstack 3.5.0 upgrade changes
+          # nothing in ClickHouse's config.
+          logger: null
           # PORTAL READER USERS. sse-proxy and snowplow read ClickHouse as `default` today, which has
           # no password and GRANT ALL. These two users bound portal reads instead: read-only, a time
           # limit, two threads each and a per-user query cap, so reads can't fill the server's 100
@@ -1094,6 +1103,12 @@ clickstack:
     # in the ConfigMap is left to win over. The template refuses to render if this key comes back.
     config:
       MONGO_URI: null
+      # Added by clickstack 3.5.0: the retention its bundled collector gives the tables it creates.
+      # Only HyperDX's OpAMP config template reads it (opampController.js, with its own 720h
+      # default), for the bundled collector this chart disables. The collectors that create otel_*
+      # here set their own ttl (168h). Deleted so clickstack-config doesn't state a 30-day
+      # retention that nothing applies.
+      HYPERDX_OTEL_EXPORTER_TABLES_TTL: null
     # MONGODB_PASSWORD is emptied (0.1.46). It is upstream's public default, rendered into
     # krateo-clickstack-mongodb-password and clickstack-secret. Nothing has read it since 0.1.44 (the
     # MongoDB user's passwordSecretRef names mongodb-hyperdx-credentials, HyperDX's MONGO_URI comes
@@ -1104,6 +1119,50 @@ clickstack:
     # 0.1.44). Upstream has no switch for its password Secret, so it stays, empty.
     secrets:
       MONGODB_PASSWORD: ""
+
+    # HyperDX's DASHBOARD PROVISIONER (clickstack 3.5.0, 0.1.49), ON, with NO dashboards yet: they come
+    # in a later version. Two parts, both in the HyperDX pod:
+    #   - dashboard-watcher, a k8s-sidecar (kiwigrid/k8s-sidecar:2.10.1, upstream's pin) that watches
+    #     ConfigMaps labelled hyperdx.io/dashboard: "true" and copies their *.json keys into an
+    #     emptyDir mounted at /dashboards;
+    #   - HyperDX's own provision-dashboards task, a fourth process in the app container (the image's
+    #     entry.sh starts it when DASHBOARD_PROVISIONER_DIR is set). With RUN_SCHEDULED_TASKS_EXTERNALLY
+    #     false it runs every minute, reads /dashboards and upserts each dashboard by name into every
+    #     HyperDX team (DASHBOARD_PROVISIONER_ALL_TEAMS: "true", set by upstream), flagged
+    #     provisioned: true. It never deletes, and a user's own dashboard of the same name is left alone
+    #     beside it. It connects with the app container's MONGO_URI, so the generated credential above,
+    #     not a new one. An empty /dashboards is a no-op: no write, no error.
+    # A dashboard is a ConfigMap in THIS namespace, labelled hyperdx.io/dashboard: "true", whose data
+    # keys end in .json and hold one exported HyperDX dashboard each ({"name": ..., "tiles": [...]}).
+    # dashboards.configMaps renders such a ConfigMap from values (krateo-clickstack-dashboards); empty
+    # here, so none renders.
+    # namespaces [] keeps discovery to the release namespace: a Role and a RoleBinding granting the
+    # HyperDX ServiceAccount get, list and watch on ConfigMaps there, no ClusterRole. Kubernetes RBAC
+    # can't select by label, so that is EVERY ConfigMap in this namespace, readable by the sidecar AND
+    # the app container (one ServiceAccount, one token). "ALL" would make it cluster-wide.
+    dashboards:
+      enabled: true
+      namespaces: []
+      rbac:
+        create: true
+      configMaps: {}
+      # Upstream's 64Mi limit OOMKills the watcher: on kind (k8s-sidecar 2.10.1, one labelled ConfigMap
+      # in a namespace of six) it peaked at 95Mi while starting and then held 72-79Mi, and with 64Mi it
+      # was killed within a minute of every start, 4 times in 5 minutes. A crash-looping sidecar makes
+      # the whole HyperDX pod NotReady, so the app drops out of its Service. 192Mi is twice the peak.
+      # The CPU limit stays upstream's 50m (the watcher is idle between events).
+      resources:
+        requests:
+          cpu: 10m
+          memory: 96Mi
+        limits:
+          cpu: 50m
+          memory: 192Mi
+    # The provisioner's RBAC needs a ServiceAccount of its own: upstream refuses dashboards without one,
+    # and the pod used the namespace's `default` before, which a Role must not widen. create: true
+    # renders ServiceAccount krateo-clickstack (the fullnameOverride) and runs the pod as it.
+    serviceAccount:
+      create: true
 
     # The HyperDX app flapped 15 times on krateo-057 (2026-10-11), every one a SIGKILL after a
     # failed liveness probe. The decisive evidence is that the PREVIOUS container's log held only
@@ -1117,12 +1176,14 @@ clickstack:
     # went quiet once the node was warm, which is why this reads as transient and is not.
     #
     # A startupProbe is the right instrument and we cannot use it: upstream clickstack 3.2.0 does
-    # not template one (grepped templates/, not assumed) and we do not patch third-party charts.
+    # not template one (grepped templates/, not assumed; 3.5.0 still does not) and we do not patch
+    # third-party charts.
     # failureThreshold IS exposed, so it is the knob: 10 moves the kill to 10 + 30x10 = 310s, about
     # 7.5x the measured boot, while still restarting a genuinely wedged process inside ~5 minutes --
     # an acceptable detection delay for an observability UI, and the trade is explicit rather than
-    # incidental. readinessProbe is deliberately left at upstream defaults: it already keeps the pod
-    # out of the Service until /health answers, and it cannot kill.
+    # incidental. readinessProbe is deliberately left at upstream defaults: it keeps the pod out of
+    # the Service until the API answers, and it cannot kill. From clickstack 3.5.0 (HyperDX 2.39.1)
+    # it reads /ready, which answers 503 until MongoDB is connected, where it read /health before.
     deployment:
       livenessProbe:
         failureThreshold: 10
@@ -1192,9 +1253,14 @@ clickstack:
       # the same driver the app uses (/app/node_modules/mongodb in the HyperDX image, so no extra image
       # pull). On a credential change the old pod keeps serving until the new one passes this. The image
       # must be the app container's image: the template refuses to render otherwise.
+      # HyperDX 2.39.1 (clickstack 3.5.0) retries the initial connect forever (connectDBWithRetry) and
+      # its readiness probe, /ready, stays 503 until it is connected, so a pod on a refused credential
+      # is no longer Ready. This init container stays: it still keeps the new pod's app and its
+      # dashboard provisioner from starting before MongoDB takes the password, and the logs then say
+      # why the pod waits.
       initContainers:
         - name: wait-for-mongodb-auth
-          image: docker.hyperdx.io/hyperdx/hyperdx:2.35.0
+          image: docker.hyperdx.io/hyperdx/hyperdx:2.39.1
           imagePullPolicy: IfNotPresent
           workingDir: /app
           command:
