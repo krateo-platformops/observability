@@ -118,7 +118,7 @@ top-level `global` propagates into clickstack and all its subcharts
 
   | User | Profile | Grants |
   |---|---|---|
-  | `analyst` (ad-hoc queries) | `analyst`: readonly=2, 30 s, 4 threads, 4 GiB, 4 at a time | SELECT on the seven `otel_*` tables and `krateo_audit` |
+  | `analyst` (ad-hoc queries) | `analyst`: readonly=2, 30 s, 4 threads, 4 GiB, 4 at a time | SELECT on the seven `otel_*` tables and `krateo_audit`; since `0.1.48` also `cmp.health_records` and `showback.usage_records` |
   | `mcp_reader` (clickhouse-mcp-server) | `mcp_reader`: readonly=0 (the client sends readonly=1 per query), 30 s, 2 threads, 2 GiB, 4 at a time | SELECT on `otel_logs`, `otel_traces`, `otel_metrics_gauge/sum/histogram`, `krateo_audit` |
   | `nightly_reader` (nightly-review) | `batch_reader`: readonly=2, 60 s, 2 threads, 2 at a time | SELECT on `otel_logs` |
   | `audit_sealer` (audit-worm seal) | `default` | SELECT on `krateo_audit`; SELECT, INSERT, CREATE TABLE on `krateo_audit_worm` and `krateo_audit_seal`; CREATE VIEW on `krateo_audit_worm_mv` |
@@ -142,6 +142,14 @@ top-level `global` propagates into clickstack and all its subcharts
   `settings.extraConfig.startup_scripts`: `CREATE DATABASE IF NOT EXISTS cmp ENGINE = Atomic`, run
   by the server on every start before its client ports open. Nothing here is meant to be overridden:
   the user, Secret and database names are fixed.
+- **`analyst` reads the CMP contract tables** (`0.1.48`): its one GRANT statement adds
+  `SELECT ON cmp.health_records` (cmp-usage-collector's health rows) and
+  `SELECT ON showback.usage_records` (showback's usage), for ops reading per-tenant health and usage.
+  Nothing else in `cmp` or `showback`, no sealing tables, no `system.query_log`. `showback` exists
+  only where the showback component is installed: ClickHouse loads the grant without the database,
+  and it applies once showback creates the table. Every user's grants, rendered and as `SHOW GRANTS`
+  prints them, are pinned byte for byte in `tests/fixtures/clickhouse-users-grants.json`, so a grant
+  change shows up in that file's diff.
 - **The `/events` HTTP handler** lives under
   `clickstack.clickhouse.cluster.spec.settings.extraConfig.http_handlers` — NOT a ConfigMap.
   The operator merges `settings.extraConfig` into `/etc/clickhouse-server/config.d/`. The

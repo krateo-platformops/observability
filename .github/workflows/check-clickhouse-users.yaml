@@ -2,7 +2,8 @@
 # per-table grants, @from_env hashes, generated Secrets, no client switched), then that config loaded
 # into the ClickHouse version krateo-057 runs, checked with SHOW GRANTS, CHECK GRANT and getSetting.
 # users.d applies only the first `grants` item and drops the rest silently, so only the database
-# tells the truth.
+# tells the truth. Every user's grants, rendered and from SHOW GRANTS, must match
+# tests/fixtures/clickhouse-users-grants.json byte for byte.
 #
 # A separate workflow, like check-tailsampling: lint.yaml is the org-wide canonical chart lint.
 
@@ -13,12 +14,14 @@ on:
     paths:
       - "charts/krateo-observability/**"
       - "tests/clickhouse-users-docker.py"
+      - "tests/fixtures/clickhouse-users-grants.json"
       - ".github/workflows/check-clickhouse-users.yaml"
   push:
     branches: [main]
     paths:
       - "charts/krateo-observability/**"
       - "tests/clickhouse-users-docker.py"
+      - "tests/fixtures/clickhouse-users-grants.json"
   workflow_dispatch:
 
 permissions:

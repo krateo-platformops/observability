@@ -1,0 +1,156 @@
+{
+  "rendered": {
+    "analyst": [
+      {
+        "query": "GRANT SELECT ON default.otel_logs, SELECT ON default.otel_traces, SELECT ON default.otel_metrics_gauge, SELECT ON default.otel_metrics_sum, SELECT ON default.otel_metrics_histogram, SELECT ON default.otel_metrics_exponential_histogram, SELECT ON default.otel_metrics_summary, SELECT ON default.krateo_audit, SELECT ON cmp.health_records, SELECT ON showback.usage_records"
+      }
+    ],
+    "app": [
+      {
+        "query": "GRANT SHOW ON *.*, SELECT ON system.*, SELECT ON default.*"
+      }
+    ],
+    "audit_sealer": [
+      {
+        "query": "GRANT SELECT ON default.krateo_audit, SELECT, INSERT, CREATE TABLE ON default.krateo_audit_worm, SELECT, INSERT, CREATE TABLE ON default.krateo_audit_seal, CREATE VIEW ON default.krateo_audit_worm_mv"
+      }
+    ],
+    "audit_verifier": [
+      {
+        "query": "GRANT SELECT ON default.krateo_audit, SELECT ON default.krateo_audit_worm, SELECT ON default.krateo_audit_seal, SHOW TABLES ON default.krateo_audit_worm_mv"
+      }
+    ],
+    "hyperdx": [
+      {
+        "query": "GRANT SELECT ON default.otel_logs, SELECT ON default.otel_traces, SELECT ON default.otel_metrics_gauge, SELECT ON default.otel_metrics_sum, SELECT ON default.otel_metrics_histogram, SELECT ON default.krateo_audit, SELECT ON system.data_skipping_indices"
+      }
+    ],
+    "mcp_reader": [
+      {
+        "query": "GRANT SELECT ON default.otel_logs, SELECT ON default.otel_traces, SELECT ON default.otel_metrics_gauge, SELECT ON default.otel_metrics_sum, SELECT ON default.otel_metrics_histogram, SELECT ON default.krateo_audit"
+      }
+    ],
+    "nightly_reader": [
+      {
+        "query": "GRANT SELECT ON default.otel_logs"
+      }
+    ],
+    "otel_writer": [
+      {
+        "query": "GRANT SELECT, INSERT, CREATE TABLE ON default.otel_logs, SELECT, INSERT, CREATE TABLE ON default.otel_traces, SELECT, INSERT, CREATE TABLE ON default.otel_traces_trace_id_ts, SELECT, INSERT, CREATE TABLE ON default.otel_metrics_gauge, SELECT, INSERT, CREATE TABLE ON default.otel_metrics_sum, SELECT, INSERT, CREATE TABLE ON default.otel_metrics_histogram, SELECT, INSERT, CREATE TABLE ON default.otel_metrics_exponential_histogram, SELECT, INSERT, CREATE TABLE ON default.otel_metrics_summary, SELECT, INSERT, CREATE TABLE ON default.krateo_audit, CREATE VIEW ON default.otel_traces_trace_id_ts_mv"
+      }
+    ],
+    "otelcollector": [
+      {
+        "query": "GRANT SELECT,INSERT,CREATE,SHOW ON default.*"
+      }
+    ],
+    "slo_rollup": [
+      {
+        "query": "GRANT SELECT ON default.otel_metrics_sum, SELECT ON default.otel_metrics_histogram, SELECT, INSERT, CREATE TABLE, ALTER MODIFY TTL ON default.krateo_slo_daily, CREATE VIEW ON default.krateo_slo_daily_mv"
+      }
+    ],
+    "snowplow_reader": [
+      {
+        "query": "GRANT SELECT ON default.otel_logs, SELECT ON default.otel_traces, SELECT ON default.otel_metrics_gauge, SELECT ON default.otel_metrics_sum, SELECT ON default.otel_metrics_histogram, SELECT ON default.krateo_audit"
+      }
+    ],
+    "sse_proxy": [
+      {
+        "query": "GRANT SELECT ON default.otel_logs, SELECT ON default.krateo_audit"
+      }
+    ],
+    "usage_collector": [
+      {
+        "query": "GRANT INSERT, CREATE TABLE ON cmp.health_records"
+      }
+    ]
+  },
+  "show_grants": {
+    "analyst": [
+      "GRANT SELECT ON cmp.health_records TO analyst",
+      "GRANT SELECT ON default.krateo_audit TO analyst",
+      "GRANT SELECT ON default.otel_logs TO analyst",
+      "GRANT SELECT ON default.otel_metrics_exponential_histogram TO analyst",
+      "GRANT SELECT ON default.otel_metrics_gauge TO analyst",
+      "GRANT SELECT ON default.otel_metrics_histogram TO analyst",
+      "GRANT SELECT ON default.otel_metrics_sum TO analyst",
+      "GRANT SELECT ON default.otel_metrics_summary TO analyst",
+      "GRANT SELECT ON default.otel_traces TO analyst",
+      "GRANT SELECT ON showback.usage_records TO analyst"
+    ],
+    "app": [
+      "GRANT SHOW ON *.* TO app",
+      "GRANT SELECT ON default.* TO app",
+      "GRANT SELECT ON system.* TO app"
+    ],
+    "audit_sealer": [
+      "GRANT SELECT ON default.krateo_audit TO audit_sealer",
+      "GRANT SELECT, INSERT, CREATE TABLE ON default.krateo_audit_seal TO audit_sealer",
+      "GRANT SELECT, INSERT, CREATE TABLE ON default.krateo_audit_worm TO audit_sealer",
+      "GRANT CREATE VIEW ON default.krateo_audit_worm_mv TO audit_sealer"
+    ],
+    "audit_verifier": [
+      "GRANT SELECT ON default.krateo_audit TO audit_verifier",
+      "GRANT SELECT ON default.krateo_audit_seal TO audit_verifier",
+      "GRANT SELECT ON default.krateo_audit_worm TO audit_verifier",
+      "GRANT SHOW TABLES ON default.krateo_audit_worm_mv TO audit_verifier"
+    ],
+    "hyperdx": [
+      "GRANT SELECT ON default.krateo_audit TO hyperdx",
+      "GRANT SELECT ON default.otel_logs TO hyperdx",
+      "GRANT SELECT ON default.otel_metrics_gauge TO hyperdx",
+      "GRANT SELECT ON default.otel_metrics_histogram TO hyperdx",
+      "GRANT SELECT ON default.otel_metrics_sum TO hyperdx",
+      "GRANT SELECT ON default.otel_traces TO hyperdx",
+      "GRANT SELECT ON system.data_skipping_indices TO hyperdx"
+    ],
+    "mcp_reader": [
+      "GRANT SELECT ON default.krateo_audit TO mcp_reader",
+      "GRANT SELECT ON default.otel_logs TO mcp_reader",
+      "GRANT SELECT ON default.otel_metrics_gauge TO mcp_reader",
+      "GRANT SELECT ON default.otel_metrics_histogram TO mcp_reader",
+      "GRANT SELECT ON default.otel_metrics_sum TO mcp_reader",
+      "GRANT SELECT ON default.otel_traces TO mcp_reader"
+    ],
+    "nightly_reader": [
+      "GRANT SELECT ON default.otel_logs TO nightly_reader"
+    ],
+    "otel_writer": [
+      "GRANT SELECT, INSERT, CREATE TABLE ON default.krateo_audit TO otel_writer",
+      "GRANT SELECT, INSERT, CREATE TABLE ON default.otel_logs TO otel_writer",
+      "GRANT SELECT, INSERT, CREATE TABLE ON default.otel_metrics_exponential_histogram TO otel_writer",
+      "GRANT SELECT, INSERT, CREATE TABLE ON default.otel_metrics_gauge TO otel_writer",
+      "GRANT SELECT, INSERT, CREATE TABLE ON default.otel_metrics_histogram TO otel_writer",
+      "GRANT SELECT, INSERT, CREATE TABLE ON default.otel_metrics_sum TO otel_writer",
+      "GRANT SELECT, INSERT, CREATE TABLE ON default.otel_metrics_summary TO otel_writer",
+      "GRANT SELECT, INSERT, CREATE TABLE ON default.otel_traces TO otel_writer",
+      "GRANT SELECT, INSERT, CREATE TABLE ON default.otel_traces_trace_id_ts TO otel_writer",
+      "GRANT CREATE VIEW ON default.otel_traces_trace_id_ts_mv TO otel_writer"
+    ],
+    "otelcollector": [
+      "GRANT SHOW, SELECT, INSERT, CREATE DATABASE, CREATE TABLE, CREATE VIEW, CREATE DICTIONARY ON default.* TO otelcollector"
+    ],
+    "slo_rollup": [
+      "GRANT SELECT, INSERT, ALTER TTL, CREATE TABLE ON default.krateo_slo_daily TO slo_rollup",
+      "GRANT CREATE VIEW ON default.krateo_slo_daily_mv TO slo_rollup",
+      "GRANT SELECT ON default.otel_metrics_histogram TO slo_rollup",
+      "GRANT SELECT ON default.otel_metrics_sum TO slo_rollup"
+    ],
+    "snowplow_reader": [
+      "GRANT SELECT ON default.krateo_audit TO snowplow_reader",
+      "GRANT SELECT ON default.otel_logs TO snowplow_reader",
+      "GRANT SELECT ON default.otel_metrics_gauge TO snowplow_reader",
+      "GRANT SELECT ON default.otel_metrics_histogram TO snowplow_reader",
+      "GRANT SELECT ON default.otel_metrics_sum TO snowplow_reader",
+      "GRANT SELECT ON default.otel_traces TO snowplow_reader"
+    ],
+    "sse_proxy": [
+      "GRANT SELECT ON default.krateo_audit TO sse_proxy",
+      "GRANT SELECT ON default.otel_logs TO sse_proxy"
+    ],
+    "usage_collector": [
+      "GRANT INSERT, CREATE TABLE ON cmp.health_records TO usage_collector"
+    ]
+  }
+}
