@@ -1026,6 +1026,12 @@ opentelemetry-collector:
     failureThreshold: 6
   # Readiness keeps prompt endpoint removal (failureThreshold: 3, implicit 10s period)
   # but timeoutSeconds: 5 keeps load alone from flapping the endpoint in and out.
+  # initialDelaySeconds: 10 skips the probe at t=0, which can never pass: the health_check
+  # extension reports ready 2.6-5.0s after the container starts (krateo-057, the 2026-11-14 roll,
+  # 4 pods), so that probe always got "connection refused" and logged an Unhealthy event, and the
+  # pod turned Ready at the 10s probe anyway. Starting at 10s keeps the same Ready time without
+  # the failed probe. A startupProbe would not help: its failures are Unhealthy events too.
   readinessProbe:
+    initialDelaySeconds: 10
     timeoutSeconds: 5
     failureThreshold: 3
