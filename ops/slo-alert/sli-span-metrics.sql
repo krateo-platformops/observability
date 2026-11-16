@@ -15,8 +15,9 @@
 --
 -- Parameters (ClickHouse query parameters; clickhouse-client: --param_start=... --param_end=...):
 --   {start:DateTime64(9)}  {end:DateTime64(9)}   the window, [start, end)
--- A window must END at the first collector flush after the period it measures: delta points are
--- stamped with the flush time (TimeUnix), so a request at 14:26:29 lands in a 14:26:43 point.
+-- The window is [start, end): `end` is EXCLUSIVE. Delta points are stamped with the flush time
+-- (TimeUnix), so a request at 14:26:29 lands in a 14:26:43 point. To include a period's last
+-- flush, set `end` strictly AFTER that flush's TimeUnix (e.g. the next whole minute), never at it.
 --
 -- Percentiles: the bucket that holds rank q*n, reported as the interval (lower, upper] in ms.
 -- Buckets are upper-inclusive (`le`): a rank equal to the cumulative count at bound b is IN the
