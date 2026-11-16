@@ -200,9 +200,10 @@ kept for 40 days by default and refreshed hourly from the two metrics above.
   `sli-span-metrics.sql` (the percentile rule under [SLIs](#slis)): a percentile is the bucket
   `(lower, upper]` that holds rank `q × n`, upper-inclusive, no interpolation, and a rank in the
   overflow bucket (past 10 s) reports upper `inf`. Rows with different `bounds` are never summed: a
-  window that spans a layout change returns one row per layout and reports no percentile. (The
-  chart README's worked query, `tests/rollup-query.sql`, still interpolates: for SLO figures read
-  the statements above.)
+  window that spans a layout change returns one row per layout and reports no percentile. The
+  chart's README reads the table the same way, and its kind proof (`tests/e2e-kind.sh`) runs these
+  three statements against the rollup it builds (0.1.3; up to 0.1.2 it had an interpolating query
+  of its own).
 - **Counts are of the spans snowplow exports.** On 2026-11-10 that was every SERVER span: X5 Load A
   step 4's span-metric calls (158,332) equalled the load generator's request count exactly
   ([`ops/perf/x5-2026-11-10/results.tsv`](../ops/perf/x5-2026-11-10/results.tsv); run details

@@ -52,7 +52,7 @@ Targets are **configuration, not code** — set them in `.env` (defaults below):
 
 | File | Purpose |
 |------|---------|
-| `sli-span-metrics.sql` | THE SLI definitions from span metrics: availability, API/UI latency p50/p95, widget-fetch failure share, burn rate. |
+| `sli-span-metrics.sql` | THE SLI definitions from span metrics: availability, API/UI latency p50/p95, widget-fetch failure share, burn rate over `otel_metrics_*` (7 days); then the 30-day statements over `krateo_slo_daily` ([krateo-slo-rollup](../../charts/krateo-slo-rollup/README.md)), whole UTC days read with `FINAL`: **30d-1** availability and error budget per SLI class, **30d-2** API p50/p95, **30d-3** UI p50/p95 per interaction. |
 | `sli-queries.sql` | SLI 3, error-rate over `otel_logs` (no span-metrics equivalent). |
 | `bootstrap-slo-alerts.sh` | Creates HyperDX saved searches + breach alerts via API. |
 | `.env.example` | Configuration template (targets + HyperDX access). |

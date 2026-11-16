@@ -13,9 +13,11 @@
 #      tables missing: the Job fails with a clear message and creates nothing
 #   B. source tables empty: objects created, zero rows, a refresh succeeds, nothing fails; every
 #      DDL ran as slo_rollup and the view refreshes as its definer, slo_rollup
-#   C. delta rows for two days and two routes: counts, error ratio and a p95 from summed buckets
-#      equal the hand-computed values; cumulative rows and other metrics are left out; two bucket
-#      layouts are kept apart and give no p95
+#   C. delta rows for two days, two API routes and three UI span names, read with THE 30-day
+#      statements (30d-1..30d-3 of ops/slo-alert/sli-span-metrics.sql, cut from the file as
+#      committed): availability, error budget and p50/p95 bucket intervals equal the hand-computed
+#      values; whole UTC days (midnight, mid-day and now-30d..now windows); cumulative rows and
+#      other metrics are left out; two bucket layouts stay two rows and are never summed
 #   D. re-running is a no-op: same DDL, no mutation, same answer after more refreshes
 #   E. installed over rows already in the sources: backfills the same answer
 #   F. rollup table dropped: the writer's insert still succeeds; the next apply restores the rollup
@@ -23,9 +25,15 @@
 #   H. ttlDays changed: with the shipped grants (ALTER TTL on the rollup) it applies, and the next
 #      run does nothing; with ALTER TTL revoked the Job says so and fails; re-granted, it applies
 #   M. mutations of the SQL (error filter, delta filter, metric filter, bucket sum) each fail C
+#
+# There is no query of the chart's own: the rollup is read the one way every reader reads it, with
+# the 30-day statements of ops/slo-alert/sli-span-metrics.sql (SLI_SQL overrides the path). Their
+# percentiles are bucket intervals (lower, upper], upper-inclusive, never interpolated.
 set -uo pipefail
 CHART="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
+SLI_SQL="${SLI_SQL:-$HERE/../../../ops/slo-alert/sli-span-metrics.sql}"
+[ -f "$SLI_SQL" ] || { echo "no $SLI_SQL: run from the repo, or set SLI_SQL"; exit 1; }
 : "${KUBECONFIG:?point KUBECONFIG at a disposable kind cluster}"
 CTX="$(kubectl config current-context 2>/dev/null)"
 case "$CTX" in
@@ -33,7 +41,8 @@ case "$CTX" in
   *) echo "refusing: current context '$CTX' is not kind-*"; exit 1 ;;
 esac
 NS=slo-rollup-e2e; REL=krateo-slo-rollup; T=krateo_slo_daily
-CH_IMAGE="clickhouse/clickhouse-server:26.8-alpine"
+# The server krateo-057 runs (krateo-observability pins 26.10.3.7), as tests/sli-span-metrics-docker.py.
+CH_IMAGE="clickhouse/clickhouse-server:26.10.3.7"
 W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
 export HELM_CONFIG_HOME="$W/helm/config" HELM_CACHE_HOME="$W/helm/cache" HELM_DATA_HOME="$W/helm/data"
 k() { kubectl --context "$CTX" -n $NS "$@"; }
@@ -79,16 +88,53 @@ run() { # run : trigger apply, wait, print Complete|Failed; the log is left in $
 }
 refresh() { CH "SYSTEM REFRESH VIEW ${T}_mv"; CH "SYSTEM WAIT VIEW ${T}_mv"; }
 wipe() { CH "DROP VIEW IF EXISTS ${T}_mv"; CH "DROP TABLE IF EXISTS $T"; }
-query() { CHF "$HERE/rollup-query.sql"; }
+# The statements of sli-span-metrics.sql, cut as tests/sli-span-metrics-docker.py cuts them:
+# comments out first (one holds a ';'), then split on ';'. 6, 7, 8 are 30d-1, 30d-2, 30d-3.
+stmt() { sed 's/--.*$//' "$SLI_SQL" | awk -v n="$1" 'BEGIN { RS = ";" } /[^[:space:]]/ { if (++c == n) { print; exit } }'; }
+nstmt() { sed 's/--.*$//' "$SLI_SQL" | awk 'BEGIN { RS = ";" } /[^[:space:]]/ { c++ } END { print c }'; }
+# CHP <start> <end> <sql>: run as a reader does, with clickhouse-client's --param_start/--param_end.
+CHP() { k exec deploy/clickhouse -- clickhouse-client --user e2e --password "$ADMINPW" --format TSV \
+          --param_start="$1" --param_end="$2" -q "$3"; }
+# 30d-1 as committed, its three ratios rounded to 5 places so the float tails do not decide the test.
+s30d1() { CHP "$1" "$2" "SELECT sli_service, calls, sli_errors, round(availability, 5), round(error_budget_calls, 5),
+  round(budget_remaining, 5), first_day, last_day, days_with_data FROM ($(stmt 6))"; }
+# 30d-2 has no ORDER BY (rows of two layouts come back in either order): sorted here. $3 swaps the
+# service, for the layout check.
+s30d2() { CHP "$1" "$2" "$(stmt 7 | sed "s/service = 'snowplow'/service = '${3:-snowplow}'/")" | LC_ALL=C sort; }
+s30d3() { CHP "$1" "$2" "$(stmt 8)"; }
+# The fixture's two days: [D3, D1) holds both, [D3, D2) only the first. Set once the fixture lands.
+query() { s30d1 "$D3" "$D1"; s30d2 "$D3" "$D1"; s30d3 "$D3" "$D1"; }
 
-# Hand-computed from fixture.sql. Summed buckets over both days and routes:
-#   counts   [0, 500, 600, 1000, 300, 0, 10, 0, 40, 50, 0, 0]  total 2500
+# What the three statements must return over the fixture's two days, worked by hand from fixture.sql.
+# Bounds (ms) [25,50,100,250,500,750,1000,1500,2500,5000,10000]: bucket i is (b[i-1], b[i]], bucket 1
+# is (0, 25], bucket 12 is (10000, inf). A percentile is the bucket i where the running total first
+# reaches q*n (>=, so a rank equal to the running total at a bound is IN the bucket ending there).
+# 30d-1, call rows only (bounds empty), per SLI class; budget = 0.001 * calls, remaining = 1 - errors / budget:
+#   krateo-frontend  page.load 39 + 1 error, form.submit 2, widget.fetch 58 = 100 calls, 1 error:
+#                    availability 0.99, budget 0.1, remaining 1 - 1/0.1 = -9 (overspent)
+#   snowplow         /call 600 + 300 + 10 errors + 500, /list 90 errors + 1000 = 2500 calls, 100 errors:
+#                    availability 0.96, budget 2.5, remaining 1 - 100/2.5 = -39
+#   both: first_day today-3, last_day today-2, 2 days with data
+# 30d-2, snowplow, one layout. Summed buckets over both days and routes:
+#   counts   [0, 500, 600, 1000, 300, 0, 10, 0, 40, 50, 0, 0]  n = 2500
 #   running  [0, 500, 1100, 2100, 2400, 2400, 2410, 2410, 2450, 2500, 2500, 2500]
-# p95 rank = 0.95 * 2500 = 2375, in bucket 5 (250, 500]: 250 + 250 * (2375 - 2100) / 300 = 479.2
-# /call [0,0,200,900,300,0,10,...] total 1410, rank 1339.5, 250 + 250 * 239.5 / 300 = 449.6
-# /list [0,500,400,100,0,0,0,0,40,50,...] total 1090, rank 1035.5, 1500 + 1000 * 35.5 / 40 = 2387.5
-# Errors: 10 of 1410 on /call, 90 of 1090 on /list, 100 of 2500 overall.
-WANT="$(printf '(all routes)\t2500\t100\t0.04\t479.2\n/call\t1410\t10\t0.00709\t449.6\n/list\t1090\t90\t0.08257\t2387.5')"
+#   p50 rank 1250 -> bucket 4 (100, 250]; p95 rank 2375 -> bucket 5 (250, 500]; 500 <= 500 -> within 1
+#   (0.1.2's interpolating query read this p95 as 479.2: the histogram only says "in (250, 500]")
+# 30d-3, krateo-frontend, per interaction (ORDER BY interaction); krateo.widget.fetch is not one:
+#   krateo.form.submit  [0 x 11, 2], n 2: ranks 1 and 1.9 -> bucket 12, past the last bound:
+#                       (10000, inf] for both; inf > 2000 -> within 0
+#   krateo.page.load    [0,0,0,0,0,20,10,9,0,1,0,0], n 40, running ..20, 30, 39, 39, 40:
+#                       p50 rank 20 = the running total at 750 -> bucket 6 (500, 750], not (750, 1000];
+#                       p95 rank 38 -> bucket 8 (1000, 1500]; 1500 <= 2000 -> within 1
+B11='[25,50,100,250,500,750,1000,1500,2500,5000,10000]'
+want() { # want <first day> <last day>: the three statements' rows over the fixture's two days
+  printf '%s\n' \
+    "krateo-frontend	100	1	0.99	0.1	-9	$1	$2	2" \
+    "snowplow	2500	100	0.96	2.5	-39	$1	$2	2" \
+    "$B11	2500	4	5	100	250	250	500	1" \
+    "krateo.form.submit	$B11	2	12	12	10000	inf	10000	inf	0"
+  printf '%s' "krateo.page.load	$B11	40	6	8	500	750	1000	1500	1"
+}
 
 step "0. ClickHouse, and the users the platform ships"
 kubectl --context "$CTX" delete ns $NS --ignore-not-found --wait=true >/dev/null 2>&1
@@ -122,6 +168,12 @@ spec: {selector: {app: clickhouse}, ports: [{port: 9000, targetPort: 9000}]}
 YAML
 check "clickhouse up" k rollout status deploy/clickhouse --timeout=300s
 [ "$FAILS" = 0 ] || exit 1
+# The fixture's days and the windows below are UTC dates; the statements read UTC days.
+expect "$(CH "SELECT timezone()")" "UTC" "the server's timezone is UTC"
+expect "$(nstmt)" "8" "sli-span-metrics.sql has its 8 statements"
+for n in 6 7 8; do
+  check "statement $n reads krateo_slo_daily" grep -q 'FROM krateo_slo_daily' <<<"$(stmt $n)"
+done
 check "writer created" CH "CREATE USER writer IDENTIFIED WITH sha256_password BY '$WRITERPW'"
 check "writer has the grants of the shipped otelcollector principal" \
   CH "GRANT SHOW, SELECT, INSERT, CREATE DATABASE, CREATE TABLE, CREATE VIEW, CREATE DICTIONARY ON default.* TO writer"
@@ -159,12 +211,32 @@ expect "$(CH "SELECT count() FROM system.tables WHERE database = 'default' AND n
 step "C. Known rows, known answers"
 if WRITER < "$HERE/fixture.sql"; then pass "the writer's inserts succeed"; else fail "the writer's inserts"; fi
 refresh
-expect "$(query)" "$WANT" "counts, error ratio and p95 from summed buckets, per route and overall"
-expect "$(CH "SELECT sum(calls) FROM $T FINAL WHERE service = 'snowplow' AND day = today() - 3")" "1000" "day 1: rows summed, not last-wins"
-expect "$(CH "SELECT sum(calls) FROM $T FINAL WHERE service = 'snowplow' AND day = today() - 2")" "1500" "day 2"
+# Midnight of the fixture's first day, from the fixture itself (today() could roll over mid-run).
+D3="$(CH "SELECT toDateTime(toDate(min(TimeUnix), 'UTC'), 'UTC') FROM otel_metrics_sum WHERE ServiceName = 'snowplow'")"
+D2="$(CH "SELECT toDateTime('$D3', 'UTC') + INTERVAL 1 DAY")"; D1="$(CH "SELECT toDateTime('$D3', 'UTC') + INTERVAL 2 DAY")"
+DAY3="${D3%% *}"; DAY2="${D2%% *}"
+WANT="$(want "$DAY3" "$DAY2")"
+expect "$(query)" "$WANT" "30d-1..30d-3 over [today-3, today-1): availability, budget, p50/p95 bucket intervals"
+# Whole UTC days: [today-3, today-2) is the first day alone. On it: frontend 39 calls, no error,
+# budget 0.039, remaining 1; snowplow 1000 calls (600 + 300 + 10 + 90), 100 errors, availability 0.9,
+# budget 1, remaining 1 - 100/1 = -99.
+ONE="$(printf '%s\n%s' "krateo-frontend	39	0	1	0.039	1	$DAY3	$DAY3	1" "snowplow	1000	100	0.9	1	-99	$DAY3	$DAY3	1")"
+expect "$(s30d1 "$D3" "$D2")" "$ONE" "30d-1: end at midnight leaves end's day out"
+expect "$(s30d1 "${DAY3} 12:00:00" "${DAY2} 12:00:00")" "$ONE" "30d-1: mid-day bounds take start's day whole and leave end's day out whole"
+expect "$(s30d1 "$(CH "SELECT now() - INTERVAL 30 DAY")" "$(CH "SELECT now()")")" "$(head -2 <<<"$WANT")" \
+  "30d-1: start = now - 30 days, end = now reads both fixture days"
+expect "$(CH "SELECT route, sum(calls), sumIf(calls, sli_error) FROM $T FINAL WHERE service = 'snowplow' AND empty(bounds) GROUP BY route ORDER BY route")" \
+  "$(printf '/call\t1410\t10\n/list\t1090\t90')" "per route: http.route and the error flag land in their key columns"
+expect "$(CH "SELECT sum(calls) FROM $T FINAL WHERE service = 'snowplow' AND day = '$DAY3'")" "1000" "day 1: rows summed, not last-wins"
+expect "$(CH "SELECT sum(calls) FROM $T FINAL WHERE service = 'snowplow' AND day = '$DAY2'")" "1500" "day 2"
 expect "$(CH "SELECT uniqExact(bounds) FROM $T FINAL WHERE service = 'bounds-changed'")" "2" "two bucket layouts stay two rows"
-sed "s/'snowplow'/'bounds-changed'/" "$HERE/rollup-query.sql" > "$W/q.sql"
-expect "$(CHF "$W/q.sql" | head -1 | cut -f5)" '\N' "two bucket layouts in scope give no p95"
+# Two layouts in one window: 30d-2 returns one row per layout and never sums them; a reader then
+# reports no percentile for the window. [100,200]: [1,2,0], n 3, p50 rank 1.5 and p95 rank 2.85 ->
+# bucket 2 (100, 200]. [100,200,300]: [1,1,1,1], n 4, p50 rank 2 = the running total at 200 ->
+# (100, 200]; p95 rank 3.8 -> bucket 4, (300, inf], not within 500.
+expect "$(s30d2 "$D3" "$D1" bounds-changed)" \
+  "$(printf '%s\n%s' "[100,200,300]	4	2	4	100	200	300	inf	0" "[100,200]	3	2	2	100	200	100	200	1")" \
+  "30d-2: two bucket layouts in scope give one row each, no summed percentile"
 
 step "D. Re-running is a no-op"
 DDL="$(CH "SELECT create_table_query FROM system.tables WHERE database = 'default' AND name IN ('$T', '${T}_mv') ORDER BY name")"

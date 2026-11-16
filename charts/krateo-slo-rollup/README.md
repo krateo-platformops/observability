@@ -1,8 +1,9 @@
 # krateo-slo-rollup
 
-A daily rollup of the SLI span metrics, so a rolling 28-day SLO can be computed.
+A daily rollup of the SLI span metrics, so the 30-day SLO statements (availability, error budget,
+latency) can be read: see [Reading it](#reading-it).
 
-Every `otel_*` table keeps 7 days, so nothing in ClickHouse can answer a 28-day question. This
+Every `otel_*` table keeps 7 days, so nothing in ClickHouse can answer a 30-day question. This
 chart keeps one small table, `krateo_slo_daily`, with per-day totals of
 `traces.span.metrics.calls` and `traces.span.metrics.duration` (from
 `otel-collector-daemonset` ≥ 0.1.15; see [SLO](../../docs/SLO.md)) and a retention of its own.
@@ -97,8 +98,8 @@ the last `rollup.recomputeDays` whole days from the sources. That also means:
 
 - **Install backfills.** The first refresh picks up what the sources hold, up to 6 days.
 - **It heals.** The refresh can stop for up to 5 days, and it recovers whole days when it restarts.
-- **It lags.** The current day is up to `rollup.refreshEvery` behind. A 28-day SLO over complete
-  days does not read the current day.
+- **It lags.** The current day is up to `rollup.refreshEvery` behind. The 30-day statements read
+  whole days before `end`'s day, so with `end` = now they do not read the current day.
 - **It costs one small query per refresh**, on the sources' primary key and daily partitions.
 
 Exporter retries that duplicate rows in the sources are counted, in the raw tables and here alike.
@@ -115,26 +116,45 @@ disappears from the sources writes no rows, so a dropped source partition cannot
 
 ## Reading it
 
-[`tests/rollup-query.sql`](tests/rollup-query.sql) is the worked query: error ratio and p95 per
-route and overall, the same SQL the kind proof checks against hand-computed values. Sum
-`bucket_counts` with `sumForEach` over `FINAL` rows, find the bucket holding the rank in the running
-total, and interpolate linearly inside it. Scope the query to one service, and to whole days. It
-gives no p95 when two bucket layouts are in scope.
+Read the table with the 30-day statements of
+[`ops/slo-alert/sli-span-metrics.sql`](../../ops/slo-alert/sli-span-metrics.sql), the single source
+of the SLI definitions, and with nothing else: **30d-1** availability and error budget per SLI class
+(`snowplow` = API, `krateo-frontend` = UI), **30d-2** API p50 / p95, **30d-3** UI p50 / p95 per
+interaction. They are the file's last three statements and take the same `start` / `end` query
+parameters as the span-metric ones (`clickhouse-client --param_start=… --param_end=…`). A figure
+that needs a different query changes that file, not a copy of it. The rules they apply:
 
-The numbers are estimates, for two independent reasons:
+- **Whole UTC days, read with `FINAL`.** The window is `day >= toDate({start}, 'UTC') AND day <
+  toDate({end}, 'UTC')`. Midnight bounds are exact; otherwise `start`'s day is in whole and `end`'s
+  day out whole, so `start` = now − 30 days, `end` = now reads the 30 complete days before today.
+  `FINAL` keeps only the newest `computed_at` of a day that was refreshed more than once.
+- **A percentile is a bucket interval, never interpolated.** It is the bucket holding rank `q·n` in
+  the running total of the summed `bucket_counts`, reported as `(lower, upper]` ms. Buckets are
+  upper-inclusive (`le`): a rank equal to the running total at a bound is in the bucket ending at
+  that bound. A rank in the overflow bucket (past the last bound, 10 s) reports upper `inf`. The
+  histogram cannot say where in the bucket the percentile lies, so the statements do not guess.
+- **Never sum histograms with different `bounds`.** The statements group by `bounds`: a window
+  that spans a bucket-layout change (otel-collector-daemonset 0.1.26 added 2000 ms on 2026-11-11)
+  returns one row per layout, and the window has **no** percentile; a reader reports none rather
+  than pick a row.
 
-- **Counts are of sampled spans.** snowplow head-samples its SERVER spans at about 5%
-  (`traceidratio` 0.05, not parent-based, and errors are not preferentially kept), and span metrics
-  are computed from the spans that survive. `calls` is about 5% of real traffic. Nothing in the
-  rollup scales it. Ratios and quantiles are estimates from a random sample, so their error is
-  wider on a route or a day with little traffic.
-- **Quantiles are bucketed.** A p95 is only known to lie inside its bucket; interpolation assumes
-  durations are spread evenly across it. A p95 past the last bound (10 s) reads as that bound.
+Counts are of the spans the services export, and nothing in the rollup scales them. On 2026-11-10
+snowplow exported every SERVER span: X5 Load A step 4's span-metric calls (158,332) equalled the load
+generator's request count
+([`ops/perf/x5-2026-11-10/results.tsv`](../../ops/perf/x5-2026-11-10/results.tsv)). If snowplow's
+SERVER spans are ever sampled, `calls` becomes a sample and every ratio and percentile here an
+estimate.
+
+A breakdown the statements do not give, such as per route, is a diagnostic, not an SLO figure. Read
+it by the same rules: add the column to the `GROUP BY` next to `bounds`, keep `FINAL` and whole
+days, and report bucket intervals.
 
 ## Retention
 
-`rollup.ttlDays` (default 40: a rolling 28 days plus a margin) goes into the `CREATE TABLE`, so it
-applies when the table is created. `CREATE … IF NOT EXISTS` leaves an existing table alone, so the
+`rollup.ttlDays` (default 40: a 30-day window plus a margin) goes into the `CREATE TABLE`, so it
+applies when the table is created. A row expires once `day + ttlDays` has passed, so a value below 31
+can delete the first day of a 30-day window before it is read, and the schema refuses it (minimum 31
+since 0.1.3; it was 29, from the chart's original 28-day window). `CREATE … IF NOT EXISTS` leaves an existing table alone, so the
 apply step compares the live TTL with the value and runs `ALTER TABLE … MODIFY TTL` when they
 differ, and does nothing when they match.
 
@@ -168,16 +188,20 @@ krateo_slo_daily`, with an ops principal (`slo_rollup` cannot drop).
 kind, as `slo_rollup` with exactly the four grants above (checked with `SHOW GRANTS`), against the
 exporter's real table DDL; the fixture is inserted by a second user with the collector's grants. See
 the script's header for the steps. It covers the CronJob reading `slo_rollup`'s Secret and not the
-collector's; missing and empty sources; known rows against hand-computed counts, error ratio and
-p95; re-running as a no-op; install over existing rows; a dropped rollup table with the writer's
-insert still succeeding; a stopped view; a TTL change with the shipped grants and with `ALTER TTL`
-revoked; and four mutations of the SQL, each of which must fail. `tests/rollup_test.yaml` is the
-`helm unittest` suite.
+collector's; missing and empty sources; known rows read with the 30-day statements of
+`ops/slo-alert/sli-span-metrics.sql` (cut from the file as committed, as
+`tests/sli-span-metrics-docker.py` does), against hand-computed availability, error budget and
+p50 / p95 bucket intervals, over midnight, mid-day and now − 30 days windows, with two bucket
+layouts kept to one row each; re-running as a no-op; install over existing rows; a dropped rollup
+table with the writer's insert still succeeding; a stopped view; a TTL change with the shipped
+grants and with `ALTER TTL` revoked; and four mutations of the SQL, each of which must fail.
+`tests/rollup_test.yaml` is the `helm unittest` suite.
 
 ## Limits
 
 - **Needs ClickHouse ≥ 24.10**, where refreshable views stopped being experimental. The platform
-  runs 26.8.
+  runs 26.10.3.7 (krateo-observability's pin), which the kind proof runs too; the Job's client image
+  is 26.8.
 - **Coverage starts at install**, less the backfill. A reader must check the first `day` before
   calling a window complete. Days older than the backfill stay absent.
 - **The overflow row is kept**, with `span_name` and `route` empty and `sli_error` false: if the

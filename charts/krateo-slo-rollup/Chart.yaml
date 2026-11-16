@@ -1,7 +1,7 @@
 apiVersion: v2
 name: krateo-slo-rollup
 description: >-
-  Daily rollup of the SLI span metrics into ClickHouse (krateo_slo_daily), so a rolling 28-day SLO
+  Daily rollup of the SLI span metrics into ClickHouse (krateo_slo_daily), so a rolling 30-day SLO
   can be computed although every otel_* table keeps 7 days. Adds no ingest path and nothing to the
   insert path of the otel_metrics tables.
 type: application
@@ -13,7 +13,14 @@ type: application
 # (clickhouse.credentialsSecret.name clickhouse-slo-rollup-credentials), not the collector's writer
 # (otel-clickhouse-credentials). Its grants include ALTER TTL on the rollup table, so a ttlDays
 # change now applies. The Secret must exist before the first CronJob run.
-version: 0.1.2
+# 0.1.3: values.schema.json: rollup.ttlDays minimum 29 -> 31, so the TTL covers the 30-day window the
+# canonical statements read (a value of 29 or 30 is now refused; the default 40 is unchanged). No
+# rendered object changes for any value the new schema accepts. The README reads the table by the canonical
+# SLI rules (the 30-day statements 30d-1..30d-3 of ops/slo-alert/sli-span-metrics.sql: percentiles
+# as bucket intervals, no interpolation; one row per bucket layout; whole UTC days with FINAL) and
+# no longer calls counts "about 5% sampled". The kind proof runs those statements; the chart's
+# interpolating tests/rollup-query.sql is gone.
+version: 0.1.3
 keywords:
   - slo
   - rollup
