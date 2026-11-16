@@ -208,7 +208,21 @@ baselines. Record one row per run:
 
 | Date | Scenario | Load | Availability | API p95 (ms) | UI p95 (ms) | Notes |
 |------|----------|------|--------------|--------------|-------------|-------|
-| _(pending)_ | e2e full-loop (`demo/tests`) | — | — | — | — | first baseline run to be recorded |
+| 2026-11-10 13:56:52–14:17:50Z | X5 Load A steps 1–3: **API baseline**, in-cluster, API only | 6 → 12 → 25 VUs, 55–150 req/s, 129,939 requests | 100.000 % (0 SLI errors) | (0, 25] | — | Error-free envelope of Load A. Real portal reads (58 dashboard + 11 blueprint-form GETs) straight to `snowplow:8081` (not through the gateway) as 3 tenant users; loadgen krateo-acmp b562e12, `rum_upload: false`. |
+| 2026-11-10 13:56:52–14:26:30Z (aborted) | X5 Load A, all steps: **API stress**, in-cluster | up to 50 VUs, ~310 req/s; 288,271 requests (step 4: 158,332) | 99.960 % (114 SLI errors, all HTTP 5xx; step 4: 99.928 %) | (0, 25] | — | All 114 5xx fell at 14:25–14:27Z, 98 of them slower than 5 s (83 over 10 s). ClickHouse sat at its 4-CPU limit from step 1 and sse-proxy `/events` timed out from step 2, before sse-proxy's ClickHouse fix. **Stress, not a baseline.** |
+| 2026-11-10 15:12–15:41Z | X5 Load B: UI key actions, real browser | 1 tenant, 60 iterations (form → Review → Create → Confirm → composition page), portal 1.8.106 | 100.000 % (0 of 4,715 widget fetches failed) | — | composition.open (250, 500]; form.submit (100, 250]; widget.fetch (100, 250] | p50: composition.open (250, 500], form.submit (50, 100], widget.fetch (50, 100]. 60 composition.open and 60 form.submit spans. |
+| 2026-11-11 09:30–10:00Z | X5 page load (after otel-collector-daemonset 0.1.26 added the 2000 ms bound) | 60 document loads on /dashboard, /blueprints, /compositions as a tenant | 100.000 % | — | page.load (500, 750]: **PASS** (target ≤ 2000) | p50 (500, 750]. |
+
+Not yet measured: `krateo.page.publish` (needs frontend ≥ 1.8.37 and a disposable install).
+
+All figures come from the span metrics on krateo-057 (`traces.span.metrics.calls/duration`, delta
+histograms with bounds 25, 50, 100, 250, 500, 750, 1000, 1500, 2500, 5000, 10000 ms), so a
+percentile is the bucket it falls in, not an interpolated value. The rows, the script and its
+output are in [`ops/perf/x5-2026-11-10/`](../ops/perf/x5-2026-11-10/): re-run them with
+`python3 ops/perf/x5-2026-11-10/compute.py`. A window ends at the first collector flush after it
+closes, not at the wall-clock end: Load A's 5xx landed in the 14:26:43Z and 14:27:43Z flushes,
+after the 14:26:30Z abort. Run details are acmp's (krateo-acmp#21). The source rows left
+ClickHouse's 7-day retention on 2026-11-17 and 2026-11-18, so the committed rows are the only copy.
 
 How to capture a run:
 

@@ -1,0 +1,8 @@
+window	calls	sli_err	5xx	avail%	p50(ms)	p95(ms)
+A steps1-3 API	129939	0	0	100.000	(0,25]	(0,25]
+A full stress API	288271	114	114	99.960	(0,25]	(0,25]
+A step4 API	158332	114	114	99.928	(0,25]	(0,25]
+B composition.open	60	0	0	100.000	(250,500]	(250,500]
+B form.submit	60	0	0	100.000	(50,100]	(100,250]
+B widget.fetch	4715	0	0	100.000	(50,100]	(100,250]
+PL page.load	60	0	0	100.000	(500,750]	(500,750]
