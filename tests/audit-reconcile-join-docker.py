@@ -26,7 +26,12 @@ import urllib.request
 IMAGE = "clickhouse/clickhouse-server:26.10.3.7"  # SELECT version() on krateo-057 (since 2026-11-11)
 QUERY = "ops/audit-reconcile-join/query.sql"
 WINDOW_S = 600
-T0 = dt.datetime(2026, 11, 9, 10, 0, 0)
+# Relative to now, not a calendar date: tests/fixtures/otel_traces.sql keeps the production
+# `TTL Timestamp + 7 days`, so a fixed T0 silently expires a week later and every expected
+# match comes back empty (it did on 2026-11-16). One day back, floored to the hour, keeps
+# T0-1h .. T4+1h well inside the TTL whenever the test runs.
+T0 = (dt.datetime.now(dt.timezone.utc).replace(tzinfo=None, minute=0, second=0, microsecond=0)
+      - dt.timedelta(days=1))
 
 
 def ts(t, seconds=0):
