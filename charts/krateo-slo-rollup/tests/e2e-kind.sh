@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # krateo-slo-rollup end-to-end on a disposable kind cluster: the chart's real apply.sh, run by its
-# real CronJob as the user the platform ships, against a real ClickHouse holding the exporter's
-# tables. Jobs are triggered by hand from the CronJob.
+# real CronJob as the user the platform ships for it (krateo-observability's slo_rollup, with exactly
+# its grants), against a real ClickHouse holding the exporter's tables. The fixture is inserted by a
+# second user with the collector's grants, as on the platform. Jobs are triggered by hand.
 #
 #   usage: KUBECONFIG=<disposable kind cluster> tests/e2e-kind.sh [chart-dir]
 #          (the current context must be kind-*; nothing is written otherwise)
 #
 # Proves:
-#   A. source tables missing: the Job fails with a clear message and creates nothing
-#   B. source tables empty: objects created, zero rows, a refresh succeeds, nothing fails
+#   0. slo_rollup has exactly the four grants SHOW GRANTS lists on krateo-057, and no more
+#   A. the CronJob reads clickhouse-slo-rollup-credentials, not the collector's Secret; source
+#      tables missing: the Job fails with a clear message and creates nothing
+#   B. source tables empty: objects created, zero rows, a refresh succeeds, nothing fails; every
+#      DDL ran as slo_rollup and the view refreshes as its definer, slo_rollup
 #   C. delta rows for two days and two routes: counts, error ratio and a p95 from summed buckets
 #      equal the hand-computed values; cumulative rows and other metrics are left out; two bucket
 #      layouts are kept apart and give no p95
@@ -16,8 +20,8 @@
 #   E. installed over rows already in the sources: backfills the same answer
 #   F. rollup table dropped: the writer's insert still succeeds; the next apply restores the rollup
 #   G. stopped view: the Job fails as stale, and recovers
-#   H. ttlDays changed: the shipped user cannot ALTER, the Job says so and fails; with the grant it
-#      applies, and the next run does nothing
+#   H. ttlDays changed: with the shipped grants (ALTER TTL on the rollup) it applies, and the next
+#      run does nothing; with ALTER TTL revoked the Job says so and fails; re-granted, it applies
 #   M. mutations of the SQL (error filter, delta filter, metric filter, bucket sum) each fail C
 set -uo pipefail
 CHART="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -40,9 +44,17 @@ expect() { if [ "$1" = "$2" ]; then pass "$3"; else fail "$3 (got '$1', want '$2
 check() { local m="$1"; shift; if "$@"; then pass "$m"; else fail "$m"; fi; }
 logsays() { grep -q "$1" "$W/job.log" || { cat "$W/job.log"; return 1; }; }
 step() { echo; echo "== $* =="; }
-# ADMIN is the test's own superuser. WRITER is what the Secret holds: the grants of the shipped
-# otelcollector principal, and nothing else, because the chart must work with exactly those.
-ADMINPW="$(openssl rand -hex 12)"; WRITERPW="$(openssl rand -hex 12)"
+# ADMIN is the test's own superuser. WRITER has the grants of the shipped otelcollector principal and
+# inserts the fixture, as the collectors do. SLO is what the chart's Secret holds: the slo_rollup
+# user krateo-observability ships, with its grants and nothing else, because the chart must work
+# with exactly those. The writer's Secret exists too, as on the platform, so a chart that still
+# read it would run (as the writer) and be caught by the checks in A and B, not by a missing Secret.
+ADMINPW="$(openssl rand -hex 12)"; WRITERPW="$(openssl rand -hex 12)"; SLOPW="$(openssl rand -hex 12)"
+SLO_GRANTS="$(printf '%s\n' \
+  "GRANT SELECT, INSERT, ALTER TTL, CREATE TABLE ON default.$T TO slo_rollup" \
+  "GRANT CREATE VIEW ON default.${T}_mv TO slo_rollup" \
+  "GRANT SELECT ON default.otel_metrics_histogram TO slo_rollup" \
+  "GRANT SELECT ON default.otel_metrics_sum TO slo_rollup" | sort)"
 CH() { k exec deploy/clickhouse -- clickhouse-client --user e2e --password "$ADMINPW" --format TSV -q "$1"; }
 CHF() { k exec -i deploy/clickhouse -- clickhouse-client --user e2e --password "$ADMINPW" --format TSV --multiquery < "$1"; }
 WRITER() { k exec -i deploy/clickhouse -- clickhouse-client --user writer --password "$WRITERPW" --multiquery; }
@@ -78,10 +90,11 @@ query() { CHF "$HERE/rollup-query.sql"; }
 # Errors: 10 of 1410 on /call, 90 of 1090 on /list, 100 of 2500 overall.
 WANT="$(printf '(all routes)\t2500\t100\t0.04\t479.2\n/call\t1410\t10\t0.00709\t449.6\n/list\t1090\t90\t0.08257\t2387.5')"
 
-step "0. ClickHouse, and the user the platform ships"
+step "0. ClickHouse, and the users the platform ships"
 kubectl --context "$CTX" delete ns $NS --ignore-not-found --wait=true >/dev/null 2>&1
 kubectl --context "$CTX" create ns $NS >/dev/null
 k create secret generic otel-clickhouse-credentials --from-literal=username=writer --from-literal=password="$WRITERPW" >/dev/null
+k create secret generic clickhouse-slo-rollup-credentials --from-literal=username=slo_rollup --from-literal=password="$SLOPW" >/dev/null
 k create secret generic e2e-admin --from-literal=password="$ADMINPW" >/dev/null
 k apply -f - >/dev/null <<YAML
 apiVersion: apps/v1
@@ -112,10 +125,18 @@ check "clickhouse up" k rollout status deploy/clickhouse --timeout=300s
 check "writer created" CH "CREATE USER writer IDENTIFIED WITH sha256_password BY '$WRITERPW'"
 check "writer has the grants of the shipped otelcollector principal" \
   CH "GRANT SHOW, SELECT, INSERT, CREATE DATABASE, CREATE TABLE, CREATE VIEW, CREATE DICTIONARY ON default.* TO writer"
+check "slo_rollup created" CH "CREATE USER slo_rollup IDENTIFIED WITH sha256_password BY '$SLOPW'"
+while IFS= read -r g; do check "slo_rollup: $g" CH "$g"; done <<<"$SLO_GRANTS"
+slo_grants() { CH "SHOW GRANTS FOR slo_rollup" | sort; }
+expect "$(slo_grants)" "$SLO_GRANTS" "slo_rollup's SHOW GRANTS is exactly krateo-057's four statements"
 [ "$FAILS" = 0 ] || exit 1
 
-step "A. Source tables missing"
+step "A. The CronJob runs as slo_rollup; source tables missing"
 install "$CHART" || exit 1
+for v in CH_USER CH_PASSWORD; do
+  expect "$(k get cronjob "$REL-apply" -o jsonpath="{.spec.jobTemplate.spec.template.spec.containers[0].env[?(@.name==\"$v\")].valueFrom.secretKeyRef.name}")" \
+    "clickhouse-slo-rollup-credentials" "by default $v comes from slo_rollup's Secret, not the collector's"
+done
 expect "$(run)" "Failed" "apply fails while the collector has not created the sources"
 check "the log says why" logsays 'does not exist yet'
 expect "$(CH "SELECT count() FROM system.tables WHERE database = 'default' AND name LIKE '$T%'")" "0" "nothing was created"
@@ -129,6 +150,11 @@ expect "$(CH "SELECT engine FROM system.tables WHERE database = 'default' AND na
 refresh
 expect "$(CH "SELECT exception FROM system.view_refreshes WHERE view = '${T}_mv'")" "" "a refresh over empty sources does not fail"
 expect "$(CH "SELECT count() FROM $T")" "0" "and writes nothing"
+CH "SYSTEM FLUSH LOGS"
+expect "$(CH "SELECT arrayStringConcat(arraySort(groupUniqArray(user)), ',') FROM system.query_log WHERE type = 'QueryFinish' AND query_kind = 'Create' AND query LIKE '%IF NOT EXISTS $T%'")" \
+  "slo_rollup" "the table and the view were created by slo_rollup, and by no one else"
+expect "$(CH "SELECT count() FROM system.tables WHERE database = 'default' AND name = '${T}_mv' AND create_table_query LIKE '%DEFINER = slo_rollup SQL SECURITY DEFINER%'")" \
+  "1" "the view refreshes as its definer, slo_rollup"
 
 step "C. Known rows, known answers"
 if WRITER < "$HERE/fixture.sql"; then pass "the writer's inserts succeed"; else fail "the writer's inserts"; fi
@@ -181,18 +207,27 @@ refresh
 expect "$(run)" "Complete" "apply passes again after a refresh"
 
 step "H. A changed ttlDays"
+ttl() { CH "SELECT extract(engine_full, 'toIntervalDay[(]([0-9]+)') FROM system.tables WHERE database = 'default' AND name = '$T'"; }
 install "$CHART" --set rollup.ttlDays=45 || exit 1
-expect "$(run)" "Failed" "the shipped user cannot ALTER: the Job fails rather than pretend"
-check "the log names the grant and the statement" logsays 'needs ALTER TTL'
-expect "$(CH "SELECT extract(engine_full, 'toIntervalDay[(]([0-9]+)') FROM system.tables WHERE database = 'default' AND name = '$T'")" "40" "the table keeps 40 days"
-CH "GRANT ALTER TTL ON default.$T TO writer"
-expect "$(run)" "Complete" "with ALTER TTL granted the apply succeeds"
-expect "$(CH "SELECT extract(engine_full, 'toIntervalDay[(]([0-9]+)') FROM system.tables WHERE database = 'default' AND name = '$T'")" "45" "the table now keeps 45 days"
+expect "$(run)" "Complete" "the shipped grants include ALTER TTL on the rollup: the apply succeeds"
+check "the log says what changed" logsays 'ttl changed: 40 -> 45 days'
+expect "$(ttl)" "45" "the table now keeps 45 days"
 m="$(CH "SELECT count() FROM system.mutations WHERE table = '$T'")"
 expect "$(run)" "Complete" "apply again"
 expect "$(CH "SELECT count() FROM system.mutations WHERE table = '$T'")" "$m" "no second ALTER"
-CH "REVOKE ALTER TTL ON default.$T FROM writer"
+# Negative arm: without ALTER TTL the Job must fail loudly, not pretend.
+CH "REVOKE ALTER TTL ON default.$T FROM slo_rollup"
+install "$CHART" --set rollup.ttlDays=50 || exit 1
+expect "$(run)" "Failed" "with ALTER TTL revoked the Job fails rather than pretend"
+check "the log names the grant and the statement" logsays 'needs ALTER TTL'
+expect "$(ttl)" "45" "the table keeps 45 days"
+CH "GRANT ALTER TTL ON default.$T TO slo_rollup"
+expect "$(slo_grants)" "$SLO_GRANTS" "re-granted: slo_rollup's grants are krateo-057's four again"
+expect "$(run)" "Complete" "re-granted, the apply succeeds"
+expect "$(ttl)" "50" "the table now keeps 50 days"
 install "$CHART" || exit 1
+expect "$(run)" "Complete" "back to the default ttlDays"
+expect "$(ttl)" "40" "the table keeps 40 days again"
 
 step "M. Each assertion can fail: mutate the SQL, expect a wrong answer"
 CH "ALTER TABLE otel_metrics_sum DELETE WHERE MetricName = 'traces.span.metrics.calls' AND Attributes['http.route'] = '/late' SETTINGS mutations_sync = 2"

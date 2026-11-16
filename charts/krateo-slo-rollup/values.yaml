@@ -4,15 +4,20 @@
 # totals of traces.span.metrics.calls and .duration in one small table with its own retention.
 # It adds nothing to the insert path: see "Why a refreshable view" in the README.
 
-# ClickHouse connection (native protocol). Credentials are read from a Secret, the same one the
-# OTel collectors use, never inlined.
+# ClickHouse connection (native protocol). Credentials are read from a Secret, never inlined.
 clickhouse:
   host: krateo-clickstack-clickhouse-clickhouse-headless.krateo-system.svc
   port: 9000
   # The database the collector's clickhouse exporter writes. The rollup is created here too.
   database: default
+  # krateo-observability's `slo_rollup` user, which exists for this chart: SELECT on the two source
+  # tables; SELECT, INSERT, ALTER TTL, CREATE TABLE on rollupTable; CREATE VIEW on <rollupTable>_mv;
+  # nothing else. Not the collector's writer (otel-clickhouse-credentials): that identity can
+  # write every otel_* table, and a rollup that only reads them must not hold it. krateo-observability
+  # creates the Secret with the user, in its namespace; it must exist before the first CronJob run.
+  # Only username and password are read (the Secret's password_sha256_hex is the server's).
   credentialsSecret:
-    name: otel-clickhouse-credentials
+    name: clickhouse-slo-rollup-credentials
     usernameKey: username
     passwordKey: password
 

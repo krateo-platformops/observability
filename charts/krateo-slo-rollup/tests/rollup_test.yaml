@@ -43,17 +43,28 @@ tests:
       - matchRegex:
           path: data["schema.sql"]
           pattern: toStartOfDay\(now\(\), 'UTC'\) - toIntervalDay\(2\)
-  - it: reads the credentials from the Secret and inlines none
+  - it: reads the credentials from the slo_rollup Secret and inlines none
     template: cronjob-apply.yaml
     asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: CH_USER
+            valueFrom:
+              secretKeyRef:
+                name: clickhouse-slo-rollup-credentials
+                key: username
       - contains:
           path: spec.jobTemplate.spec.template.spec.containers[0].env
           content:
             name: CH_PASSWORD
             valueFrom:
               secretKeyRef:
-                name: otel-clickhouse-credentials
+                name: clickhouse-slo-rollup-credentials
                 key: password
+      - notMatchRegex:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env[?(@.name == "CH_PASSWORD")].valueFrom.secretKeyRef.name
+          pattern: otel-clickhouse-credentials
   - it: refuses a TTL that does not cover the 28-day window
     template: configmap-scripts.yaml
     set:
