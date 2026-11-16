@@ -13,10 +13,16 @@
      sha256 of the password; no generated password appears in the ClickHouseCluster CR;
    - default, app and otelcollector are untouched (no users.default entry, no defaultUserPassword),
      and otel-clickhouse-credentials still names otelcollector: no client is switched;
-   - the render fails if an override of containerTemplate.env drops an entry.
-2. Load the rendered users.d YAML into the ClickHouse version krateo-057 runs, with the hashes from a
-   0600 env file, and check per user: login, readonly, SHOW GRANTS (one line per object, as
-   expected), CHECK GRANT on the audit tables, and the per-query settings each client sends.
+   - each user's variable reads its own Secret and no other variable reads it;
+   - the render fails if an override of containerTemplate.env drops an entry, or points another
+     variable at a user's Secret;
+   - extraConfig.startup_scripts holds exactly the one CREATE DATABASE IF NOT EXISTS cmp.
+2. Load the rendered users.d YAML and startup_scripts into the ClickHouse version krateo-057 runs,
+   with the hashes from a 0600 env file, and check per user: login, readonly, SHOW GRANTS (one line
+   per object, as expected), CHECK GRANT on the audit tables, and the per-query settings each client
+   sends. Then usage_collector against `cmp`, which must exist before it ever logs in: its own
+   CREATE TABLE IF NOT EXISTS and INSERT work, SELECT, any other table and CREATE DATABASE are
+   refused, and a restart leaves `cmp` and its rows as they were.
    Passwords are generated here and never printed.
 
 Run: python3 tests/clickhouse-users-docker.py [repo-root]   (--render-only skips step 2)
@@ -86,7 +92,18 @@ USERS = {
                    {**d("otel_metrics_sum", "otel_metrics_histogram"),
                     "default.krateo_slo_daily": "SELECT, INSERT, CREATE TABLE, ALTER MODIFY TTL",
                     "default.krateo_slo_daily_mv": "CREATE VIEW"}),
+    "usage_collector": ("CLICKHOUSE_USER_USAGE_COLLECTOR_SHA256", "clickhouse-usage-collector-credentials",
+                        "default", {"cmp.health_records": "INSERT, CREATE TABLE"}),
 }
+# The platform creates `cmp` (extraConfig.startup_scripts); usage_collector never can.
+STARTUP_SCRIPTS = {"throw_on_error": False,
+                   "scripts": [{"query": "CREATE DATABASE IF NOT EXISTS cmp ENGINE = Atomic"}]}
+# cmp-usage-collector's own DDL (internal/health/clickhouse.go TableDDL), for cmp.health_records.
+HEALTH_DDL = ("CREATE TABLE IF NOT EXISTS cmp.health_records ( record_id String, org LowCardinality(String),"
+              " tenant LowCardinality(String), service LowCardinality(String), component LowCardinality(String),"
+              " status Enum8('OK' = 1, 'Warning' = 2, 'Critical' = 3, 'Unknown' = 4), reason String,"
+              " checked_at DateTime64(3, 'UTC') DEFAULT now64(3)) ENGINE = ReplacingMergeTree(checked_at)"
+              " PARTITION BY toYYYYMM(checked_at) ORDER BY (org, tenant, service, component, record_id)")
 # `default`'s future hash: a Secret and an env variable, no users.default entry yet.
 DEFAULT_PW = ("CLICKHOUSE_USER_DEFAULT_SHA256", "clickhouse-default-password")
 SYSTEM_GRANTS_ALLOWED = {"system.data_skipping_indices"}
@@ -200,10 +217,14 @@ def check_render(root, docs):
                   and "INSERT" not in got.get("default.krateo_audit_worm", set()),
                   f"{user}: no INSERT on krateo_audit_seal / krateo_audit_worm")
 
+    env_list = spec["containerTemplate"].get("env", [])
     for user, (var, sec, *_rest) in list(USERS.items()) + [("default", DEFAULT_PW)]:
         e = env.get(var, {})
         ref = (e.get("valueFrom") or {}).get("secretKeyRef") or {}
         check(ref == {"name": sec, "key": "password_sha256_hex"}, f"env {var} -> {sec}/password_sha256_hex")
+        readers = [x["name"] for x in env_list
+                   if ((x.get("valueFrom") or {}).get("secretKeyRef") or {}).get("name") == sec]
+        check(readers == [var], f"Secret {sec} is read by {var} alone ({readers})")
         s = secrets_.get(sec)
         if not check(s is not None, f"Secret {sec} rendered"):
             continue
@@ -220,6 +241,11 @@ def check_render(root, docs):
               f"Secret {sec}: neither password nor hash appears in the ClickHouseCluster CR")
 
     # Nothing about default, app, otelcollector or the clients changes.
+    check(spec["settings"].get("extraConfig", {}).get("startup_scripts") == STARTUP_SCRIPTS,
+          "extraConfig.startup_scripts is exactly CREATE DATABASE IF NOT EXISTS cmp ENGINE = Atomic")
+    check(all("CREATE DATABASE" not in (u.get("grants") or [{}])[0].get("query", "").upper()
+              for u in users.values() if u.get("grants")),
+          "no user is granted CREATE DATABASE")
     check("default" not in users, "users.default is not overridden (default stays as the operator makes it)")
     check("defaultUserPassword" not in spec["settings"], "no settings.defaultUserPassword")
     check({"app", "otelcollector"} <= set(users) and all("password" in users[u] for u in ("app", "otelcollector")),
@@ -230,18 +256,36 @@ def check_render(root, docs):
     return chc, euc
 
 
-def check_guard(root):
+def env_entry(var, sec):
+    return {"name": var, "valueFrom": {"secretKeyRef": {"name": sec, "key": "password_sha256_hex"}}}
+
+
+def render_env(root, env):
     with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
-        yaml.safe_dump({"clickstack": {"clickhouse": {"cluster": {"spec": {"containerTemplate": {"env": [
-            {"name": "CLICKHOUSE_USER_SSE_PROXY_SHA256",
-             "valueFrom": {"secretKeyRef": {"name": "clickhouse-sse-proxy-credentials", "key": "password_sha256_hex"}}}
-        ]}}}}}}, f)
+        yaml.safe_dump({"clickstack": {"clickhouse": {"cluster": {"spec": {"containerTemplate": {"env": env}}}}}}, f)
     try:
-        r = render(root, "-f", f.name, expect_fail=True)
+        return render(root, "-f", f.name, expect_fail=True)
     finally:
         os.unlink(f.name)
+
+
+def check_guard(root):
+    r = render_env(root, [env_entry("CLICKHOUSE_USER_SSE_PROXY_SHA256", "clickhouse-sse-proxy-credentials")])
     check(r.returncode != 0 and "must contain CLICKHOUSE_USER_SNOWPLOW_READER_SHA256" in r.stderr,
           "a containerTemplate.env override that drops entries fails the render")
+    full = [env_entry(var, sec) for var, sec, *_r in list(USERS.values()) + [DEFAULT_PW]]
+    r = render_env(root, full)
+    check(r.returncode == 0, "the chart's own env list, repeated in an override, renders")
+    # usage_collector's variable borrowing another user's Secret (the krateo-slo-rollup 0.1.1 shape).
+    borrowed = [env_entry(v, "clickhouse-otel-writer-credentials" if v == "CLICKHOUSE_USER_USAGE_COLLECTOR_SHA256" else s)
+                for v, s in ((e["name"], e["valueFrom"]["secretKeyRef"]["name"]) for e in full)]
+    r = render_env(root, borrowed)
+    check(r.returncode != 0 and "CLICKHOUSE_USER_USAGE_COLLECTOR_SHA256 reads Secret clickhouse-otel-writer-credentials" in r.stderr,
+          "usage_collector's variable reading another user's Secret fails the render")
+    # A second variable reading usage_collector's Secret.
+    r = render_env(root, full + [env_entry("CLICKHOUSE_USER_OTHER_SHA256", "clickhouse-usage-collector-credentials")])
+    check(r.returncode != 0 and "entry CLICKHOUSE_USER_OTHER_SHA256 reads Secret clickhouse-usage-collector-credentials" in r.stderr,
+          "another variable reading usage_collector's Secret fails the render")
 
 
 # --- step 2: ClickHouse ---------------------------------------------------------------------------
@@ -252,9 +296,11 @@ def free_port():
         return s.getsockname()[1]
 
 
-def ch(port, sql, user="default", key=""):
-    req = urllib.request.Request(f"http://127.0.0.1:{port}/", data=sql.encode(), method="POST",
-                                 headers={"X-ClickHouse-User": user, "X-ClickHouse-Key": key})
+def ch(port, sql, user="default", key="", database=None):
+    headers = {"X-ClickHouse-User": user, "X-ClickHouse-Key": key}
+    if database:
+        headers["X-ClickHouse-Database"] = database
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/", data=sql.encode(), method="POST", headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             return True, r.read().decode().strip()
@@ -266,14 +312,79 @@ def ch(port, sql, user="default", key=""):
         return False, type(e).__name__
 
 
-def check_clickhouse(euc):
+def wait_ready(port):
+    for _ in range(90):
+        if ch(port, "SELECT 1") == (True, "1"):
+            return True
+        time.sleep(1)
+    return False
+
+
+def check_usage_collector(port, name, k):
+    """cmp exists before usage_collector's first login; then its whole life cycle, and a restart."""
+    u = "usage_collector"
+    # The first query the server answers: startup_scripts ran before the ports opened.
+    check(ch(port, "SELECT engine FROM system.databases WHERE name = 'cmp'") == (True, "Atomic"),
+          "[ch] database cmp exists (Atomic) when the server first answers, before usage_collector logs in")
+    check(ch(port, "SELECT count() FROM system.query_log WHERE user = 'usage_collector'") in ((True, "0"), (False, "60")),
+          "[ch] usage_collector has run nothing yet")
+    check(ch(port, "SELECT value FROM system.metrics WHERE metric = 'StartupScriptsExecutionState'") == (True, "1"),
+          "[ch] StartupScriptsExecutionState = 1 (Success)")
+    # A real table usage_collector must not reach, so a refusal is ACCESS_DENIED, not UNKNOWN_TABLE.
+    check(ch(port, "CREATE TABLE default.otel_logs (Body String) ENGINE = MergeTree ORDER BY tuple()")[0],
+          "[ch] (setup) default.otel_logs exists")
+    ok, out = ch(port, "SHOW GRANTS", u, k)
+    check((ok, out) == (True, "GRANT INSERT, CREATE TABLE ON cmp.health_records TO usage_collector"),
+          f"[ch] {u}: SHOW GRANTS is exactly 'GRANT INSERT, CREATE TABLE ON cmp.health_records TO usage_collector'")
+    check(ch(port, HEALTH_DDL, u, k)[0], f"[ch] {u}: CREATE TABLE IF NOT EXISTS cmp.health_records (the collector's DDL)")
+    check(ch(port, HEALTH_DDL, u, k)[0], f"[ch] {u}: the same CREATE TABLE IF NOT EXISTS again, on the existing table")
+    row = '{"record_id":"r1","org":"o","tenant":"t","service":"s","component":"c","status":"OK","reason":""}'
+    check(ch(port, "INSERT INTO cmp.health_records FORMAT JSONEachRow\n" + row, u, k)[0],
+          f"[ch] {u}: INSERT INTO cmp.health_records")
+    check(ch(port, "INSERT INTO health_records FORMAT JSONEachRow\n" + row, u, k, database="cmp")[0],
+          f"[ch] {u}: INSERT with database=cmp (unqualified table)")
+    check(ch(port, "SELECT count() FROM cmp.health_records") == (True, "2"), "[ch] (as default) the two rows landed")
+    refused = [
+        ("SELECT * FROM cmp.health_records", "SELECT on cmp.health_records"),
+        ("SELECT count() FROM cmp.health_records", "SELECT count() on cmp.health_records"),
+        ("INSERT INTO default.otel_logs FORMAT JSONEachRow\n{\"Body\":\"x\"}", "INSERT into default.otel_logs"),
+        ("SELECT * FROM default.otel_logs", "SELECT on default.otel_logs"),
+        ("CREATE DATABASE cmp2", "CREATE DATABASE cmp2"),
+        ("CREATE DATABASE IF NOT EXISTS cmp", "CREATE DATABASE IF NOT EXISTS cmp (an existing one)"),
+        ("CREATE TABLE cmp.other (x UInt8) ENGINE = MergeTree ORDER BY x", "CREATE TABLE cmp.other"),
+        ("CREATE TABLE default.health_records (x UInt8) ENGINE = MergeTree ORDER BY x", "CREATE TABLE default.health_records"),
+        ("DROP TABLE cmp.health_records", "DROP TABLE cmp.health_records"),
+        ("TRUNCATE TABLE cmp.health_records", "TRUNCATE cmp.health_records"),
+        ("ALTER TABLE cmp.health_records DELETE WHERE 1", "ALTER DELETE on cmp.health_records"),
+        ("DROP DATABASE cmp", "DROP DATABASE cmp"),
+    ]
+    for sql, what in refused:
+        check(ch(port, sql, u, k) == (False, "497"), f"[ch] {u}: refused (497 ACCESS_DENIED): {what}")
+    # Restart: the startup script meets an existing cmp; nothing is lost and nothing fails.
+    subprocess.run(["docker", "restart", name], check=True, capture_output=True)
+    if not check(wait_ready(port), "[ch] ClickHouse answered after a restart"):
+        return
+    check(ch(port, "SELECT value FROM system.metrics WHERE metric = 'StartupScriptsExecutionState'") == (True, "1"),
+          "[ch] after the restart: StartupScriptsExecutionState = 1 (Success), on an existing cmp")
+    check(ch(port, "SELECT count() FROM cmp.health_records") == (True, "2"), "[ch] after the restart: cmp.health_records keeps its rows")
+    check(ch(port, HEALTH_DDL, u, k)[0] and ch(port, "INSERT INTO cmp.health_records FORMAT JSONEachRow\n" + row, u, k)[0],
+          f"[ch] after the restart: {u} creates-if-not-exists and inserts again")
+
+
+def check_clickhouse(euc, startup_scripts):
     pws = {u: secrets.token_urlsafe(24) for u in USERS}
     work = tempfile.mkdtemp(prefix="ch-users-")
     os.chmod(work, 0o700)
     usersd, envfile = os.path.join(work, "99-extra-users-config.yaml"), os.path.join(work, "env")
+    configd = os.path.join(work, "99-extra-config.yaml")
     with open(usersd, "w") as f:
         yaml.safe_dump(euc, f, sort_keys=True)  # the operator writes this map with its keys sorted
     os.chmod(usersd, 0o644)
+    # The rendered startup_scripts, as the operator writes extraConfig to config.d (the rest of
+    # extraConfig, http_handlers among it, would replace the HTTP routes this test queries through).
+    with open(configd, "w") as f:
+        yaml.safe_dump({"startup_scripts": startup_scripts}, f, sort_keys=True)
+    os.chmod(configd, 0o644)
     fd = os.open(envfile, os.O_WRONLY | os.O_CREAT, 0o600)
     with os.fdopen(fd, "w") as f:
         for u, (var, *_r) in USERS.items():
@@ -282,15 +393,13 @@ def check_clickhouse(euc):
     port = free_port()
     name = f"ch-users-test-{port}"
     subprocess.run(["docker", "run", "-d", "--name", name, "-p", f"127.0.0.1:{port}:8123", "--env-file", envfile,
-                    "-v", f"{usersd}:/etc/clickhouse-server/users.d/99-extra-users-config.yaml:ro", IMAGE],
+                    "-v", f"{usersd}:/etc/clickhouse-server/users.d/99-extra-users-config.yaml:ro",
+                    "-v", f"{configd}:/etc/clickhouse-server/config.d/99-extra-config.yaml:ro", IMAGE],
                    check=True, capture_output=True)
     try:
-        for _ in range(90):
-            if ch(port, "SELECT 1") == (True, "1"):
-                break
-            time.sleep(1)
-        else:
+        if not wait_ready(port):
             return check(False, "ClickHouse answered")
+        check_usage_collector(port, name, pws["usage_collector"])
         for user, (var, sec, prof, objects) in USERS.items():
             k = pws[user]
             check(ch(port, "SELECT currentUser()", user, k) == (True, user), f"[ch] {user}: logs in")
@@ -328,7 +437,7 @@ def check_clickhouse(euc):
             check(ok == want, f"[ch] {user}: {'accepted' if want else 'refused'}: {sql.split('SETTINGS ')[1]}")
     finally:
         subprocess.run(["docker", "rm", "-f", name], capture_output=True)
-        for p in (usersd, envfile):
+        for p in (usersd, envfile, configd):
             os.unlink(p)
         os.rmdir(work)
 
@@ -337,7 +446,7 @@ def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     root = pathlib.Path(args[0] if args else ".").resolve()
     subprocess.run(["helm", "dependency", "build", str(root / CHART)], check=True, capture_output=True)
-    _, euc = check_render(root, render(root))
+    chc, euc = check_render(root, render(root))
     with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
         yaml.safe_dump(OVERLAY, f)
     try:
@@ -348,7 +457,7 @@ def main():
     check("chops" in users and set(USERS) <= set(users), "a componentValues user deep-merges beside the chart's users")
     check_guard(root)
     if "--render-only" not in sys.argv:
-        check_clickhouse(euc)
+        check_clickhouse(euc, chc["spec"]["settings"]["extraConfig"]["startup_scripts"])
     print(f"\n{len(failures)} failure(s)")
     return 1 if failures else 0
 

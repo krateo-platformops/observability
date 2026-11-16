@@ -581,6 +581,12 @@ clickstack:
                 secretKeyRef:
                   name: clickhouse-slo-rollup-credentials
                   key: password_sha256_hex
+            # acmp's cmp-usage-collector (0.1.47). A new variable, so 0.1.47 ROLLS ClickHouse once.
+            - name: CLICKHOUSE_USER_USAGE_COLLECTOR_SHA256
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-usage-collector-credentials
+                  key: password_sha256_hex
             # `default`'s future hash. NOTHING reads it yet: `default` keeps the operator's
             # no_password until the lockdown's last step, which then only edits users.default in
             # extraUsersConfig (a hot reload, no restart) to read this variable. Shipping the
@@ -918,6 +924,17 @@ clickstack:
                       GRANT SELECT ON default.otel_metrics_sum, SELECT ON default.otel_metrics_histogram,
                       SELECT, INSERT, CREATE TABLE, ALTER MODIFY TTL ON default.krateo_slo_daily,
                       CREATE VIEW ON default.krateo_slo_daily_mv
+              # usage_collector: acmp's cmp-usage-collector, writing service health rows (0.1.47,
+              # Diego 2026-11-16). It runs CREATE TABLE IF NOT EXISTS cmp.health_records itself and
+              # then INSERTs, so it gets those two privileges on that one table. No SELECT: it never
+              # reads back. No CREATE DATABASE: the platform creates `cmp` (extraConfig.startup_scripts
+              # below), so the collector's credential can't create databases. Nothing in `default`.
+              usage_collector:
+                password_sha256_hex:
+                  "@from_env": CLICKHOUSE_USER_USAGE_COLLECTOR_SHA256
+                profile: default
+                grants:
+                  - query: "GRANT INSERT, CREATE TABLE ON cmp.health_records"
               # `default`, `app` and `otelcollector` are NOT changed here (0.1.42 switches no client).
           extraConfig:
             # SERVER LOG FILES — the other half of the retention incident below.
@@ -940,6 +957,22 @@ clickstack:
               level: information
               size: 100M
               count: 5
+            # THE `cmp` DATABASE (0.1.47), for usage_collector's cmp.health_records. The platform
+            # creates it, not the collector, so the collector's user needs no CREATE DATABASE.
+            # startup_scripts runs each query once per server start, as the server itself (no user),
+            # before the HTTP and native ports open (programs/server/Server.cpp at 26.10.3.7), so `cmp`
+            # exists before any client can log in. IF NOT EXISTS makes every later start a no-op, and
+            # nothing here drops or alters the database. tests/clickhouse-users-docker.py loads it.
+            # ENGINE = Atomic, ClickHouse's own default, says so out loud: the operator recreates only
+            # `default` as Replicated and its database sync skips Atomic ones, and an Atomic database
+            # needs no Keeper at startup. The cluster has one replica.
+            # throw_on_error false: a failed script is logged and the server starts anyway; ClickHouse
+            # serving telemetry matters more than `cmp`. The operator restarts ClickHouse when
+            # extraConfig changes, and 0.1.47's new environment variable rolls it anyway.
+            startup_scripts:
+              throw_on_error: false
+              scripts:
+                - query: "CREATE DATABASE IF NOT EXISTS cmp ENGINE = Atomic"
             # SYSTEM-LOG RETENTION — DO NOT REMOVE (see the dataVolumeClaimSpec comment
             # above: with no <ttl> the system.* log tables grow unbounded and were
             # ~3.6GiB of the 10Gi disk when the bench filled up and inserts died with

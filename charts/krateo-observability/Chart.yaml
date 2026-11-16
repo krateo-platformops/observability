@@ -180,7 +180,18 @@ type: application
 # mongodb-hyperdx-credentials/uri is refused: roll 0.1.44 or 0.1.45 first. The guard reads that
 # Secret, not the MongoDBCommunity: the composition controller may get Secrets but not
 # MongoDBCommunity objects (installer, 2026-11-11). No restart: no pod reads either Secret.
-version: 0.1.46
+# 0.1.47: ClickHouse user usage_collector for acmp's cmp-usage-collector, and the database `cmp` it
+# writes to. ONE grant statement, exactly INSERT, CREATE TABLE ON cmp.health_records: the collector
+# creates its table with CREATE TABLE IF NOT EXISTS and inserts, and can't read, create a database or
+# touch `default`. The platform creates `cmp` with a ClickHouse startup script
+# (settings.extraConfig.startup_scripts, CREATE DATABASE IF NOT EXISTS cmp ENGINE = Atomic), which
+# runs as the server before its client ports open, on every start. Secret
+# clickhouse-usage-collector-credentials (username, password, password_sha256_hex) is generated and
+# kept like the other users'. The render now also fails if any env entry other than a user's own
+# reads that user's Secret. No new settable values key: user, Secret and database are platform
+# constants. The new containerTemplate.env entry ROLLS ClickHouse ONCE (the extraConfig change would
+# restart it anyway). No client is switched. Decision: Diego 2026-11-16.
+version: 0.1.47
 appVersion: "3.2.0"
 dependencies:
   - name: clickstack
