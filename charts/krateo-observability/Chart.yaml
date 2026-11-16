@@ -217,7 +217,14 @@ type: application
 # compares). Default sources changed upstream, applied only where none exist.
 # ROLLS HyperDX only; ClickHouse, Keeper and MongoDB see a label change on their CRs only
 # (helm.sh/chart, app.kubernetes.io/version), measured on kind as no restart.
-version: 0.1.49
+# 0.1.50: one new core alert, sre-rest-controller-vendor-5xx (Diego, 2026-11-16): the generated REST
+# controllers (rest-dynamic-controller) keep failing to observe their resources because the vendor
+# answers 5xx, at least 20 such lines in each of 2 consecutive 15-minute windows. Replayed from
+# krateo-057's counts: it fires once in the 2026-11-12 PullRequest 503 outage (15:00 to 15:45) and
+# stays silent on the isolated 500/502/503/504 failures. Not per kind: groupBy is metric-only in
+# alert-provider, so the incident's records name the controller and the runbook names kind and
+# status. Adds one Alert CR; nothing else in the render changes.
+version: 0.1.50
 appVersion: "3.5.0"
 dependencies:
   - name: clickstack

@@ -305,6 +305,38 @@ defaultAlerts:
       thresholdType: above
       interval: 15m
       description: A Krateo provider cannot connect to the system it manages, often because of expired credentials.
+    # A vendor's API answering 5xx to the generated REST controllers (rest-dynamic-controller, 34
+    # Deployments on krateo-057), seen as the controllers' own "Cannot observe external resource"
+    # line, whose err carries the status (format "unexpected status: %d: invalid status code: %d").
+    # Selected by the JSON `service` the binary writes, not by ServiceName: ServiceName is each
+    # controller's Deployment. 4xx is left out: 401/403/404 mean credentials, permissions or a
+    # missing object, which each resource shows on its own status. No existing alert caught this.
+    # NOT GROUPED BY KIND: groupBy is for metric alerts only (alert-provider CRD rule
+    # `!has(self.groupBy) || has(self.metricRef)`), and these controllers export no metrics. So
+    # this counts every kind together. The incident's records name the failing controller
+    # (ServiceName, e.g. github-provider-kog-pullrequest-controller), and the runbook's query
+    # names the kind and the status.
+    # Measured on krateo-057, 2026-11-09 to -16, per 15-minute window: the 2026-11-12 outage (17
+    # PullRequests, all 503) was 28 at 13:30, then 0, 0, 0, then 102, 34, 88, 68 from 14:30, and 0
+    # from 15:30 (the last failure was at 15:25:59). The isolated failures (500 x4 on 11-10, 502
+    # x2 on 11-10, 503 x1 on 11-11, 504 x1 on 11-16) are at most 4 in a window, and 11-13 to
+    # 11-15 had none. At 20 and 2 windows it would have fired once, from 15:00 to 15:45 on
+    # 11-12. The 13:37 burst alone, one failed resync of all 17, stays PENDING. 20 is about two
+    # resources failing every resync (on 057 a resource resyncs every 3 minutes and a failed
+    # resync logs two rows for it, about 10 rows per resource per window), so one resource on its
+    # own does not fire. A kind that resyncs less often than every 15 minutes leaves empty
+    # windows, which restart the count. Replayed in tests/vendor-5xx-alert-docker.py. Needs
+    # alert-provider 0.2.69 (runbook; consecutiveWindows on a log alert since 0.2.64).
+    - name: sre-rest-controller-vendor-5xx
+      tier: core
+      displayName: Krateo — vendor API failing with 5xx
+      where: "ResourceAttributes['telemetry.source'] = '' AND JSONExtractString(Body, 'service') = 'rest-dynamic-controller' AND JSONExtractString(Body, 'msg') = 'Cannot observe external resource' AND match(JSONExtractString(Body, 'err'), 'status( code)?: 5[0-9][0-9]')"
+      threshold: 20
+      thresholdType: above
+      interval: 15m
+      consecutiveWindows: 2
+      description: "Resources managed by a generated REST controller keep failing because the vendor's API answers with a 5xx error; the incident names the controller."
+      runbook: "1. Name the kind and the status without printing the error text, which can carry the vendor's identifiers: SELECT ServiceName AS controller, JSONExtractString(Body, 'kind') AS kind, extract(JSONExtractString(Body, 'err'), 'status(?: code)?: (5[0-9][0-9])') AS status, count() AS failures, uniqExact(JSONExtractString(Body, 'name')) AS resources, min(Timestamp) AS first, max(Timestamp) AS last FROM default.otel_logs WHERE Timestamp > now() - INTERVAL 1 HOUR AND JSONExtractString(Body, 'service') = 'rest-dynamic-controller' AND JSONExtractString(Body, 'msg') = 'Cannot observe external resource' AND match(JSONExtractString(Body, 'err'), 'status( code)?: 5[0-9][0-9]') GROUP BY ALL ORDER BY failures DESC. Report it as '<kind>: vendor <status>, <resources> resources'. Do not select err or vendorResponse. 2. One kind failing is usually one vendor endpoint; several kinds of one provider at once is the vendor as a whole. Check the vendor's status page for that API. 3. A 5xx is the vendor's side. The controller retries on every resync and the resources recover when the vendor does: on krateo-057 on 2026-11-12, 17 PullRequests failed with 503 on and off for about two hours, and all recovered together. Restarting the controller, rotating credentials or recreating the resources does not change the vendor's answer. 4. If it persists while the vendor reports healthy, compare a failing resource with a working one of the same kind (status.conditions) to find the endpoint that fails, and report it to the vendor."
     - name: sre-app-panic
       tier: core
       displayName: Application panic or unhandled traceback
