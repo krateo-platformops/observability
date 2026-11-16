@@ -1,0 +1,133 @@
+{
+ "_about": [
+  "Counts only, measured read-only on krateo-057 on 2026-11-16 (otel_logs keeps 7 days; the 2026-11-11/12 rows expire about 2026-11-18).",
+  "One entry per minute that held a generated REST controller's failed observe with a vendor 5xx: rows of default.otel_logs with",
+  "ResourceAttributes['telemetry.source'] = '', JSONExtractString(Body, 'service') = 'rest-dynamic-controller',",
+  "JSONExtractString(Body, 'msg') = 'Cannot observe external resource' and match(JSONExtractString(Body, 'err'), 'status( code)?: 5[0-9][0-9]'),",
+  "grouped by toStartOfMinute(Timestamp), JSONExtractString(Body, 'kind') and the status extracted from err.",
+  "rows = matching log rows, resources = distinct JSONExtractString(Body, 'name'). No err text, resource name or namespace is recorded.",
+  "The data spans 2026-11-09 17:33Z (oldest row kept) to 2026-11-16 19:08Z. 2026-11-13, -14 and -15 held no matching row (about 16,000 rest-dynamic-controller lines a day).",
+  "windows15m is the same where clause counted per epoch-aligned 15-minute bucket on the cluster: every non-empty bucket."
+ ],
+ "from": "2026-11-09T17:30:00Z",
+ "to": "2026-11-16T19:00:00Z",
+ "minutes": [
+  {
+   "minute": "2026-11-10T16:01:00Z",
+   "kind": "Repository",
+   "status": 500,
+   "rows": 4,
+   "resources": 3
+  },
+  {
+   "minute": "2026-11-10T21:25:00Z",
+   "kind": "PullRequest",
+   "status": 502,
+   "rows": 2,
+   "resources": 2
+  },
+  {
+   "minute": "2026-11-11T15:10:00Z",
+   "kind": "PullRequest",
+   "status": 503,
+   "rows": 1,
+   "resources": 1
+  },
+  {
+   "minute": "2026-11-12T13:37:00Z",
+   "kind": "PullRequest",
+   "status": 503,
+   "rows": 28,
+   "resources": 17
+  },
+  {
+   "minute": "2026-11-12T14:34:00Z",
+   "kind": "PullRequest",
+   "status": 503,
+   "rows": 34,
+   "resources": 17
+  },
+  {
+   "minute": "2026-11-12T14:37:00Z",
+   "kind": "PullRequest",
+   "status": 503,
+   "rows": 34,
+   "resources": 17
+  },
+  {
+   "minute": "2026-11-12T14:40:00Z",
+   "kind": "PullRequest",
+   "status": 503,
+   "rows": 34,
+   "resources": 17
+  },
+  {
+   "minute": "2026-11-12T14:46:00Z",
+   "kind": "PullRequest",
+   "status": 503,
+   "rows": 34,
+   "resources": 17
+  },
+  {
+   "minute": "2026-11-12T15:01:00Z",
+   "kind": "PullRequest",
+   "status": 503,
+   "rows": 33,
+   "resources": 17
+  },
+  {
+   "minute": "2026-11-12T15:04:00Z",
+   "kind": "PullRequest",
+   "status": 503,
+   "rows": 20,
+   "resources": 17
+  },
+  {
+   "minute": "2026-11-12T15:07:00Z",
+   "kind": "PullRequest",
+   "status": 503,
+   "rows": 2,
+   "resources": 2
+  },
+  {
+   "minute": "2026-11-12T15:10:00Z",
+   "kind": "PullRequest",
+   "status": 503,
+   "rows": 33,
+   "resources": 17
+  },
+  {
+   "minute": "2026-11-12T15:22:00Z",
+   "kind": "PullRequest",
+   "status": 503,
+   "rows": 34,
+   "resources": 17
+  },
+  {
+   "minute": "2026-11-12T15:25:00Z",
+   "kind": "PullRequest",
+   "status": 503,
+   "rows": 34,
+   "resources": 17
+  },
+  {
+   "minute": "2026-11-16T06:38:00Z",
+   "kind": "Repository",
+   "status": 504,
+   "rows": 1,
+   "resources": 1
+  }
+ ],
+ "windows15m": {
+  "2026-11-10T16:00:00Z": 4,
+  "2026-11-10T21:15:00Z": 2,
+  "2026-11-11T15:00:00Z": 1,
+  "2026-11-12T13:30:00Z": 28,
+  "2026-11-12T14:30:00Z": 102,
+  "2026-11-12T14:45:00Z": 34,
+  "2026-11-12T15:00:00Z": 88,
+  "2026-11-12T15:15:00Z": 68,
+  "2026-11-16T06:30:00Z": 1
+ },
+ "lastFailure": "2026-11-12T15:25:59Z"
+}

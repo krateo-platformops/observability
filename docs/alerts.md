@@ -1,7 +1,7 @@
 ---
 type: Configuration
 title: observability — the default alert set
-description: The 30 Alert CRs the chart seeds, the measured evidence behind every filter and threshold, and the three rules that decide whether an Alert can fire at all — `where` is ClickHouse SQL and not the Lucene the CRD advertises, severity needs `otel-collector-daemonset` ≥ 0.1.17 and JSON logs, and log alerts must exclude the observability stack or they diagnose themselves. Event alerts skip the DELETED copy of an expired Event.
+description: The 32 Alert CRs the chart seeds, the measured evidence behind every filter and threshold, and the three rules that decide whether an Alert can fire at all — `where` is ClickHouse SQL and not the Lucene the CRD advertises, severity needs `otel-collector-daemonset` ≥ 0.1.17 and JSON logs, and log alerts must exclude the observability stack or they diagnose themselves. Event alerts skip the DELETED copy of an expired Event.
 resource: oci://ghcr.io/krateo-platformops/charts/krateo-observability
 tags: [alerting, alerts, observability, clickhouse, hyperdx, sre, runbook]
 timestamp: 2026-09-18T00:00:00Z
@@ -122,6 +122,7 @@ about whether your cluster has that problem.
 | `sre-telemetry-pipeline-stalled` | core | all rows | below 100 | 15m | 58,302,075 |
 | `sre-krateo-composition-reconcile-error` | core | logs | above 2 | 15m | 59,811 |
 | `sre-krateo-provider-connection-failure` | core | events | above 10 | 15m | 1,706 |
+| `sre-rest-controller-vendor-5xx` | core | logs, generated REST controllers' failed observes with a vendor 5xx | above 19 for 2 consecutive windows | 15m | 328 (1 firing run, the 2026-11-12 outage) |
 | `sre-app-panic` | core | logs | above 0 | 15m | 0 |
 | `sre-app-out-of-memory` | core | logs | above 0 | 15m | 0 |
 | `sre-certificate-expiry-warning` | core | logs | above 0 | 1h | 7,434 |
@@ -221,6 +222,7 @@ boundary case is where the difference lives:
 | `sre-probe-failing` | >= 6 | 3.1%  (at `>= 5` it is 3.3%) |
 | `sre-volume-attach-failure` | >= 4 | 0.6%  (**at `>= 3` it is 9.4%** — a 15x difference) |
 | `sre-krateo-provider-connection-failure` | >= 11 | 1.6% |
+| `sre-rest-controller-vendor-5xx` | >= 20, 2 windows in a row | 3 of 678 windows ALERT (0.4%), all in one outage |
 | `sre-telemetry-pipeline-stalled` | < 100 | 0.0%  (observed floor: 67,081 rows/window) |
 
 `below` is exclusive, so the dead-man's switch reads correctly as "fewer than 100 rows".
@@ -327,3 +329,67 @@ core-provider logs both whenever it restarts. On krateo-057 they were every matc
 conflicts it re-queues too. 0.1.33 excludes both messages, in `err` or `error`. Over the same 4 days
 what still fires is a CompositionDefinition stuck waiting for its compositions to delete, in 10 windows.
 
+## `sre-rest-controller-vendor-5xx` (0.1.50)
+
+A vendor's API answering 5xx to the generated REST controllers: the Deployments that run
+`rest-dynamic-controller`, 34 on krateo-057 (the GitHub provider's `github-provider-kog-*-controller`
+among them). When a vendor fails, every resource of the affected kind fails its resync together, and
+before 0.1.50 no alert caught it: the controllers log `Cannot observe external resource`, not
+`Reconciler error`.
+
+**What it counts.** Container log lines whose JSON `service` is `rest-dynamic-controller` (written by
+the binary, so it holds whatever the Deployment is called; `ServiceName` is the Deployment), whose
+`msg` is `Cannot observe external resource`, and whose `err` carries a 5xx status. The controller
+formats a vendor status as `unexpected status: <code>: invalid status code: <code>`, so the filter is
+`match(err, 'status( code)?: 5[0-9][0-9]')`. Each failure also logs a `Performing REST call` line,
+which the `msg` filter leaves out so a failure counts once. 4xx is left out on purpose: 401, 403 and
+404 mean credentials, permissions or a missing object, and each resource reports those on its own
+status. In the 7 days to 2026-11-16 there were no 4xx observe failures on krateo-057 at all.
+
+**Not per kind.** alert-provider's `groupBy` is for metric alerts only. Its CRD refuses it on a log
+alert (`!has(self.groupBy) || has(self.metricRef)`, `helm/alert-provider-crds/templates/crd.alert.yaml`,
+the same rule live on krateo-057 with alert-provider 0.2.85), and `rest-dynamic-controller` exports no
+metrics or spans to build a `Metric` from. So the alert counts all kinds together, and the kind is
+named in two places instead:
+
+- the Incident's records, which alert-provider groups by `ServiceName` and pod for a container log,
+  so they name the failing controller (`github-provider-kog-pullrequest-controller`);
+- the runbook's query, which returns kind, status, failures and distinct resources (for the outage
+  below: `PullRequest`, `503`, 321, 17) and never selects `err`, which can carry the vendor's
+  identifiers.
+
+**Threshold and window: 20 rows in each of 2 consecutive 15-minute windows.** Measured on krateo-057,
+every epoch-aligned 15-minute window from 2026-11-09 17:30 to 2026-11-16 19:00 (678 windows); only 9
+were non-empty:
+
+| window (UTC) | rows | what | state after it |
+|---|---|---|---|
+| 11-10 16:00 | 4 | 500, 3 Repositories | OK |
+| 11-10 21:15 | 2 | 502, 2 PullRequests | OK |
+| 11-11 15:00 | 1 | 503, 1 PullRequest | OK |
+| 11-12 13:30 | 28 | 503, one failed resync of all 17 PullRequests (13:37) | PENDING |
+| 11-12 13:45 to 14:15 | 0 | | OK |
+| 11-12 14:30 | 102 | 503, 17 PullRequests | PENDING |
+| 11-12 14:45 | 34 | 503, 17 | **ALERT** (at 15:00) |
+| 11-12 15:00 | 88 | 503, 17 | ALERT |
+| 11-12 15:15 | 68 | 503, 17; the last failure at 15:25:59 | ALERT |
+| 11-12 15:30 | 0 | | OK (at 15:45, 19 minutes after the last failure) |
+| 11-16 06:30 | 1 | 504, 1 Repository | OK |
+
+2026-11-13, -14 and -15 had none, out of about 16,000 `rest-dynamic-controller` lines a day.
+
+- The isolated failures are at most 4 rows, the outage's sustained windows at least 34.
+- Two windows in a row keeps a single failed resync from firing: the 13:37 burst was every
+  PullRequest failing once, then 57 minutes of successes. It goes PENDING, which notifies nothing.
+  It also keeps the outage to one firing instead of two.
+- 20 is about two resources failing every resync. On krateo-057 a resource resyncs every 3 minutes
+  and a failed resync logs two rows for it, about 10 rows per resource per window, so one resource
+  failing on its own stays below the threshold: that resource's own status shows it.
+- A kind that resyncs less often than every 15 minutes leaves empty windows, and an empty window
+  restarts the count, so this alert can't see a vendor outage on such a kind.
+
+`tests/vendor-5xx-alert-docker.py` (workflow `check-vendor-5xx-alert`) renders the Alert, checks its
+spec, and replays these counts (`tests/fixtures/vendor-5xx-krateo-057.json`, counts only) as synthetic
+rows through the rendered `where` in ClickHouse 26.10.3.7, with the 4xx, non-status, other-controller
+and HyperDX-echo controls left out. Needs alert-provider 0.2.69 (`runbook`; `consecutiveWindows` on a
+log alert since 0.2.64).

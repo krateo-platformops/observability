@@ -1,0 +1,50 @@
+# sre-rest-controller-vendor-5xx: renders the Alert and checks its where, threshold, window and
+# consecutiveWindows, then replays krateo-057's 2026-11-12 vendor 503 outage from its saved counts
+# (tests/fixtures/vendor-5xx-krateo-057.json, counts only) in the ClickHouse version 057 runs,
+# against otel_logs from 057's own DDL. The rendered where must fire during the outage, clear within
+# two windows of the last failure, and stay silent on the isolated 5xx failures, a quiet day, and the
+# 4xx / non-status / other-controller controls. No cluster needed.
+#
+# It is a separate workflow on purpose. lint.yaml is the org-wide canonical chart-repo lint,
+# identical across every krateo-* chart repo.
+
+name: check-vendor-5xx-alert
+
+on:
+  pull_request:
+    paths:
+      - "charts/krateo-observability/**"
+      - "tests/vendor-5xx-alert-docker.py"
+      - "tests/fixtures/otel_logs.sql"
+      - "tests/fixtures/vendor-5xx-krateo-057.json"
+      - ".github/workflows/check-vendor-5xx-alert.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "charts/krateo-observability/**"
+      - "tests/vendor-5xx-alert-docker.py"
+      - "tests/fixtures/otel_logs.sql"
+      - "tests/fixtures/vendor-5xx-krateo-057.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Add the dependency repository
+        run: helm repo add clickstack https://clickhouse.github.io/ClickStack-helm-charts
+      - name: Render the Alert and replay the 057 outage through its where
+        run: python3 tests/vendor-5xx-alert-docker.py .
