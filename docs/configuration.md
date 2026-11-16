@@ -132,7 +132,16 @@ top-level `global` propagates into clickstack and all its subcharts
   copy is refused. `clickhouse-default-password` and `CLICKHOUSE_USER_DEFAULT_SHA256` are shipped
   unused, so closing `default` later is a hot reload rather than a ClickHouse restart.
   `tests/clickhouse-users-docker.py` (workflow `check-clickhouse-users`) checks the rendered config
-  and loads it into ClickHouse 26.8.36.3.
+  and loads it into ClickHouse 26.10.3.7.
+- **`usage_collector` and the `cmp` database** (`0.1.47`): the user for acmp's cmp-usage-collector,
+  profile `default`, ONE grant statement, `GRANT INSERT, CREATE TABLE ON cmp.health_records`. The
+  collector runs `CREATE TABLE IF NOT EXISTS cmp.health_records` and inserts; it can't read the
+  table back, create a database or reach `default`. Its Secret is
+  `clickhouse-usage-collector-credentials`, read by `CLICKHOUSE_USER_USAGE_COLLECTOR_SHA256` alone
+  (the render fails if another variable reads it). The platform creates `cmp`, through
+  `settings.extraConfig.startup_scripts`: `CREATE DATABASE IF NOT EXISTS cmp ENGINE = Atomic`, run
+  by the server on every start before its client ports open. Nothing here is meant to be overridden:
+  the user, Secret and database names are fixed.
 - **The `/events` HTTP handler** lives under
   `clickstack.clickhouse.cluster.spec.settings.extraConfig.http_handlers` — NOT a ConfigMap.
   The operator merges `settings.extraConfig` into `/etc/clickhouse-server/config.d/`. The

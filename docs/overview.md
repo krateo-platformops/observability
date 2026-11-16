@@ -118,8 +118,8 @@ Krateo additions rendered by THIS chart's own templates
   `clickhouse-sse-proxy-credentials` and `clickhouse-snowplow-reader-credentials`, `0.1.42` for the
   rest) — `username`, `password` and `password_sha256_hex` for each chart user: `sse_proxy`,
   `snowplow_reader`, `analyst`, `mcp_reader`, `nightly_reader`, `audit_sealer`, `audit_verifier`,
-  `otel_writer` (`clickhouse-otel-writer-credentials`), `hyperdx` and `slo_rollup`, all named
-  `clickhouse-<user>-credentials`, plus `clickhouse-default-password` for `default`'s future
+  `otel_writer` (`clickhouse-otel-writer-credentials`), `hyperdx`, `slo_rollup` and (`0.1.47`)
+  `usage_collector`, all named `clickhouse-<user>-credentials`, plus `clickhouse-default-password` for `default`'s future
   password (unused until `default` is closed). The password is generated on first install and kept
   on upgrade (lookup). ClickHouse reads only the hash, through `containerTemplate.env`.
 - **`krateo-clickstack-app-lb` LoadBalancer Service** (`hyperdx-loadbalancer.yaml`, gated on
