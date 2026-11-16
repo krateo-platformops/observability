@@ -177,21 +177,37 @@ Rows per flush (60 s) per node agent, per metric:
 
 ## 28-day rollup
 
-The `otel_*` tables keep 7 days, so a rolling 28-day objective reads
+The `otel_*` tables keep 7 days, so the 30-day availability objective and error budget (and the
+chart's rolling 28-day window) read
 [`charts/krateo-slo-rollup`](../charts/krateo-slo-rollup/README.md): one table, `krateo_slo_daily`,
 kept for 40 days by default and refreshed hourly from the two metrics above.
 
 - **What it holds.** One row per UTC day, `ServiceName`, `span.name`, `http.route`,
-  `krateo.sli.error` and bucket layout: the day's call count, or its bucket counts summed element
-  by element. Delta rows only. The error count is the calls of the `krateo.sli.error` rows. Read it
-  with `FINAL`: a refresh writes each recent day again.
-- **Counts are of sampled spans.** snowplow head-samples its SERVER spans at about 5%
-  (`traceidratio` 0.05, not parent-based, errors not preferentially kept), so `calls` is about 5%
-  of real traffic. Nothing in the rollup scales it. Error ratios and quantiles are estimates from a
-  random sample, weaker on routes and days with little traffic.
-- **Quantiles are approximate.** A p95 from summed buckets is only known to lie inside its bucket,
-  and interpolation assumes durations are evenly spread across it. A p95 past the last bound
-  (10 s) reads as that bound.
+  `krateo.sli.error` and bucket layout: the day's call count (`bounds` empty), or its bucket counts
+  summed element by element (`bounds` set). Delta rows only. The error count is the calls of the
+  `krateo.sli.error` rows. Read it with `FINAL`: a refresh writes each recent day again, and only the
+  newest `computed_at` counts.
+- **The statements.** The 30-day reads are the last three statements of
+  [`sli-span-metrics.sql`](../ops/slo-alert/sli-span-metrics.sql), after the five span-metric ones:
+  30d-1 availability and error budget per SLI class (`error_budget_calls` = 0.1 % of calls,
+  `budget_remaining` = 1 − errors / budget, negative once overspent), 30d-2 API p50 / p95, 30d-3 UI
+  p50 / p95 per interaction. They take the same `start` / `end` parameters, read as whole UTC days:
+  `day >= toDate(start, 'UTC') AND day < toDate(end, 'UTC')`. Midnight bounds are exact; otherwise
+  `start`'s day is in whole and `end`'s day out whole, so `start` = now − 30 days, `end` = now reads
+  the 30 complete days before today. Running the whole file with `--queries-file` needs the rollup
+  installed: without `krateo_slo_daily` the five span-metric statements run and the 30-day ones fail.
+- **Same percentile and layout rules.** The rollup's readers use the bucket-interval rule of
+  `sli-span-metrics.sql` (the percentile rule under [SLIs](#slis)): a percentile is the bucket
+  `(lower, upper]` that holds rank `q × n`, upper-inclusive, no interpolation, and a rank in the
+  overflow bucket (past 10 s) reports upper `inf`. Rows with different `bounds` are never summed: a
+  window that spans a layout change returns one row per layout and reports no percentile. (The
+  chart README's worked query, `tests/rollup-query.sql`, still interpolates: for SLO figures read
+  the statements above.)
+- **Counts are of the spans snowplow exports.** On 2026-11-10 that was every SERVER span: X5 Load A
+  step 4's span-metric calls (158,332) equalled the load generator's request count exactly
+  ([`ops/perf/x5-2026-11-10/results.tsv`](../ops/perf/x5-2026-11-10/results.tsv); run details
+  krateo-acmp#21). Nothing in the rollup scales counts, so if snowplow's SERVER spans are ever
+  sampled, `calls` becomes a sample and error ratios and percentiles become estimates.
 - **Coverage starts at install**, plus up to 6 days of backfill. A window reaching further back is
   incomplete, and has to be reported as such.
 - **It cannot affect ingestion.** The view is refreshable, not insert-triggered. The README has

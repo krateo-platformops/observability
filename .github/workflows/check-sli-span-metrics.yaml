@@ -6,7 +6,9 @@
 # --param_end) against fixture rows for each rule the file states: 4xx is not an error, the
 # upper-inclusive bucket boundary, first and overflow buckets, one row per bucket layout, [start,
 # end) window edges. It also replays the committed X5 rows (ops/perf/x5-2026-11-10/) and checks
-# they give docs/SLO.md's performance rows.
+# they give docs/SLO.md's performance rows. The 30-day statements run against krateo_slo_daily,
+# created from the chart's own DDL (charts/krateo-slo-rollup/templates/configmap-scripts.yaml):
+# FINAL keeps the newest refresh, whole-UTC-day window edges, histograms are not calls.
 #
 # It is a separate workflow on purpose. lint.yaml is the org-wide canonical chart-repo lint,
 # identical across every krateo-* chart repo.
@@ -19,6 +21,8 @@ on:
       - "ops/slo-alert/sli-span-metrics.sql"
       - "tests/sli-span-metrics-docker.py"
       - "charts/krateo-slo-rollup/tests/otel-metrics-tables.sql"
+      - "charts/krateo-slo-rollup/templates/configmap-scripts.yaml"
+      - "charts/krateo-slo-rollup/values.yaml"
       - "ops/perf/x5-2026-11-10/span-metrics-rows.jsonl"
       - ".github/workflows/check-sli-span-metrics.yaml"
   push:
@@ -27,6 +31,8 @@ on:
       - "ops/slo-alert/sli-span-metrics.sql"
       - "tests/sli-span-metrics-docker.py"
       - "charts/krateo-slo-rollup/tests/otel-metrics-tables.sql"
+      - "charts/krateo-slo-rollup/templates/configmap-scripts.yaml"
+      - "charts/krateo-slo-rollup/values.yaml"
       - "ops/perf/x5-2026-11-10/span-metrics-rows.jsonl"
   workflow_dispatch:
 
