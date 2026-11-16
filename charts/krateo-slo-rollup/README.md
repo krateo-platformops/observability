@@ -153,8 +153,8 @@ days, and report bucket intervals.
 
 `rollup.ttlDays` (default 40: a 30-day window plus a margin) goes into the `CREATE TABLE`, so it
 applies when the table is created. A row expires once `day + ttlDays` has passed, so a value below 31
-can delete the first day of a 30-day window before it is read; the schema's minimum, 29, dates from
-the chart's original 28-day window. `CREATE … IF NOT EXISTS` leaves an existing table alone, so the
+can delete the first day of a 30-day window before it is read, and the schema refuses it (minimum 31
+since 0.1.3; it was 29, from the chart's original 28-day window). `CREATE … IF NOT EXISTS` leaves an existing table alone, so the
 apply step compares the live TTL with the value and runs `ALTER TABLE … MODIFY TTL` when they
 differ, and does nothing when they match.
 

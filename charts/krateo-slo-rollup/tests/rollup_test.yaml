@@ -65,9 +65,17 @@ tests:
       - notMatchRegex:
           path: spec.jobTemplate.spec.template.spec.containers[0].env[?(@.name == "CH_PASSWORD")].valueFrom.secretKeyRef.name
           pattern: otel-clickhouse-credentials
-  - it: refuses a TTL that does not cover the 28-day window
+  - it: refuses a TTL that does not cover the 30-day window
     template: configmap-scripts.yaml
     set:
-      rollup.ttlDays: 28
+      rollup.ttlDays: 30
     asserts:
       - failedTemplate: {}
+  - it: accepts the smallest TTL that covers the 30-day window
+    template: configmap-scripts.yaml
+    set:
+      rollup.ttlDays: 31
+    asserts:
+      - matchRegex:
+          path: data["schema.sql"]
+          pattern: TTL day \+ toIntervalDay\(31\)

@@ -1,6 +1,6 @@
-# krateo-slo-rollup: a daily rollup of the SLI span metrics, for a rolling 28-day SLO.
+# krateo-slo-rollup: a daily rollup of the SLI span metrics, for a rolling 30-day SLO.
 #
-# The otel_* tables keep 7 days, so nothing can answer a 28-day question. This chart keeps per-day
+# The otel_* tables keep 7 days, so nothing can answer a 30-day question. This chart keeps per-day
 # totals of traces.span.metrics.calls and .duration in one small table with its own retention.
 # It adds nothing to the insert path: see "Why a refreshable view" in the README.
 
@@ -28,7 +28,7 @@ histogramTable: otel_metrics_histogram
 rollupTable: krateo_slo_daily
 
 rollup:
-  # Days a rollup row is kept. Must exceed the SLO window: 40 is a rolling 28 days plus a margin
+  # Days a rollup row is kept. Must exceed the SLO window: 40 is a rolling 30 days plus a margin; the schema's minimum is 31
   # (a late look at the previous window, and a TTL that only fires on merge). Changing it after
   # install needs ALTER TTL: see "Retention" in the README.
   ttlDays: 40

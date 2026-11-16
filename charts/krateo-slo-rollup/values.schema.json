@@ -86,8 +86,8 @@
       "properties": {
         "ttlDays": {
           "type": "integer",
-          "minimum": 29,
-          "description": "Must exceed the 28-day SLO window."
+          "minimum": 31,
+          "description": "Must exceed the 30-day SLO window by at least a day (the 30d statements in ops/slo-alert/sli-span-metrics.sql read 30 whole UTC days before today)."
         },
         "refreshEvery": {
           "type": "string",
