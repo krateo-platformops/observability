@@ -71,8 +71,8 @@ ROLLUP_TEMPLATE = "charts/krateo-slo-rollup/templates/configmap-scripts.yaml"
 ROLLUP_VALUES = "charts/krateo-slo-rollup/values.yaml"
 X5_ROWS = "ops/perf/x5-2026-11-10/span-metrics-rows.jsonl"
 STATEMENTS = ["availability", "api_latency", "ui_latency", "widget_fetch", "burn_rate",
-              "avail_30d", "api_latency_30d", "ui_latency_30d"]
-LATENCY = ("api_latency", "ui_latency", "api_latency_30d", "ui_latency_30d")
+              "30d-1", "30d-2", "30d-3"]
+LATENCY = ("api_latency", "ui_latency", "30d-2", "30d-3")
 INTS = ("calls", "sli_errors", "fetches", "failed", "days_with_data")
 
 OLD = [25, 50, 100, 250, 500, 750, 1000, 1500, 2500, 5000, 10000]        # before 0.1.26
@@ -307,7 +307,7 @@ ROLLUP_CASES = {
             dhist("2026-10-20", SP, "GET /call", b({0: 5000}), err=True, calls=5000),
             dhist("2026-10-05", FE, "krateo.page.load", b({0: 77}), err=True, calls=77),
         ],
-        {"avail_30d": [
+        {"30d-1": [
             # 25 errors against a budget of 10 calls: overspent, remaining -1.5.
             avail(FE, 10000, 25, 10.0, -1.5, "2026-10-03", "2026-10-04", 2),
             avail(SP, 1000000, 250, 1000.0, 0.75, "2026-10-01", "2026-10-30", 3),
@@ -326,32 +326,32 @@ ROLLUP_CASES = {
             dhist("2026-09-03", SP, "GET /call", b({12: 105}), route="/call", computed=OLDER),
             dhist("2026-09-03", FE, "krateo.page.load", b({12: 4}), computed=OLDER),
         ],
-        {"avail_30d": [avail(SP, 249, 9, 0.249, 1 - 9 / 0.249, "2026-09-03", "2026-09-03", 1)],
-         "api_latency_30d": [lat(249, (25, 50), (25, 50), 1)],
-         "ui_latency_30d": [lat(10, (100, 250), (100, 250), 1, interaction="krateo.page.load")]},
+        {"30d-1": [avail(SP, 249, 9, 0.249, 1 - 9 / 0.249, "2026-09-03", "2026-09-03", 1)],
+         "30d-2": [lat(249, (25, 50), (25, 50), 1)],
+         "30d-3": [lat(10, (100, 250), (100, 250), 1, interaction="krateo.page.load")]},
         [],
     ),
     "day edges: toDate(start) in, toDate(end) out": (
         "2026-08-10 00:00:00", "2026-08-20 00:00:00", EDGE_ROWS,
-        {"avail_30d": EDGE_AVAIL, "api_latency_30d": [lat(8, (25, 50), (25, 50), 1)]},
+        {"30d-1": EDGE_AVAIL, "30d-2": [lat(8, (25, 50), (25, 50), 1)]},
         [],
     ),
     "day edges: mid-day bounds, start's day in whole, end's day out whole": (
         "2026-08-10 13:00:00", "2026-08-20 13:00:00", [],
-        {"avail_30d": EDGE_AVAIL, "api_latency_30d": [lat(8, (25, 50), (25, 50), 1)]},
+        {"30d-1": EDGE_AVAIL, "30d-2": [lat(8, (25, 50), (25, 50), 1)]},
         [],
     ),
     "day edges: end 1 ns before midnight leaves that day out": (
         "2026-08-10 00:00:00", "2026-08-19 23:59:59.999999999", [],
-        {"avail_30d": [avail(SP, 7, 0, 0.007, 1.0, "2026-08-10", "2026-08-10", 1)]},
+        {"30d-1": [avail(SP, 7, 0, 0.007, 1.0, "2026-08-10", "2026-08-10", 1)]},
         [],
     ),
     "UTC days: session_timezone Asia/Tokyo, days are the UTC dates of the instants": (
         # 08-11 08:00 JST = 08-10 23:00Z and 08-20 08:00 JST = 08-19 23:00Z: UTC days 08-10 in,
         # 08-19 out. Dates as typed (no 'UTC') would give 08-11 .. 08-19: calls 1, errors 1.
         "2026-08-11 08:00:00", "2026-08-20 08:00:00", [],
-        {"avail_30d": [avail(SP, 7, 0, 0.007, 1.0, "2026-08-10", "2026-08-10", 1)],
-         "api_latency_30d": [lat(7, (25, 50), (25, 50), 1)]},
+        {"30d-1": [avail(SP, 7, 0, 0.007, 1.0, "2026-08-10", "2026-08-10", 1)],
+         "30d-2": [lat(7, (25, 50), (25, 50), 1)]},
         ["--session_timezone=Asia/Tokyo"],
     ),
     "boundary: rank == cumulative count at 250": (
@@ -362,8 +362,8 @@ ROLLUP_CASES = {
             daily("2026-07-01", SP, "GET /a", 100, route="/a"),                     # a call row
             dhist("2026-07-05", FE, "krateo.form.submit", b({2: 10, 3: 9, 4: 1})),  # n = 20, rank 19
         ],
-        {"api_latency_30d": [lat(100, (50, 100), (100, 250), 1)],
-         "ui_latency_30d": [lat(20, (50, 100), (100, 250), 1, interaction="krateo.form.submit")]},
+        {"30d-2": [lat(100, (50, 100), (100, 250), 1)],
+         "30d-3": [lat(20, (50, 100), (100, 250), 1, interaction="krateo.form.submit")]},
         [],
     ),
     "first bucket, overflow, UI names only": (
@@ -376,8 +376,8 @@ ROLLUP_CASES = {
             dhist("2026-06-03", FE, "krateo.widget.fetch", b({11: 500})),       # not a latency SLI
             dhist("2026-06-03", FE, "GET /somewhere", b({11: 500})),            # not an interaction
         ],
-        {"api_latency_30d": [lat(100, (0, 25), (0, 25), 1)],
-         "ui_latency_30d": [
+        {"30d-2": [lat(100, (0, 25), (0, 25), 1)],
+         "30d-3": [
              lat(10, (250, 500), (250, 500), 1, interaction="krateo.composition.open"),
              lat(100, (0, 25), (10000, INF), 0, interaction="krateo.page.load"),
          ]},
@@ -391,9 +391,9 @@ ROLLUP_CASES = {
             dhist("2026-05-10", FE, "krateo.page.load", b({8: 4}, OLD), bounds=OLD),
             dhist("2026-05-11", FE, "krateo.page.load", b({8: 6}), bounds=NEW),
         ],
-        {"api_latency_30d": [lat(10, (100, 250), (100, 250), 1, bounds=OLD),
+        {"30d-2": [lat(10, (100, 250), (100, 250), 1, bounds=OLD),
                              lat(20, (1500, 2000), (1500, 2000), 0, bounds=NEW)],
-         "ui_latency_30d": [lat(4, (1500, 2500), (1500, 2500), 0, bounds=OLD, interaction="krateo.page.load"),
+         "30d-3": [lat(4, (1500, 2500), (1500, 2500), 0, bounds=OLD, interaction="krateo.page.load"),
                             lat(6, (1500, 2000), (1500, 2000), 1, bounds=NEW, interaction="krateo.page.load")]},
         [],
     ),
