@@ -9,7 +9,11 @@ type: application
 # chart's own ConfigMap and run on the upstream ClickHouse client image, so the chart version IS the
 # logic version.
 # 0.1.1: the client image is pinned by digest.
-version: 0.1.1
+# 0.1.2: runs as krateo-observability's least-privilege `slo_rollup` user by default
+# (clickhouse.credentialsSecret.name clickhouse-slo-rollup-credentials), not the collector's writer
+# (otel-clickhouse-credentials). Its grants include ALTER TTL on the rollup table, so a ttlDays
+# change now applies. The Secret must exist before the first CronJob run.
+version: 0.1.2
 keywords:
   - slo
   - rollup

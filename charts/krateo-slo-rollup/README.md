@@ -22,6 +22,30 @@ appear on the first run after install. Until the collector has created `otel_met
 tables with no rows are fine: the refresh succeeds and writes nothing, so the chart is safe to
 install before any span metric exists.
 
+## Credentials
+
+The Job runs as **krateo-observability's `slo_rollup` ClickHouse user**, which exists for this
+chart, by default: `clickhouse.credentialsSecret.name` is `clickhouse-slo-rollup-credentials`, of
+which only `username` and `password` are read (`password_sha256_hex` is the server's).
+krateo-observability (≥ 0.1.42) ships the user and creates the Secret with it, in its release
+namespace; **the Secret must exist before the first CronJob run**, or the Job's pod cannot start.
+Install this chart in the same namespace.
+
+Its grants are the least the chart needs, and nothing on `system.*`:
+
+```
+GRANT SELECT, INSERT, ALTER TTL, CREATE TABLE ON default.krateo_slo_daily TO slo_rollup
+GRANT CREATE VIEW ON default.krateo_slo_daily_mv TO slo_rollup
+GRANT SELECT ON default.otel_metrics_histogram TO slo_rollup
+GRANT SELECT ON default.otel_metrics_sum TO slo_rollup
+```
+
+The view is created by `slo_rollup` and refreshes as its definer, so the refresh runs with those
+grants too. Up to 0.1.1 the default was the collector's writer, `otel-clickhouse-credentials`: an
+identity that can insert into and create any table in `default`, which a rollup that only reads two
+of them has no business holding. Pointing `clickhouse.credentialsSecret` at another Secret still
+works; that user needs at least the grants above.
+
 ## What the table holds
 
 | column | meaning |
@@ -114,11 +138,11 @@ applies when the table is created. `CREATE … IF NOT EXISTS` leaves an existing
 apply step compares the live TTL with the value and runs `ALTER TABLE … MODIFY TTL` when they
 differ, and does nothing when they match.
 
-**The shipped `otelcollector` user cannot run that ALTER**: its grants are `SHOW, SELECT, INSERT,
-CREATE DATABASE, CREATE TABLE, CREATE VIEW, CREATE DICTIONARY ON default.*`
-([disk-full runbook](../../docs/clickhouse-disk-full.md)). So changing the value on a live cluster
-makes the Job **fail**, with the exact statement in its log, until someone with `ALTER TTL` on the
-table runs it or that grant is added. The table keeps its old TTL in the meantime.
+The `slo_rollup` user has `ALTER TTL` on the rollup table, so a changed value applies on the next
+run. A user without that grant (the collector's `otelcollector` has none:
+[disk-full runbook](../../docs/clickhouse-disk-full.md)) makes the Job **fail**, with the exact
+statement in its log, until someone with `ALTER TTL` on the table runs it or the grant is added. The
+table keeps its old TTL in the meantime.
 
 `rollup.refreshEvery`, `rollup.recomputeDays` and any change to the view's query apply at view
 creation only. Changing them means dropping the view (not the table) with an ops principal; the
@@ -127,7 +151,7 @@ is partly expired there would replace its complete total here.
 
 ## Detecting a stopped view
 
-A failing refresh is not visible to the shipped user (`system.view_refreshes` needs its own grant,
+A failing refresh is not visible to `slo_rollup` (`system.view_refreshes` needs its own grant,
 and refresh errors stay there). So the apply Job fails with `stale:` when a source row older than
 `apply.staleAfterSeconds` was written after the newest `computed_at`. A quiet cluster has no such
 row, so it does not false-alarm.
@@ -136,16 +160,18 @@ row, so it does not false-alarm.
 
 `helm uninstall` removes the CronJob and leaves the table and the view, which keeps refreshing
 into the table. To remove them: `DROP VIEW krateo_slo_daily_mv`, then `DROP TABLE
-krateo_slo_daily`, with an ops principal (the shipped user cannot drop).
+krateo_slo_daily`, with an ops principal (`slo_rollup` cannot drop).
 
 ## Proof
 
 `tests/e2e-kind.sh` (manual; refuses anything but a `kind-*` context) runs the chart's real Job on
-kind, as a user with exactly the shipped grants, against the exporter's real table DDL. See the
-script's header for the steps. It covers missing and empty sources; known rows against hand-computed
-counts, error ratio and p95; re-running as a no-op; install over existing rows; a dropped rollup
-table with the writer's insert still succeeding; a stopped view; a TTL change with and without the
-grant; and four mutations of the SQL, each of which must fail. `tests/rollup_test.yaml` is the
+kind, as `slo_rollup` with exactly the four grants above (checked with `SHOW GRANTS`), against the
+exporter's real table DDL; the fixture is inserted by a second user with the collector's grants. See
+the script's header for the steps. It covers the CronJob reading `slo_rollup`'s Secret and not the
+collector's; missing and empty sources; known rows against hand-computed counts, error ratio and
+p95; re-running as a no-op; install over existing rows; a dropped rollup table with the writer's
+insert still succeeding; a stopped view; a TTL change with the shipped grants and with `ALTER TTL`
+revoked; and four mutations of the SQL, each of which must fail. `tests/rollup_test.yaml` is the
 `helm unittest` suite.
 
 ## Limits
