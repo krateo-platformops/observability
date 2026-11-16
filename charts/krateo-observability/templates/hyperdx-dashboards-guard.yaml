@@ -1,0 +1,19 @@
+{{- /*
+  HyperDX's dashboard provisioner (clickstack 3.5.0) must stay off (0.1.49, Diego 2026-11-16).
+
+  Upstream's effectiveNamespaces helper always puts the release namespace in the watcher's scope,
+  whatever hyperdx.dashboards.namespaces says, so turning it on grants HyperDX's ServiceAccount
+  get/list/watch on EVERY ConfigMap in krateo-system (319 on krateo-057, authn's config and a hop
+  kubeconfig among them): a Role there with namespaces [], a ClusterRole plus a RoleBinding there
+  with [ns, ...], a ClusterRoleBinding with [ALL]. With rbac.create false and the grant made
+  elsewhere, the sidecar is refused in krateo-system on its first sync, exits and crash-loops, and
+  the HyperDX pod goes NotReady (measured on kind). So any value that turns it on fails here.
+
+  Turn it on only once an upstream release can leave the release namespace out, in a dedicated
+  namespace, and change this guard in the same version: it must then fail whenever the release
+  namespace or ALL would be in the provisioner's scope.
+*/}}
+{{- $dashboards := default (dict) .Values.clickstack.hyperdx.dashboards }}
+{{- if and .Values.clickstack.hyperdx.enabled $dashboards.enabled }}
+{{- fail (printf "clickstack.hyperdx.dashboards.enabled must stay false: clickstack %s always adds the release namespace (%s) to the dashboard provisioner's scope, which grants HyperDX read on every ConfigMap there. It waits for an upstream release that can leave the release namespace out." (index .Subcharts "clickstack").Chart.Version .Release.Namespace) }}
+{{- end }}

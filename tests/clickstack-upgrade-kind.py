@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """krateo-observability upgraded in place on kind: an older chart installed, data written, the new
 chart upgraded over it, and the data and wiring checked again. Written for 0.1.48 (clickstack 3.2.0,
-HyperDX 2.35.0) -> 0.1.49 (clickstack 3.5.0, HyperDX 2.39.1, dashboard provisioner on).
+HyperDX 2.35.0) -> 0.1.49 (clickstack 3.5.0, HyperDX 2.39.1, dashboard provisioner left OFF).
 
 The whole stack runs as the platform runs it: this repo's clickhouse-operator and mongodb-operator
 charts in krateo-system, then the chart (only global.storageClassName=standard and
@@ -15,24 +15,23 @@ Before the upgrade it writes:
     bootstrap does), and through the v2 API with the admin's access key, the objects alert-provider
     creates: a generic webhook, a one-tile dashboard (alert-provider's tile shape) and a tile alert
     on it, plus a second dashboard standing in for a user's own.
+  - The HyperDX pod's ServiceAccount, and what `kubectl auth can-i` answers for it.
 After the upgrade it checks:
-  1. HyperDX's pod rolled, is Ready, and runs app + dashboard-watcher;
-  2. the provisioner process runs every minute and finishes with nothing to provision, /dashboards
-     is empty, and no provision-dashboards line reports a failure;
-  3. the provisioner uses the app container's MONGO_URI (secretKeyRef mongodb-hyperdx-credentials/uri)
-     and the pod references no other MongoDB credential;
-  4. RBAC: one Role (get/list/watch configmaps) bound to ServiceAccount krateo-clickstack in
-     krateo-system, no ClusterRole or ClusterRoleBinding, and `kubectl auth can-i` agrees;
-  5. the team mode (DASHBOARD_PROVISIONER_ALL_TEAMS=true, no TEAM_ID);
-  6. MongoDB data: the same team, the same access key (compared by hash), the webhook, both
+  1. HyperDX's pod rolled to 2.39.1, is Ready, runs the app container only (no dashboard-watcher),
+     on the same ServiceAccount as before, with no DASHBOARD_PROVISIONER_* variable;
+  2. the provisioner is absent: no ServiceAccount krateo-clickstack, no Role, RoleBinding,
+     ClusterRole or ClusterRoleBinding of it, the same `can-i` answers as before the upgrade (list
+     and watch configmaps in krateo-system, get secrets), no provisioner process or log line, and a
+     ConfigMap labelled hyperdx.io/dashboard=true in krateo-system is NOT provisioned (control);
+  3. HyperDX's MongoDB credential: MONGO_URI from secretKeyRef mongodb-hyperdx-credentials/uri, the
+     pod's only secretKeyRef, and clickstack-config without MONGO_URI;
+  4. MongoDB data: the same team, the same access key (compared by hash), the webhook, both
      dashboards with their tile ids, the alert with its fields, the sources unchanged;
-  7. alert-provider's calls still work: PUT of the alert and of the dashboard (same tile id, the
+  5. alert-provider's calls still work: PUT of the alert and of the dashboard (same tile id, the
      alert survives), a new dashboard + alert, POST /api/v2/charts/series;
-  8. ClickHouse: SHOW GRANTS byte-identical for every user, `cmp` present, the otel_* and
-     krateo_audit row counts and content hashes identical; whether the ClickHouse, Keeper and
-     MongoDB pods restarted is reported (pod UIDs);
-  9. then, past the zero-dashboard state: a ConfigMap labelled hyperdx.io/dashboard=true is
-     provisioned into the team within two minutes, flagged provisioned, beside the user's dashboard.
+  6. ClickHouse: SHOW GRANTS byte-identical for every user, `cmp` present, the otel_* and
+     krateo_audit row counts and content hashes identical, no logger in the ClickHouseCluster spec;
+     whether the ClickHouse, Keeper and MongoDB pods restarted is reported (pod UIDs).
 Credentials are generated here or read from the cluster and never printed (hashes only).
 
 Run: python3 tests/clickstack-upgrade-kind.py --from OLD_CHART_DIR [--to NEW_CHART_DIR] [--keep]
@@ -276,6 +275,15 @@ def ch_snapshot(kube):
     return snap
 
 
+def can_i(kube, sa):
+    who = f"system:serviceaccount:{NS}:{sa}"
+    out = {}
+    for verb, res, ns in (("list", "configmaps", NS), ("watch", "configmaps", NS), ("get", "secrets", NS),
+                          ("list", "configmaps", "default")):
+        out[f"{verb} {res} -n {ns}"] = kube.k("auth", "can-i", "--as", who, verb, res, "-n", ns, check_=False).stdout.strip()
+    return out
+
+
 def pod_uids(kube):
     out = {}
     for p in kube.json("get", "pods")["items"]:
@@ -329,6 +337,9 @@ def main():
         old_hx = hyperdx_pod(kube)
         check(len(old_hx) == 1 and old_hx[0]["spec"]["containers"][0]["image"].endswith(":2.35.0"),
               "old chart: one HyperDX pod on 2.35.0")
+        sa_before = old_hx[0]["spec"].get("serviceAccountName")
+        can_before = can_i(kube, sa_before)
+        print(f"     before: HyperDX runs as ServiceAccount {sa_before}; can-i {can_before}")
 
         step("seed ClickHouse")
         wait("ClickHouse answers", lambda: ch(kube, "SELECT 1").strip() == "1", timeout=300)
@@ -394,76 +405,47 @@ def main():
 
         step("1. HyperDX up")
         check(p["metadata"]["uid"] != old_hx[0]["metadata"]["uid"], "the HyperDX pod rolled")
-        check(list(cs) == ["app", "dashboard-watcher"], f"containers: {list(cs)}")
+        check(list(cs) == ["app"], f"containers: {list(cs)} (no dashboard-watcher)")
         check(cs["app"]["image"].endswith(":2.39.1"), f"app image {cs['app']['image']}")
         check(all(c["ready"] for c in p["status"]["containerStatuses"]), "every container Ready")
         check(cs["app"]["readinessProbe"]["httpGet"]["path"] == "/ready", "readiness reads /ready")
-        check(p["spec"].get("serviceAccountName") == SA, f"runs as ServiceAccount {p['spec'].get('serviceAccountName')}")
-
-        step("2. the provisioner, with zero dashboards")
-        time.sleep(120)  # past two cron ticks ('0 * * * * *'), and past the watcher's start-up peak
-        log = kube.kn("logs", name, "-c", "app").stdout
-        prov = [line for line in log.splitlines() if "DASH-PROVISION" in line]
-        check(any("provision-dashboards started" in line for line in prov), f"provision-dashboards started ({len(prov)} lines)")
-        check(any("provision-dashboards finished" in line for line in prov), "provision-dashboards finished")
-        # The task's own failure lines (tasks/index.js, provisionDashboards/index.js). Not the OTLP
-        # exporter's health check, which fails on kind (no node agent at $(HOST_IP):4318).
-        bad = [line for line in prov if re.search(
-            r"provision-dashboards failed|Failed to (read|parse|provision)|Skipping invalid|Uncaught exception|"
-            r"Unhandled rejection|Task execution failed|DASHBOARD_PROVISIONER_\w+ (is|environment)", line)]
-        check(not bad, f"no provision-dashboards line reports a failure ({bad[:2] or 'none'})")
-        check(any("Connection established to MongoDB" in line for line in prov), "the provisioner process connected to MongoDB")
-        ls = kube.kn("exec", name, "-c", "app", "--", "ls", "-A", "/dashboards").stdout.split()
-        check(ls == [], f"/dashboards is empty ({ls})")
-        ps = kube.kn("exec", name, "-c", "app", "--", "sh", "-c", "ps -eo args 2>/dev/null || ps").stdout
-        check("provision-dashboards" in ps, "a provision-dashboards process runs in the app container")
-        wlog = kube.kn("logs", name, "-c", "dashboard-watcher").stdout
-        check("403" not in wlog and "Forbidden" not in wlog, "dashboard-watcher: no 403 from the API server")
-        check("Initial sync complete" in wlog, "dashboard-watcher: initial sync complete")
-        # Upstream's 64Mi limit OOMKilled it within a minute of each start (0.1.49's first kind run).
-        st = {c["name"]: c for c in kube.json("get", "pod", name)["status"]["containerStatuses"]}
-        w = st["dashboard-watcher"]
-        check(w["restartCount"] == 0, f"dashboard-watcher never restarted ({w['restartCount']}, last {w.get('lastState') or 'none'})")
-        mem = kube.kn("exec", name, "-c", "dashboard-watcher", "--", "sh", "-c",
-                      "echo $(cat /sys/fs/cgroup/memory.peak) $(cat /sys/fs/cgroup/memory.max)", check_=False).stdout.split()
-        if len(mem) == 2:
-            print(f"     dashboard-watcher memory peak {int(mem[0]) >> 20}Mi of limit {int(mem[1]) >> 20}Mi")
-
-        step("3. the provisioner's MongoDB credential")
+        check(p["spec"].get("serviceAccountName") == sa_before,
+              f"the same ServiceAccount as 0.1.48 ({p['spec'].get('serviceAccountName')} vs {sa_before})")
         env = {e["name"]: e for e in cs["app"].get("env", [])}
+        check(not [n for n in env if n.startswith("DASHBOARD_PROVISIONER")], "no DASHBOARD_PROVISIONER_* variable")
+
+        step("2. the dashboard provisioner is absent")
+        sas = [x["metadata"]["name"] for x in kube.json("get", "serviceaccounts")["items"]]
+        check(SA not in sas, f"no ServiceAccount {SA}")
+        rbac = [f"{x['kind']}/{x['metadata']['name']}" for x in
+                json.loads(kube.k("get", "roles,rolebindings,clusterroles,clusterrolebindings", "-A", "-o", "json").stdout)["items"]
+                if "dashboard" in x["metadata"]["name"]]
+        check(not rbac, f"no dashboard-provisioner Role, RoleBinding, ClusterRole or ClusterRoleBinding ({rbac or 'none'})")
+        can_after = can_i(kube, p["spec"].get("serviceAccountName"))
+        print(f"     after: can-i {can_after}")
+        check(can_after == can_before, "kubectl auth can-i answers for HyperDX's ServiceAccount unchanged by the upgrade")
+        check(can_after["list configmaps -n krateo-system"] == "no", "HyperDX's ServiceAccount can't list configmaps in krateo-system")
+        kube.kn("apply", "-f", "-", input_=json.dumps({
+            "apiVersion": "v1", "kind": "ConfigMap",
+            "metadata": {"name": "e2e-dashboard", "namespace": NS, "labels": {"hyperdx.io/dashboard": "true"}},
+            "data": {"e2e-provisioned.json": json.dumps({"name": "e2e-provisioned", "tiles": [], "tags": ["e2e"]})}}))
+        time.sleep(130)  # past two of the provisioner's would-be minute ticks
+        log = kube.kn("logs", name, "-c", "app").stdout
+        check(not [line for line in log.splitlines() if "DASH-PROVISION" in line or "provision-dashboards" in line],
+              "no provisioner process logs in the app container")
+        ps = kube.kn("exec", name, "-c", "app", "--", "sh", "-c", "ps -eo args 2>/dev/null || ps").stdout
+        check("provision-dashboards" not in ps, "no provision-dashboards process")
+
+        step("3. HyperDX's MongoDB credential")
         check(env.get("MONGO_URI", {}).get("valueFrom") == {"secretKeyRef": {"name": "mongodb-hyperdx-credentials", "key": "uri"}},
               "app container: MONGO_URI from secretKeyRef mongodb-hyperdx-credentials/uri")
         refs = sorted({e["valueFrom"]["secretKeyRef"]["name"] for c in p["spec"]["containers"] + p["spec"]["initContainers"]
                        for e in c.get("env", []) if "secretKeyRef" in e.get("valueFrom", {})})
         check(refs == ["mongodb-hyperdx-credentials"], f"the pod's only secretKeyRef is mongodb-hyperdx-credentials ({refs})")
-        check("MONGO_URI" not in cs["dashboard-watcher"].get("env", []) and not cs["dashboard-watcher"].get("envFrom"),
-              "dashboard-watcher has no MongoDB credential")
         cm = kube.json("get", "configmap", "clickstack-config")["data"]
         check("MONGO_URI" not in cm, "clickstack-config still has no MONGO_URI")
 
-        step("4. RBAC")
-        role = kube.json("get", "role", f"{SA}-dashboard-provisioner")
-        check(role["rules"] == [{"apiGroups": [""], "resources": ["configmaps"], "verbs": ["list", "get", "watch"]}],
-              f"Role rules: {role['rules']}")
-        rb = kube.json("get", "rolebinding", f"{SA}-dashboard-provisioner")
-        check(rb["subjects"] == [{"kind": "ServiceAccount", "name": SA, "namespace": NS}]
-              and rb["roleRef"]["kind"] == "Role", f"RoleBinding: Role -> ServiceAccount {SA}")
-        crs = [x["metadata"]["name"] for x in json.loads(kube.k("get", "clusterroles,clusterrolebindings", "-o", "json").stdout)["items"]
-               if "dashboard" in x["metadata"]["name"]]
-        check(not crs, f"no dashboard ClusterRole or ClusterRoleBinding ({crs or 'none'})")
-        who = f"system:serviceaccount:{NS}:{SA}"
-        can = lambda *x: kube.k("auth", "can-i", "--as", who, *x, check_=False).stdout.strip()  # noqa: E731
-        check(can("list", "configmaps", "-n", NS) == "yes", "can list configmaps in krateo-system")
-        check(can("watch", "configmaps", "-n", NS) == "yes", "can watch configmaps in krateo-system")
-        check(can("list", "configmaps", "-n", "default") == "no", "cannot list configmaps in another namespace")
-        check(can("get", "secrets", "-n", NS) == "no", "cannot get secrets")
-        check(can("create", "configmaps", "-n", NS) == "no", "cannot create configmaps")
-
-        step("5. team mode")
-        check(env.get("DASHBOARD_PROVISIONER_ALL_TEAMS", {}).get("value") == "true" and "DASHBOARD_PROVISIONER_TEAM_ID" not in env,
-              "DASHBOARD_PROVISIONER_ALL_TEAMS=true, no DASHBOARD_PROVISIONER_TEAM_ID")
-
-        step("6. MongoDB data")
+        step("4. MongoDB data")
         hx = HyperDX(kube, email, password)
         st, ok = hx.register_or_login(register=False)
         check(ok, f"the seeded admin logs in on 2.39.1 (HTTP {st})")
@@ -474,6 +456,8 @@ def main():
         by = {d["id"]: d for d in dash} if st == 200 else {}
         check(d1["id"] in by and by[d1["id"]]["tiles"][0]["id"] == tile_id, "alert-provider's dashboard, same id and tile id")
         check(d2["id"] in by and by[d2["id"]]["name"] == "e2e-user-dashboard", "the user's dashboard, same id")
+        check(not [d for d in dash if d["name"] == "e2e-provisioned"],
+              "the labelled ConfigMap in krateo-system was NOT provisioned (control: the provisioner is off)")
         st, alerts = hx.v2("GET", "/alerts", key=key)
         live = next((x for x in alerts if x["id"] == al["id"]), None) if st == 200 else None
         old_al = next(x for x in mongo_before["alerts"] if x["id"] == al["id"])
@@ -486,7 +470,7 @@ def main():
         st, whs = hx.v2("GET", "/webhooks", key=key)
         check(st == 200 and [w["id"] for w in whs] == [w["id"] for w in mongo_before["webhooks"]], "the webhook, same id")
 
-        step("7. alert-provider's calls on 2.39.1")
+        step("5. alert-provider's calls on 2.39.1")
         st, _ = hx.v2("PUT", f"/alerts/{al['id']}", alert_body("e2e-alert", d1["id"], tile_id, wh["id"]), key=key)
         check(st == 200, f"PUT /api/v2/alerts/:id with the same body (HTTP {st})")
         st, upd = hx.v2("PUT", f"/dashboards/{d1['id']}", {"name": "e2e-alert-tile", "tags": [],
@@ -508,7 +492,7 @@ def main():
         want = int(ch(kube, "SELECT count() FROM default.otel_logs WHERE ServiceName = 'e2e-1'").strip())
         check(st == 200 and total == want, f"POST /api/v2/charts/series counts what ClickHouse counts ({total} vs {want})")
 
-        step("8. ClickHouse")
+        step("6. ClickHouse")
         after = ch_snapshot(kube)
         for u in USERS:
             check(after["grants"][u] == before["grants"][u], f"SHOW GRANTS FOR {u}: byte-identical")
@@ -524,19 +508,6 @@ def main():
         cr = json.loads(kube.kn("get", "clickhouseclusters.clickhouse.com", "krateo-clickstack-clickhouse", "-o", "json").stdout)
         check("logger" not in cr["spec"].get("settings", {}), "ClickHouseCluster spec.settings has no logger (upstream's nulled)")
 
-        step("9. one labelled ConfigMap is provisioned (beyond this PR's zero dashboards)")
-        dash_json = json.dumps({"name": "e2e-provisioned", "tiles": [], "tags": ["e2e"]})
-        kube.kn("apply", "-f", "-", input_=json.dumps({
-            "apiVersion": "v1", "kind": "ConfigMap",
-            "metadata": {"name": "e2e-dashboard", "namespace": NS, "labels": {"hyperdx.io/dashboard": "true"}},
-            "data": {"e2e-provisioned.json": dash_json}}))
-        got = wait("the provisioned dashboard", lambda: next((d for d in hx.v2("GET", "/dashboards", key=key)[1]
-                                                               if d["name"] == "e2e-provisioned"), None), timeout=180, every=10)
-        check(bool(got), "a ConfigMap labelled hyperdx.io/dashboard=true becomes a dashboard in the team")
-        ls = kube.kn("exec", name, "-c", "app", "--", "ls", "-A", "/dashboards").stdout.split()
-        print(f"     /dashboards now: {ls}")
-        st, dash = hx.v2("GET", "/dashboards", key=key)
-        check(any(d["id"] == d2["id"] for d in dash), "the user's dashboard is still there beside it")
     finally:
         if hx:
             hx.close()

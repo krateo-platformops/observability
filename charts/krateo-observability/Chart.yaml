@@ -200,22 +200,21 @@ type: application
 # byte-identical (tests/fixtures/clickhouse-users-grants.json). Only extraUsersConfig changes (no new
 # env entry, no extraConfig change), which ClickHouse reloads without a restart. Decision: Diego
 # 2026-11-16.
-# 0.1.49: clickstack 3.2.0 -> 3.5.0 (HyperDX 2.35.0 -> 2.39.1), with HyperDX's dashboard provisioner
-# ON and NO dashboards yet (they come in a later version). The provisioner is a sidecar
-# (kiwigrid/k8s-sidecar:2.10.1) copying ConfigMaps labelled hyperdx.io/dashboard: "true" from this
-# namespace into /dashboards, and HyperDX's provision-dashboards task in the app container, which
-# upserts them into every team each minute with the app's own MONGO_URI (mongodb-hyperdx-credentials).
-# It needs a ServiceAccount: the pod moves from `default` to krateo-clickstack, with a Role (get, list,
-# watch configmaps in this namespace) and a RoleBinding; no ClusterRole. The watcher gets 96Mi/192Mi:
-# upstream's 64Mi limit OOMKilled it within a minute of every start on kind (peak 95Mi), and a
-# crash-looping sidecar takes the whole HyperDX pod out of its Service. Two upstream additions are
-# nulled so nothing else changes: settings.logger on the ClickHouseCluster (extraConfig.logger,
-# 100M x 5, stays the bound, and the CR spec is unchanged) and HYPERDX_OTEL_EXPORTER_TABLES_TTL in
-# clickstack-config (read only by the disabled bundled collector). wait-for-mongodb-auth moves to the
-# 2.39.1 image, and the render now fails if it is not the app's image (the values comment said so
-# since 0.1.44; only the test checked it). Readiness reads /ready (503 until MongoDB is connected).
-# HyperDX 2.39.1 runs one startup migration (alerts without displayName/tags get them derived; no
-# field alert-provider compares). Default sources changed upstream, applied only where none exist.
+# 0.1.49: clickstack 3.2.0 -> 3.5.0 (HyperDX 2.35.0 -> 2.39.1). HyperDX's new dashboard provisioner
+# stays OFF (upstream's default): its effectiveNamespaces helper always adds the release namespace to
+# the provisioner's scope, so turning it on grants HyperDX read on every ConfigMap in krateo-system
+# (319 on 057, authn's config among them), and granting only a dedicated namespace makes its sidecar
+# crash-loop on the 403 in krateo-system (kind). templates/hyperdx-dashboards-guard.yaml fails the
+# render if it is turned on. It comes on in a dedicated namespace once an upstream release can leave
+# the release namespace out (Diego, 2026-11-16). So no ServiceAccount, Role or sidecar: the pod keeps
+# the namespace's `default` ServiceAccount, as in 0.1.48. Two upstream additions are nulled so
+# nothing else changes: settings.logger on the ClickHouseCluster (extraConfig.logger, 100M x 5, stays
+# the bound, and the CR spec is unchanged) and HYPERDX_OTEL_EXPORTER_TABLES_TTL in clickstack-config
+# (read only by the disabled bundled collector). wait-for-mongodb-auth moves to the 2.39.1 image, and
+# the render now fails if it is not the app's image (the values comment said so since 0.1.44; only
+# the test checked it). Readiness reads /ready (503 until MongoDB is connected). HyperDX 2.39.1 runs
+# one startup migration (alerts without displayName/tags get them derived; no field alert-provider
+# compares). Default sources changed upstream, applied only where none exist.
 # ROLLS HyperDX only; ClickHouse, Keeper and MongoDB see a label change on their CRs only
 # (helm.sh/chart, app.kubernetes.io/version), measured on kind as no restart.
 version: 0.1.49

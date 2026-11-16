@@ -1120,49 +1120,20 @@ clickstack:
     secrets:
       MONGODB_PASSWORD: ""
 
-    # HyperDX's DASHBOARD PROVISIONER (clickstack 3.5.0, 0.1.49), ON, with NO dashboards yet: they come
-    # in a later version. Two parts, both in the HyperDX pod:
-    #   - dashboard-watcher, a k8s-sidecar (kiwigrid/k8s-sidecar:2.10.1, upstream's pin) that watches
-    #     ConfigMaps labelled hyperdx.io/dashboard: "true" and copies their *.json keys into an
-    #     emptyDir mounted at /dashboards;
-    #   - HyperDX's own provision-dashboards task, a fourth process in the app container (the image's
-    #     entry.sh starts it when DASHBOARD_PROVISIONER_DIR is set). With RUN_SCHEDULED_TASKS_EXTERNALLY
-    #     false it runs every minute, reads /dashboards and upserts each dashboard by name into every
-    #     HyperDX team (DASHBOARD_PROVISIONER_ALL_TEAMS: "true", set by upstream), flagged
-    #     provisioned: true. It never deletes, and a user's own dashboard of the same name is left alone
-    #     beside it. It connects with the app container's MONGO_URI, so the generated credential above,
-    #     not a new one. An empty /dashboards is a no-op: no write, no error.
-    # A dashboard is a ConfigMap in THIS namespace, labelled hyperdx.io/dashboard: "true", whose data
-    # keys end in .json and hold one exported HyperDX dashboard each ({"name": ..., "tiles": [...]}).
-    # dashboards.configMaps renders such a ConfigMap from values (krateo-clickstack-dashboards); empty
-    # here, so none renders.
-    # namespaces [] keeps discovery to the release namespace: a Role and a RoleBinding granting the
-    # HyperDX ServiceAccount get, list and watch on ConfigMaps there, no ClusterRole. Kubernetes RBAC
-    # can't select by label, so that is EVERY ConfigMap in this namespace, readable by the sidecar AND
-    # the app container (one ServiceAccount, one token). "ALL" would make it cluster-wide.
+    # HyperDX's DASHBOARD PROVISIONER (new in clickstack 3.5.0) stays OFF, as upstream ships it. It
+    # would let HyperDX read every ConfigMap in krateo-system (319 on krateo-057, authn's config and a
+    # hop kubeconfig among them). Upstream's effectiveNamespaces helper always adds the release
+    # namespace to dashboards.namespaces: with namespaces: [krateo-dashboards] it renders a ClusterRole
+    # (get, list, watch configmaps) bound by a RoleBinding in krateo-system AND one in
+    # krateo-dashboards, and the watcher sidecar lists both. Granting only the dashboards namespace
+    # (rbac.create: false, our own Role) doesn't work either: the sidecar's first sync of krateo-system
+    # is refused (403), it exits 1 and crash-loops, and the HyperDX pod goes NotReady (kind,
+    # 2026-11-16). Decision: Diego 2026-11-16 -- off until an upstream release can leave the release
+    # namespace out, then on in a dedicated namespace. templates/hyperdx-dashboards-guard.yaml fails
+    # the render if this is turned on. Off, upstream renders no ServiceAccount, Role, RoleBinding,
+    # ClusterRole or sidecar, and the pod keeps the namespace's `default` ServiceAccount, as in 0.1.48.
     dashboards:
-      enabled: true
-      namespaces: []
-      rbac:
-        create: true
-      configMaps: {}
-      # Upstream's 64Mi limit OOMKills the watcher: on kind (k8s-sidecar 2.10.1, one labelled ConfigMap
-      # in a namespace of six) it peaked at 95Mi while starting and then held 72-79Mi, and with 64Mi it
-      # was killed within a minute of every start, 4 times in 5 minutes. A crash-looping sidecar makes
-      # the whole HyperDX pod NotReady, so the app drops out of its Service. 192Mi is twice the peak.
-      # The CPU limit stays upstream's 50m (the watcher is idle between events).
-      resources:
-        requests:
-          cpu: 10m
-          memory: 96Mi
-        limits:
-          cpu: 50m
-          memory: 192Mi
-    # The provisioner's RBAC needs a ServiceAccount of its own: upstream refuses dashboards without one,
-    # and the pod used the namespace's `default` before, which a Role must not widen. create: true
-    # renders ServiceAccount krateo-clickstack (the fullnameOverride) and runs the pod as it.
-    serviceAccount:
-      create: true
+      enabled: false
 
     # The HyperDX app flapped 15 times on krateo-057 (2026-10-11), every one a SIGKILL after a
     # failed liveness probe. The decisive evidence is that the PREVIOUS container's log held only
@@ -1255,9 +1226,9 @@ clickstack:
       # must be the app container's image: the template refuses to render otherwise.
       # HyperDX 2.39.1 (clickstack 3.5.0) retries the initial connect forever (connectDBWithRetry) and
       # its readiness probe, /ready, stays 503 until it is connected, so a pod on a refused credential
-      # is no longer Ready. This init container stays: it still keeps the new pod's app and its
-      # dashboard provisioner from starting before MongoDB takes the password, and the logs then say
-      # why the pod waits.
+      # is no longer Ready. This init container stays: it still keeps the new pod's app (and its
+      # in-process alert checks) from starting before MongoDB takes the password, and the logs then
+      # say why the pod waits.
       initContainers:
         - name: wait-for-mongodb-auth
           image: docker.hyperdx.io/hyperdx/hyperdx:2.39.1
