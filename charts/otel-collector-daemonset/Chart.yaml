@@ -162,7 +162,11 @@ type: application
 # producer on krateo-057 (otel_logs, 7 days). tests/otlp-log-routing-docker.py.
 # Also a comment fix in transform/slo-error: an aborted widget fetch is no longer exported (frontend
 # 1.8.44), so it is no longer listed among the no-status ERROR spans; the rule is unchanged.
-version: 0.1.30
+# 0.1.31: readinessProbe.initialDelaySeconds: 10. The first readiness probe ran at container start,
+# before the health_check extension listens (it is ready 2.6-5.0s in), so every new pod logged one
+# "Readiness probe failed ... connection refused" Unhealthy event (14 per roll on krateo-057) and
+# became Ready at the 10s probe regardless. Same Ready time, no failing probe. No other change.
+version: 0.1.31
 appVersion: "0.158.0"
 dependencies:
   - name: opentelemetry-collector
