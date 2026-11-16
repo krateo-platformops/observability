@@ -13,7 +13,12 @@ type: application
 # (clickhouse.credentialsSecret.name clickhouse-slo-rollup-credentials), not the collector's writer
 # (otel-clickhouse-credentials). Its grants include ALTER TTL on the rollup table, so a ttlDays
 # change now applies. The Secret must exist before the first CronJob run.
-version: 0.1.2
+# 0.1.3: docs and tests only; no rendered object changes. The README reads the table by the canonical
+# SLI rules (the 30-day statements 30d-1..30d-3 of ops/slo-alert/sli-span-metrics.sql: percentiles
+# as bucket intervals, no interpolation; one row per bucket layout; whole UTC days with FINAL) and
+# no longer calls counts "about 5% sampled". The kind proof runs those statements; the chart's
+# interpolating tests/rollup-query.sql is gone.
+version: 0.1.3
 keywords:
   - slo
   - rollup
