@@ -17,13 +17,40 @@ breach alerts live in [`ops/slo-alert/`](../ops/slo-alert/).
 
 All three SLIs are computed from telemetry already collected by the stack —
 no additional instrumentation is required for services that emit OTLP traces
-and structured logs.
+and structured logs. Each has **one** definition, in one file; every reader (the `cmp-slo-*`
+alerts, the HyperDX dashboard, the portal's SLOs tab, the performance rows below) uses it, and a
+reader that needs a different number changes that file rather than keeping its own copy.
 
-| SLI | Definition | Source table |
-|-----|------------|--------------|
-| **Availability** | ratio of server spans with `StatusCode != 'Error'` | `otel_traces` |
-| **Latency** | p50 / p95 / p99 of server-span `Duration`, per service | `otel_traces` |
-| **Error-rate** | `ERROR`/`FATAL` structured log lines per service/namespace | `otel_logs` |
+| SLI | Definition | Source | Query |
+|-----|------------|--------|-------|
+| **Availability** | `1 - sli_errors / calls` per SLI class (`snowplow` = API, `krateo-frontend` = UI), an error being `krateo.sli.error = 'true'` (5xx or no response, never 4xx); for the UI, also the `krateo.widget.fetch` failure share | [span metrics](#span-metrics-the-inputs-for-performance-alerts): `traces.span.metrics.calls` (`otel_metrics_sum`) | [`ops/slo-alert/sli-span-metrics.sql`](../ops/slo-alert/sli-span-metrics.sql) |
+| **Latency** | p50 / p95 bucket: API over all snowplow SERVER spans in scope, UI per interaction (`krateo.page.load`, `krateo.composition.open`, `krateo.form.submit`, `krateo.page.publish`) | span metrics: `traces.span.metrics.duration` (`otel_metrics_histogram`) | [`ops/slo-alert/sli-span-metrics.sql`](../ops/slo-alert/sli-span-metrics.sql) |
+| **Error-rate** | `ERROR`/`FATAL` structured log lines per namespace | `otel_logs` | [`ops/slo-alert/sli-queries.sql`](../ops/slo-alert/sli-queries.sql), SLI 3 |
+
+Availability and latency are **not** computed from `otel_traces` scans: those were a second
+definition (errors by `StatusCode` rather than `krateo.sli.error`, over a different span set from
+the one the alerts read) and are gone.
+
+`sli-span-metrics.sql` takes its window as ClickHouse query parameters, `[start, end)`:
+`clickhouse-client --param_start='…' --param_end='…' --queries-file ops/slo-alert/sli-span-metrics.sql`.
+
+- **Percentile rule.** A percentile is the bucket that holds rank `q × n`, reported as the
+  interval `(lower, upper]` in ms. Buckets are upper-inclusive (`le`): a rank equal to the
+  cumulative count at bound *b* is in the bucket that ends at *b*, not the next one (95 of 100
+  spans at ≤ 250 ms is a p95 of (100, 250], not (250, 500]). A rank in the first bucket reports
+  lower 0; a rank in the overflow bucket reports upper `inf`. No interpolation: the result says
+  exactly what the histogram can say and nothing more.
+- **Layout rule.** Never sum histograms with different `ExplicitBounds`. The layout changed on
+  2026-11-11 (otel-collector-daemonset 0.1.26 added the 2000 ms bound). Every percentile query
+  groups by bounds, so a window that spans a layout change returns one row per layout, and the
+  reader then reports **no** percentile for that window rather than pick one.
+- **Window rule.** Delta points are stamped with the flush time (`TimeUnix`), so a window must
+  reach past the first collector flush after the period it measures; `end` is exclusive, so a
+  window ending exactly on that flush's `TimeUnix` leaves it out.
+
+[`tests/sli-span-metrics-docker.py`](../tests/sli-span-metrics-docker.py) runs every statement in
+a throwaway ClickHouse against fixture rows for each rule above, and against the committed X5 rows,
+which it reproduces (e.g. `krateo.form.submit` p95 (100, 250]).
 
 ## Span metrics (the inputs for performance alerts)
 
@@ -183,23 +210,26 @@ Defaults:
 | Error-rate | ≤ 10 lines at `SeverityNumber >= 17` / 5 m / namespace, excluding the observability stack and `krateo-budget-evaluator` | 5-minute buckets |
 
 **Error budget:** at 99.9 % availability the monthly budget is ~43 minutes of
-failed requests. The burn-rate query in `sli-queries.sql` reports consumption;
+failed requests. The burn-rate query in
+[`sli-span-metrics.sql`](../ops/slo-alert/sli-span-metrics.sql) reports consumption per SLI class;
 a burn rate above ~14× on the 1-hour window is a fast-burn (page-worthy)
 signal.
 
 ## Dashboards
 
-The **"Platform SLOs"** HyperDX dashboard is built from the queries in
-[`ops/slo-alert/sli-queries.sql`](../ops/slo-alert/sli-queries.sql):
+- **HyperDX "CMP performance SLOs (X5)"**, 12 tiles over the span metrics. It exists on
+  krateo-057, created through the HyperDX API, and is not shipped by a chart yet; a reconciled,
+  chart-shipped form is being proposed.
+- **Portal SLOs tab** on `/observability`, being designed by frontend.
 
-1. Availability by service (5m) + 30-day availability vs. target
-2. Latency p50/p95/p99 by service + share of requests within target
-3. Error-rate by namespace
-4. Error-budget burn rate by service
+Both must read [`ops/slo-alert/sli-span-metrics.sql`](../ops/slo-alert/sli-span-metrics.sql)
+(and SLI 3 of [`sli-queries.sql`](../ops/slo-alert/sli-queries.sql) for error-rate), not queries
+of their own.
 
-Breach alerts are bootstrapped by
-[`ops/slo-alert/bootstrap-slo-alerts.sh`](../ops/slo-alert/bootstrap-slo-alerts.sh)
-and route through the standard alert channels (portal / alert-proxy / email).
+The SLO alerts are the alert-provider `Metric` CRs (`cmp-slo-*`), over the same span metrics.
+[`ops/slo-alert/bootstrap-slo-alerts.sh`](../ops/slo-alert/bootstrap-slo-alerts.sh) also creates
+HyperDX saved-search breach alerts (span and log-line counts); they route through the standard
+alert channels (portal / alert-proxy / email).
 
 ## Performance results
 
@@ -226,7 +256,12 @@ ClickHouse's 7-day retention on 2026-11-17 and 2026-11-18, so the committed rows
 
 How to capture a run:
 
-1. Execute the load/e2e scenario (see `demo/tests/`).
-2. While the run window is active, execute the queries in
-   `ops/slo-alert/sli-queries.sql` scoped to the run's time range.
-3. Append the resulting numbers to the table above and link the raw output.
+1. Execute the load/e2e scenario (see `demo/tests/`) and note its start and end (UTC).
+2. Run [`ops/slo-alert/sli-span-metrics.sql`](../ops/slo-alert/sli-span-metrics.sql) over the
+   run's window: `clickhouse-client --param_start='<run start>' --param_end='<end>'
+   --queries-file ops/slo-alert/sli-span-metrics.sql`. The window ends at the first collector
+   flush after the run, not at its wall-clock end (`end` is exclusive, so pass a time after that
+   flush's `TimeUnix`, e.g. the next whole minute). If the window spans a bucket-layout change
+   (two rows for one percentile), report no percentile for it.
+3. Append the resulting numbers to the table above, and commit the raw rows (the otel_* tables
+   keep 7 days) next to the run's output, as `ops/perf/x5-2026-11-10/` does.

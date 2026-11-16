@@ -182,4 +182,4 @@ if [ -s "$FAIL_LOG" ]; then
   log "The bootstrap is PARTIAL: fix the failures above and re-run."
   exit 1
 fi
-log "Done. Build the 'Platform SLOs' dashboard from sli-queries.sql (see README)."
+log "Done. SLI definitions: availability, latency and burn rate in sli-span-metrics.sql (span metrics); error-rate in sli-queries.sql SLI 3 (see README)."

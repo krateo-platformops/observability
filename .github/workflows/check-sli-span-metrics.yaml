@@ -1,0 +1,45 @@
+# THE SLI definitions (ops/slo-alert/sli-span-metrics.sql), run in the ClickHouse version
+# krateo-057 runs, against otel_metrics_sum / otel_metrics_histogram from the DDL the daily rollup
+# is tested against (charts/krateo-slo-rollup/tests/otel-metrics-tables.sql).
+#
+# Every statement is run the way docs/SLO.md tells a reader to (clickhouse-client --param_start /
+# --param_end) against fixture rows for each rule the file states: 4xx is not an error, the
+# upper-inclusive bucket boundary, first and overflow buckets, one row per bucket layout, [start,
+# end) window edges. It also replays the committed X5 rows (ops/perf/x5-2026-11-10/) and checks
+# they give docs/SLO.md's performance rows.
+#
+# It is a separate workflow on purpose. lint.yaml is the org-wide canonical chart-repo lint,
+# identical across every krateo-* chart repo.
+
+name: check-sli-span-metrics
+
+on:
+  pull_request:
+    paths:
+      - "ops/slo-alert/sli-span-metrics.sql"
+      - "tests/sli-span-metrics-docker.py"
+      - "charts/krateo-slo-rollup/tests/otel-metrics-tables.sql"
+      - "ops/perf/x5-2026-11-10/span-metrics-rows.jsonl"
+      - ".github/workflows/check-sli-span-metrics.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "ops/slo-alert/sli-span-metrics.sql"
+      - "tests/sli-span-metrics-docker.py"
+      - "charts/krateo-slo-rollup/tests/otel-metrics-tables.sql"
+      - "ops/perf/x5-2026-11-10/span-metrics-rows.jsonl"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sli:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run every SLI statement against fixture rows and the X5 rows
+        run: python3 tests/sli-span-metrics-docker.py .
