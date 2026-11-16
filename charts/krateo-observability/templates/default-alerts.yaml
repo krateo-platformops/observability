@@ -67,7 +67,27 @@ spec:
     {{ $k | quote }}: {{ $v | quote }}
     {{- end }}
   {{- end }}
-  threshold: {{ .threshold | int64 }}
+  {{- /* alert-provider >= 0.2.58: compare a share, the aggregation of the points `labels` keep
+         divided by that of the points ratio.labels keep. An empty ratio.labels keeps every point
+         of the metric for the denominator, and renders as `ratio: {}`. */}}
+  {{- if kindIs "map" .ratio }}
+  {{- with .ratio.labels }}
+  ratio:
+    labels:
+      {{- range $k, $v := . }}
+      {{ $k | quote }}: {{ $v | quote }}
+      {{- end }}
+  {{- else }}
+  ratio: {}
+  {{- end }}
+  {{- end }}
+  {{- /* A whole number renders as an integer (a values number is a float64, and 3221225472 would
+         print as 3.221225472e+09); a fraction, e.g. a ratio alert's 0.001, as itself. A string
+         threshold (the composition CRD types the field as one) must be a plain decimal: the
+         conversion would read anything else as 0. */}}
+  {{- $t := .threshold }}
+  {{- if and (kindIs "string" $t) (not (regexMatch "^-?[0-9]+([.][0-9]+)?$" $t)) }}{{ fail (printf "defaultAlerts %s: threshold %q is not a plain decimal number" $a.name $t) }}{{ end }}
+  threshold: {{ if eq (float64 $t) (float64 (int64 $t)) }}{{ int64 $t }}{{ else }}{{ float64 $t }}{{ end }}
   thresholdType: {{ .thresholdType }}
   interval: {{ .interval }}
   {{- with .description }}

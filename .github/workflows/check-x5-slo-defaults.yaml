@@ -1,0 +1,55 @@
+# The X5 SLO defaults (krateo-observability 0.1.52): the chart's cmp-slo-* Alerts and slo-span-*
+# Metrics must equal krateo-acmp's generator output, committed with its provenance in
+# tests/fixtures/x5-slo-render-acmp-b562e12.yaml. tests/x5-slo-defaults.py renders the chart and
+# compares spec by spec (values and JSON types), checks the labels, the Metric references and the
+# Alert/Metric counts per gate; the helm-unittest suite pins the same five and the template's
+# threshold and ratio handling. No cluster needed.
+#
+# It is a separate workflow on purpose. lint.yaml is the org-wide canonical chart-repo lint,
+# identical across every krateo-* chart repo.
+
+name: check-x5-slo-defaults
+
+on:
+  pull_request:
+    paths:
+      - "charts/krateo-observability/**"
+      - "tests/x5-slo-defaults.py"
+      - "tests/fixtures/x5-slo-render-acmp-b562e12.yaml"
+      - ".github/workflows/check-x5-slo-defaults.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "charts/krateo-observability/**"
+      - "tests/x5-slo-defaults.py"
+      - "tests/fixtures/x5-slo-render-acmp-b562e12.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - name: Install helm-unittest
+        # Required: the step fails rather than skips without it.
+        run: helm plugin install https://github.com/helm-unittest/helm-unittest --version 1.2.1
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Build the chart's dependency
+        run: |
+          helm repo add clickstack https://clickhouse.github.io/ClickStack-helm-charts
+          helm dependency build charts/krateo-observability
+      - name: Compare the rendered defaults with render.py's output
+        run: python3 tests/x5-slo-defaults.py .
+      - name: helm unittest
+        run: helm unittest charts/krateo-observability

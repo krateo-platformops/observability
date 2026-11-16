@@ -1,0 +1,2 @@
+# helm-unittest suites (helm unittest charts/krateo-observability), not part of the packaged chart.
+tests/

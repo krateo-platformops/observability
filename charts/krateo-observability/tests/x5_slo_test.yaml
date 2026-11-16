@@ -1,0 +1,198 @@
+suite: X5 SLO metrics and alerts (0.1.52)
+# The five objects acmp hand-applied on krateo-057, now chart defaults under the same names.
+# tests/x5-slo-defaults.py compares their specs with render.py's committed output; this suite pins
+# the names, labels and specs, and the template's threshold and ratio handling.
+templates:
+  - default-alerts.yaml
+  - default-metrics.yaml
+release:
+  name: krateo-observability
+  namespace: krateo-system
+tests:
+  - it: renders Metric slo-span-calls with render.py's spec and the chart's labels
+    template: default-metrics.yaml
+    documentSelector:
+      path: metadata.name
+      value: slo-span-calls
+    asserts:
+      - isKind:
+          of: Metric
+      - equal:
+          path: metadata
+          value:
+            name: slo-span-calls
+            namespace: krateo-system
+            labels:
+              app.kubernetes.io/managed-by: krateo-observability-defaults
+              app.kubernetes.io/part-of: krateo-observability
+      - equal:
+          path: spec
+          value:
+            metricName: traces.span.metrics.calls
+            type: sum
+            collectedBy: otel-collector spanmetrics
+            description: 'Calls per SLI span (DELTA), with krateo.sli.error = "true" on 5xx or no response.'
+
+  - it: renders Metric slo-span-duration with render.py's spec
+    template: default-metrics.yaml
+    documentSelector:
+      path: metadata.name
+      value: slo-span-duration
+    asserts:
+      - equal:
+          path: spec
+          value:
+            metricName: traces.span.metrics.duration
+            type: histogram
+            unit: ms
+            collectedBy: otel-collector spanmetrics
+            description: SLI span duration, buckets 25 ms to 10 s.
+
+  - it: renders Alert cmp-slo-api-p95 with render.py's spec and the chart's labels only
+    template: default-alerts.yaml
+    documentSelector:
+      path: metadata.name
+      value: cmp-slo-api-p95
+    asserts:
+      - isKind:
+          of: Alert
+      - equal:
+          path: metadata
+          value:
+            name: cmp-slo-api-p95
+            namespace: krateo-system
+            labels:
+              app.kubernetes.io/managed-by: krateo-observability-defaults
+              app.kubernetes.io/part-of: krateo-observability
+      - equal:
+          path: spec
+          value:
+            displayName: API p95 latency above its objective (X5 api-p95)
+            metricRef:
+              name: slo-span-duration
+            aggregation: p95
+            labels:
+              service.name: snowplow
+            interval: 1h
+            threshold: 500
+            thresholdType: above
+            description: "snowplow's p95 response time over the last 1h is above the 500 ms objective (X5 api-p95). The alert's percentile interpolates inside histogram buckets; assembly/slo/slis.py reports the exact bucket that holds the p95."
+
+  - it: renders Alert cmp-slo-api-error-ratio with its ratio and a fractional threshold
+    template: default-alerts.yaml
+    documentSelector:
+      path: metadata.name
+      value: cmp-slo-api-error-ratio
+    asserts:
+      - equal:
+          path: spec
+          value:
+            displayName: API error share above its objective (X5 api-error-ratio)
+            metricRef:
+              name: slo-span-calls
+            aggregation: sum
+            labels:
+              service.name: snowplow
+              krateo.sli.error: "true"
+            ratio:
+              labels:
+                service.name: snowplow
+            interval: 1h
+            threshold: 0.001
+            thresholdType: above
+            description: The share of snowplow requests that failed (5xx or no response; 4xx is not a failure, D3) over the last 1h is above the 0.001 objective (X5 api-error-ratio).
+      - notExists:
+          path: spec.where
+
+  - it: renders Alert cmp-slo-metrics-overflow with render.py's spec
+    template: default-alerts.yaml
+    documentSelector:
+      path: metadata.name
+      value: cmp-slo-metrics-overflow
+    asserts:
+      - equal:
+          path: spec
+          value:
+            displayName: SLI span metrics hit their cardinality cap (X5 SLIs unreliable)
+            metricRef:
+              name: slo-span-calls
+            aggregation: sum
+            labels:
+              otel.metric.overflow: "true"
+            interval: 1h
+            threshold: 1
+            thresholdType: above
+            description: "The spanmetrics connector folded SLI span combinations into its overflow row: more label combinations than its cap (2,000 per service per agent per flush), most likely from new http.route values. Those calls no longer carry service.name, http.route or krateo.sli.error, so the X5 latency and error SLIs under-count without going NO DATA. Find the new routes in otel_traces and raise the cap or narrow the dimensions."
+
+  - it: ships the five in the core tier (31 Alerts, 4 Metrics by default)
+    asserts:
+      - hasDocuments:
+          count: 31
+        template: default-alerts.yaml
+      - hasDocuments:
+          count: 4
+        template: default-metrics.yaml
+
+  - it: keeps a large whole threshold an integer (no float exponent)
+    template: default-alerts.yaml
+    documentSelector:
+      path: metadata.name
+      value: sre-clickhouse-disk-headroom
+    asserts:
+      - equal:
+          path: spec.threshold
+          value: 3221225472
+
+  - it: renders a string threshold as a number, and an empty ratio.labels as ratio {}
+    template: default-alerts.yaml
+    set:
+      defaultMetrics:
+        - name: m
+          metricName: x
+          type: sum
+      defaultAlerts.alerts:
+        - name: a
+          metricRef: m
+          aggregation: sum
+          labels:
+            k: v
+          ratio:
+            labels: {}
+          threshold: "0.25"
+          thresholdType: above
+          interval: 5m
+        - name: b
+          metricRef: m
+          aggregation: sum
+          threshold: "500"
+          thresholdType: above
+          interval: 5m
+    asserts:
+      - equal:
+          path: spec.threshold
+          value: 0.25
+        documentIndex: 0
+      - equal:
+          path: spec.ratio
+          value: {}
+        documentIndex: 0
+      - equal:
+          path: spec.threshold
+          value: 500
+        documentIndex: 1
+      - notExists:
+          path: spec.ratio
+        documentIndex: 1
+
+  - it: refuses a string threshold that is not a plain decimal
+    template: default-alerts.yaml
+    set:
+      defaultAlerts.alerts:
+        - name: bad
+          where: "1"
+          threshold: "1e3"
+          thresholdType: above
+          interval: 5m
+    asserts:
+      - failedTemplate:
+          errorPattern: "defaultAlerts bad: threshold \"1e3\" is not a plain decimal number"

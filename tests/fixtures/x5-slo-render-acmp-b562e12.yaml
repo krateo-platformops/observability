@@ -1,0 +1,125 @@
+# PROVENANCE. The stdout of krateo-acmp's X5 SLO generator at commit
+# b562e12a1ddc97a54e97c33cf162267b4ca189be ("X5: burn alerts use spec.description (alert-provider
+# 0.2.68 rename) (#83)"), run on 2026-11-16 from a clean copy of that commit as
+#
+#     python3 -I assembly/slo/alerts/render.py --targets assembly/slo/targets.yaml
+#
+# with Python 3.14 and the default --interval 1h. Everything below this header is that output,
+# byte for byte (sha256 838c5e993dd65517e1e83bfc9f33311bb0db4d8f77a3ac6e14e7b89b983ca4b0). Input
+# sha256: render.py 97285937fb25d9eed3210195089d8172c789aa91b575124a7a020d243fd4ab63,
+# slis.py b24d4036231569574e15386f9db0044a259fcd2a9fd76dcce402144c57bbd4ac,
+# targets.yaml 07dec31117ee03afca90be8666f47d826847d9e4eca06adfc514b7222ca26f54.
+# These are the specs acmp applied by hand on krateo-057 on 2026-11-10 (13:55:51-52Z), there with
+# one extra label, acmp.krateo.io/x5-slo: v1. On 2026-11-16 the five live specs equalled these
+# field for field, except the API server's default `where: ""` on the three Alerts.
+#
+# tests/x5-slo-defaults.py compares the chart's rendered cmp-slo-* Alerts and slo-span-* Metrics
+# with this file, so a change on either side (acmp's targets or wording, or the chart's values) has
+# to be made on both. To refresh: re-run the command above at the new acmp commit, replace
+# everything below this header with its output, and update the commit, hashes and date here.
+---
+{
+  "apiVersion": "observability.krateo.io/v1alpha1",
+  "kind": "Metric",
+  "metadata": {
+    "name": "slo-span-calls",
+    "namespace": "krateo-system"
+  },
+  "spec": {
+    "metricName": "traces.span.metrics.calls",
+    "type": "sum",
+    "collectedBy": "otel-collector spanmetrics",
+    "description": "Calls per SLI span (DELTA), with krateo.sli.error = \"true\" on 5xx or no response."
+  }
+}
+---
+{
+  "apiVersion": "observability.krateo.io/v1alpha1",
+  "kind": "Metric",
+  "metadata": {
+    "name": "slo-span-duration",
+    "namespace": "krateo-system"
+  },
+  "spec": {
+    "metricName": "traces.span.metrics.duration",
+    "type": "histogram",
+    "unit": "ms",
+    "collectedBy": "otel-collector spanmetrics",
+    "description": "SLI span duration, buckets 25 ms to 10 s."
+  }
+}
+---
+{
+  "apiVersion": "observability.krateo.io/v1alpha1",
+  "kind": "Alert",
+  "metadata": {
+    "name": "cmp-slo-api-p95",
+    "namespace": "krateo-system"
+  },
+  "spec": {
+    "displayName": "API p95 latency above its objective (X5 api-p95)",
+    "metricRef": {
+      "name": "slo-span-duration"
+    },
+    "aggregation": "p95",
+    "labels": {
+      "service.name": "snowplow"
+    },
+    "interval": "1h",
+    "threshold": 500,
+    "thresholdType": "above",
+    "description": "snowplow's p95 response time over the last 1h is above the 500 ms objective (X5 api-p95). The alert's percentile interpolates inside histogram buckets; assembly/slo/slis.py reports the exact bucket that holds the p95."
+  }
+}
+---
+{
+  "apiVersion": "observability.krateo.io/v1alpha1",
+  "kind": "Alert",
+  "metadata": {
+    "name": "cmp-slo-api-error-ratio",
+    "namespace": "krateo-system"
+  },
+  "spec": {
+    "displayName": "API error share above its objective (X5 api-error-ratio)",
+    "metricRef": {
+      "name": "slo-span-calls"
+    },
+    "aggregation": "sum",
+    "labels": {
+      "service.name": "snowplow",
+      "krateo.sli.error": "true"
+    },
+    "ratio": {
+      "labels": {
+        "service.name": "snowplow"
+      }
+    },
+    "interval": "1h",
+    "threshold": 0.001,
+    "thresholdType": "above",
+    "description": "The share of snowplow requests that failed (5xx or no response; 4xx is not a failure, D3) over the last 1h is above the 0.001 objective (X5 api-error-ratio)."
+  }
+}
+---
+{
+  "apiVersion": "observability.krateo.io/v1alpha1",
+  "kind": "Alert",
+  "metadata": {
+    "name": "cmp-slo-metrics-overflow",
+    "namespace": "krateo-system"
+  },
+  "spec": {
+    "displayName": "SLI span metrics hit their cardinality cap (X5 SLIs unreliable)",
+    "metricRef": {
+      "name": "slo-span-calls"
+    },
+    "aggregation": "sum",
+    "labels": {
+      "otel.metric.overflow": "true"
+    },
+    "interval": "1h",
+    "threshold": 1,
+    "thresholdType": "above",
+    "description": "The spanmetrics connector folded SLI span combinations into its overflow row: more label combinations than its cap (2,000 per service per agent per flush), most likely from new http.route values. Those calls no longer carry service.name, http.route or krateo.sli.error, so the X5 latency and error SLIs under-count without going NO DATA. Find the new routes in otel_traces and raise the cap or narrow the dimensions."
+  }
+}

@@ -64,8 +64,10 @@ Targets are **configuration, not code** — set them in `.env` (defaults below):
   created through the HyperDX API; it is not shipped by a chart yet. A
   reconciled, chart-shipped form is being proposed.
 - **Portal SLOs tab** on `/observability` is being designed by frontend.
-- **SLO alerts**: the alert-provider `Metric` CRs (`cmp-slo-*`) read the same
-  span metrics.
+- **SLO alerts**: the alert-provider Alerts `cmp-slo-*`, over the Metrics
+  `slo-span-calls` and `slo-span-duration`, read the same span metrics.
+  krateo-observability ships them from 0.1.52 (`defaultAlerts`, `defaultMetrics`;
+  [alerts.md](../../docs/alerts.md#the-x5-slo-alerts-0152)).
 
 All of them must read `sli-span-metrics.sql` (and `sli-queries.sql` SLI 3 for
 error-rate), not their own queries.
