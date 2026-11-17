@@ -125,7 +125,7 @@ type: application
 # traces/slo pipeline is unchanged, so the SLIs still count every span. Logs and metrics unchanged.
 # 0.1.21: adds a NODE-LOCAL Service, <release>-local (ClusterIP, internalTrafficPolicy: Local, OTLP 4317/4318),
 # for senders that can only be given a Service name: the composition-dynamic-controllers, whose tracing
-# Diego turned on for OTEL-8 (installer#400). The upstream Service is headless, which ignores
+# Diego turned on for the audit-to-reconcile join (installer#400). The upstream Service is headless, which ignores
 # internalTrafficPolicy, so spans could land on another node's agent and go unenriched by its
 # node-filtered k8sattributes. Additive: nothing else changes.
 # 0.1.25: the trace transform deletes agent CONTENT before it leaves the node: kagent's
@@ -137,7 +137,7 @@ type: application
 # change: krateo-slo-rollup keeps rows per bounds and reports no p95 over a window that spans both
 # layouts, so a 30-day p95 that includes the change day is unavailable until the window passes
 # (krateo-slo-rollup isn't deployed on krateo-057 today). HyperDX and alert quantiles read bounds per row.
-# 0.1.27: the gateway's AUDIT COPY (AUDIT-4, observability#138). logs/gateway-audit projects the agent
+# 0.1.27: the gateway's AUDIT COPY (observability#138). logs/gateway-audit projects the agent
 # gateway's acting hops (A2A calls, MCP tools/call/resources/read/prompts/get, LLM completions) from
 # its OTLP access log into krateo_audit as writer `gateway` of krateo-platformops/audit schema v1,
 # scope github.com/krateo-platformops/observability/gateway-audit. logs/gateway still writes every
@@ -170,7 +170,9 @@ type: application
 # became Ready at the 10s probe regardless. Same Ready time, no failing probe. No other change.
 # 0.1.32: comments only: neutral wording in comments (no internal ids or private repo
 # references); no rendered object changes.
-version: 0.1.32
+# 0.1.33: comments only: neutral wording (no internal work-item or plan ids);
+# no rendered object changes.
+version: 0.1.33
 appVersion: "0.158.0"
 dependencies:
   - name: opentelemetry-collector

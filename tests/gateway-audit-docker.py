@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Functional test of otel-collector-daemonset's gateway audit projection (AUDIT-4, observability#138).
+"""Functional test of otel-collector-daemonset's gateway audit projection (observability#138).
 
 The input is what the REAL proxy writes: tests/fixtures/gateway-access-log.otlp.jsonl was produced by
 agentgateway v1.5.0 running agentgateway-policies' rendered access-log CEL

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Functional test of otel-collector-daemonset's credential-header deletion (S1).
+"""Functional test of otel-collector-daemonset's credential-header deletion.
 
 The node agent's `transform` processor must drop every span, span-event and log attribute whose KEY
 names a credential header (authorization, proxy-authorization, cookie, set-cookie; any naming, any

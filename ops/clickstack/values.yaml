@@ -62,7 +62,7 @@ otel:
 # ---------------------------------------------------------------------------
 # NOTE: The ClickStack chart does not expose a service.type value for HyperDX.
 # After install/upgrade, patch the service to LoadBalancer manually or via
-# install.sh (Phase 2b):
+# install.sh:
 #   kubectl patch svc krateo-clickstack-app -n clickhouse-system \
 #     -p '{"spec": {"type": "LoadBalancer"}}'
 hyperdx:

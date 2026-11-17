@@ -82,7 +82,7 @@ type: application
 # `krateo-autopilot`, which matched 0 of 26.74M rows over 7 days on krateo-057. sre-jwt-in-telemetry
 # drops its ServiceName exclusion altogether, because it hid the services most likely to leak a token,
 # kagent among them, and this regex cannot match its own query. No default alert's count changes.
-# 0.1.28: HyperDX's own traces and metrics go to the node-local agent (G13). The upstream default named
+# 0.1.28: HyperDX's own traces and metrics go to the node-local agent. The upstream default named
 # the disabled collector subchart, so none arrived. Logs stay off OTLP, because filelog has them, and
 # traces are sampled at 5%. The endpoint must stay set: without one the SDK defaults to HyperDX's cloud.
 # 0.1.29: a comment only (#106), naming alert-provider-crd as the Alert CRD's owner. Nothing
@@ -115,7 +115,7 @@ type: application
 # alerts (rotate the token, stop it at source). 0.1.36's one-sentence rewrite had dropped them, and
 # the description is what the notification and the RCA read. Interim until alert-provider gains a
 # `runbook` field (Diego, 2026-11-09), where the full guidance moves back.
-# 0.1.38: sre-credential-header-in-traces (S1) fires on any span or span-event attribute whose key
+# 0.1.38: sre-credential-header-in-traces fires on any span or span-event attribute whose key
 # names authorization or cookie, the case sre-jwt-in-traces can't see (an opaque token, a cookie).
 # Pairs with otel-collector-daemonset 0.1.24, which deletes those keys. Human-only analysis.
 # 0.1.39: sre-incident-checks-unknown fires once per incident whose check script stopped giving a
@@ -140,13 +140,14 @@ type: application
 # @from_env, a profile and ONE per-table GRANT statement (never default.* or system.*; hyperdx's one
 # system table is data_skipping_indices). Also clickhouse-default-password and its env variable,
 # unused until `default` is closed later as a hot reload. Grants and profiles as tested on kind
-# (S0, 2026-11-10). The new containerTemplate.env ROLLS ClickHouse ONCE. NO client is switched, and
+# (2026-11-10). The new containerTemplate.env ROLLS ClickHouse ONCE. NO client is switched, and
 # default, app and otelcollector are unchanged. Decision: Diego 2026-11-10.
 # 0.1.43: PIN the ClickHouse server image by digest (multi-arch index of 26.8.36.3-alpine, the build
-# 057 runs since S1). The floating tag `26.8-alpine` made the S1 restart an unplanned minor upgrade
-# (26.8.7.19 -> 26.8.36.3) and left the operator's VersionInSync=False. Same binary, but the pod
-# spec changes, so this ROLLS ClickHouse ONCE. It rides the 057 node-pool recreate (Thu 12 Nov
-# 07:00Z, Diego 2026-11-11) rather than adding a restart of its own.
+# 057 runs since the lockdown restart of 2026-11-11 06:32Z). The floating tag `26.8-alpine` made
+# that restart an unplanned minor upgrade (26.8.7.19 -> 26.8.36.3) and left the operator's
+# VersionInSync=False. Same binary, but the pod spec changes, so this ROLLS ClickHouse ONCE. It
+# rides the 057 node-pool recreate (Thu 12 Nov 07:00Z, Diego 2026-11-11) rather than adding a
+# restart of its own.
 # 0.1.44: HyperDX's MongoDB credential moves to a generated Secret and is ROTATED. It was upstream's
 # public default, and the whole URI sat in plain text in ConfigMap clickstack-config. Now the chart
 # generates mongodb-hyperdx-credentials once (lookup-kept; keys username, password, uri), the
@@ -265,7 +266,9 @@ type: application
 # both versions, so under Helm 4 the ClickHouseCluster spec gets upstream's logger (100M x 10)
 # until Helm 4 changes this (helm/helm#32132); check-helm4-render allows exactly that difference. The platform renders
 # with Helm 3.20 and sees only the two empty keys.
-version: 0.1.54
+# 0.1.55: comments only: neutral wording (no internal work-item or plan ids);
+# no rendered object changes.
+version: 0.1.55
 appVersion: "3.5.0"
 dependencies:
   - name: clickstack

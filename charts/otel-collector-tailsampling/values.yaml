@@ -224,7 +224,7 @@ opentelemetry-collector:
                 - >-
                   span.name == "reconcile" and span.attributes["provider_runtime.acted"] == true
                   and IsMatch(resource.attributes["service.name"], "^(krateo-alert-provider|core-provider|git-provider|incident-provider)$")
-          # An audited write (AUDIT-9, installer#415; Diego): the shared krateo-platformops/audit library
+          # An audited write (installer#415; Diego): the shared krateo-platformops/audit library
           # (v0.4.0, used by snowplow and rest-dynamic-controller) sets krateo.audit.recorded=true on the
           # request's Server span once the audit record is handed to the log pipeline. Keeping those
           # traces whole lets an audit row's TraceId resolve in otel_traces (7-day TTL), instead of only

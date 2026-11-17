@@ -102,7 +102,7 @@ daily/monthly period windows and the `enabled` flag:
 tests/smoke-budget-ddl.sh
 ```
 
-## Log-line shape (D19a)
+## Log-line shape
 
 The evaluator emits one JSON line per warning/breached budget following the
 OTel Logs Data Model, so a collector json parser can map it 1:1 onto an

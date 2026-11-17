@@ -1,6 +1,6 @@
 global: {}
 
-# Prometheus -> OTLP bridge (KOS-1: Prometheus-only /metrics -> ClickHouse).
+# Prometheus -> OTLP bridge (Prometheus-only /metrics -> ClickHouse, #112).
 # Several components expose metrics ONLY as Prometheus /metrics scrape endpoints (NOT OTLP),
 # so they never reach the ClickHouse otel_metrics_* tables. A `prometheus` receiver could
 # scrape them via kubernetes_sd_configs (pod role) and feed the metrics pipeline.
@@ -65,7 +65,7 @@ opentelemetry-collector:
     #        so editor-created (non-installer) compositions' own reconcile events correlate.
     # 1.0.2: + patched clickhouseexporter — recreate the otel_* schema and retry on UNKNOWN_TABLE
     #        (ClickHouse re-provisioned with a fresh DB) instead of dropping data until a restart.
-    # 1.0.1: patched k8sobjectsreceiver (recycle timer + restart-on-close) — KOS-1 #112 bug #2
+    # 1.0.1: patched k8sobjectsreceiver (recycle timer + restart-on-close) — #112 bug #2
     tag: "1.0.9"
     pullPolicy: IfNotPresent
 

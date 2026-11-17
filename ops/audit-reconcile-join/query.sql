@@ -1,4 +1,4 @@
--- OTEL-8 (installer#400): the reconciles each portal write caused, joined out of band.
+-- The audit-to-reconcile join (installer#400): the reconciles each portal write caused, joined out of band.
 --
 -- One row per successful mutating portal write in krateo_audit between {from} and {to}, with the
 -- composition-controller reconciles of the same object that started within {window_s} seconds after

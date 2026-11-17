@@ -5,7 +5,7 @@ description: >-
   collector, which waits for each trace to finish and keeps it only if it matters: any error, any
   HTTP status of 400 or more, any span outside the portal path, any JWT-shaped value, or a 5% sample
   of the rest. Exports the kept traces to ClickHouse otel_traces. Wraps the upstream
-  opentelemetry-collector chart (installer#402, OTEL-10; design in observability#118).
+  opentelemetry-collector chart (installer#402; design in observability#118).
 type: application
 # 0.1.0: first release. It ships idle: nothing sends to it until otel-collector-daemonset's traces
 # pipeline is switched to its loadbalancing exporter (observability#118, step 2).
@@ -44,7 +44,9 @@ type: application
 # until snowplow ships #1322. tests/tailsampling-docker.py.
 # 0.1.14: comments only: neutral wording in comments (no internal ids or private repo
 # references); no rendered object changes.
-version: 0.1.14
+# 0.1.15: comments and the chart description only: neutral wording (no
+# internal work-item or plan ids); no rendered object changes.
+version: 0.1.15
 # The collector this chart renders: the upstream chart's own appVersion picks the image tag.
 # Keep equal to otel-collector-daemonset's appVersion, so both tiers run the same build.
 appVersion: "0.158.0"

@@ -71,8 +71,8 @@ def d(*tables, privs="SELECT"):
     return {f"default.{t}": privs for t in tables}
 
 
-# user -> (env variable, Secret, profile, {object: privileges}). The S0 kind run (2026-11-10,
-# users-test-C) is where these were proven against 057's DDL, the real seal/verify Jobs and the MVs.
+# user -> (env variable, Secret, profile, {object: privileges}). The kind run of 2026-11-10
+# (users-test-C) is where these were proven against 057's DDL, the real seal/verify Jobs and the MVs.
 USERS = {
     "sse_proxy": ("CLICKHOUSE_USER_SSE_PROXY_SHA256", "clickhouse-sse-proxy-credentials",
                   "portal_reader", d("otel_logs", "krateo_audit")),

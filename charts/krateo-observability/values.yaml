@@ -453,7 +453,7 @@ defaultAlerts:
       interval: 15m
       description: "An access token was stored unredacted in the traces and should be treated as leaked."
       runbook: "1. Treat the token as leaked from the moment it was written. Do not copy its value into a ticket, chat or query result you share. 2. Find who emitted it, without printing the value: group the matching otel_traces rows by ServiceName and SpanName over the alert window, and note which attribute holds it. 3. If it may still be valid, revoke it. For a Krateo authn token, only a signing-key rotation revokes it (authn has no per-token revocation), which signs every user out, so weigh it against the token's remaining lifetime (decode only iss and exp). For other issuers, rotate the credential. 4. Stop it at the source: change the service's instrumentation so it does not record the token. otel-collector-daemonset deletes credential header keys and redacts JWT-shaped values; a firing means a token got past both, so also report the attribute to the collector's owner. 5. If the service also prints spans to stdout, check its container log and Google Cloud Logging."
-    # S1 (2026-11-09): a credential HEADER, by key, in otel_traces: any span or span-event attribute
+    # 2026-11-09: a credential HEADER, by key, in otel_traces: any span or span-event attribute
     # whose key names authorization, proxy-authorization, cookie or set-cookie. otel-collector-daemonset
     # 0.1.24 deletes those keys whatever the value, so one here means the redaction failed or a sender
     # bypassed the node agents. It complements sre-jwt-in-traces, which matches JWT-shaped VALUES and so

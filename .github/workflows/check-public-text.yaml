@@ -1,8 +1,8 @@
-# This repository is public: no internal work-item or decision ids, no private repository name,
-# issue numbers or paths, no internal team short name (hack/public-text-check.py has the list).
-# SLO targets may be stated. Checks every tracked file's content and path; on a pull request
-# also its title, body and commit messages. Justified decision-id-shaped tokens that are not
-# decision ids live in hack/public-text-allowlist.txt, each with its reason.
+# This repository is public: no internal work-item, plan or decision ids of any kind, no private
+# repository name, issue numbers or paths, no internal team short name (hack/public-text-check.py
+# has the list). SLO targets may be stated. Checks every tracked file's content and path; on a
+# pull request also its title, body and commit messages. Id-shaped tokens that are really a
+# variable, a code or a name live in hack/public-text-allowlist.txt, each with its reason.
 #
 # It is a separate workflow on purpose. lint.yaml is the org-wide canonical chart-repo lint,
 # identical across every krateo-* chart repo.

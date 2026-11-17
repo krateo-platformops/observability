@@ -294,7 +294,7 @@ Wraps the same upstream chart in `daemonset` mode, stock
   `k8s.volume.available` and `k8s.volume.capacity` and turning the inode metrics off.
   `filter/pvc-volumes` keeps only PersistentVolumeClaims, because most pod volumes are
   configmaps, tokens and emptyDirs. Each point carries `k8s.persistentvolumeclaim.name`.
-- **Credential headers** (0.1.24, S1): `transform` drops every span, span-event and log attribute
+- **Credential headers** (0.1.24): `transform` drops every span, span-event and log attribute
   whose **key** names a credential header (`delete_matching_keys(attributes, "(?i)(authorization|cookie)")`:
   `http.header.Authorization`, `http.request.header.authorization`, `…cookie`, `set-cookie`,
   `proxy-authorization`), whatever the value. The JWT sweep catches only JWT-shaped values, so an
@@ -307,7 +307,7 @@ Wraps the same upstream chart in `daemonset` mode, stock
   labels and `service.version` on them. `transform/browser-resource`, right after it in `traces`,
   keeps only `service.name` on a `krateo-frontend` resource, which is all the frontend sets. Tested by
   `tests/browser-resource-docker.py` (workflow `check-browser-resource`).
-- **Gateway metrics** (0.1.22, OTEL-14(a), installer#406): `prometheus/agentgateway` scrapes the
+- **Gateway metrics** (0.1.22, installer#406): `prometheus/agentgateway` scrapes the
   agentgateway pods on the agent's own node (Kubernetes pod discovery, selected by
   `gateway.networking.k8s.io/gateway-class-name=agentgateway` and `spec.nodeName`), at their
   `prometheus.io/port` and `prometheus.io/path` annotations, every 30s. agentgateway publishes
@@ -333,7 +333,7 @@ Wraps the same upstream chart in `daemonset` mode, stock
   pipeline); **`ttl: 168h`** — do not remove.
 - Pipelines: `logs` (filelog), `metrics` (`hostmetrics, kubeletstats, otlp`), `traces`
   (`otlp`) — the `otlp` entries are how engine/cdc/app OTLP metrics and traces reach
-  ClickHouse (KOS-1 #112).
+  ClickHouse (#112).
 - **SLO span metrics** (0.1.15, performance alerts built from span metrics): two more pipelines, added next to `traces` without
   changing it. The `otlp` receiver fans out to every pipeline that names it, so every span still
   reaches `otel_traces`.
@@ -411,7 +411,7 @@ made at the gateway: agentgateway decides sampling when a request arrives, befor
   | `snowplow-stage-failure` | any span with `snowplow.stages.failed > 0` (snowplow#1264): a resolve whose stages failed while the response succeeded. Its status stays Unset, so the two rules above miss it. Absent or 0 doesn't match. Widget responses don't carry it yet (snowplow#1279) |
   | `jwt-shaped-value` | the `sre-jwt-in-traces` pattern in span attributes, status message, resource attributes or event attributes, so sampling never hides a leaked token |
   | `alert-provider-incident` | any trace with an `incident.*` span: alert-provider's RCA path (`incident.fire`, `incident.compare`, `incident.analyze`), kept whole whatever else is in the trace |
-  | `audited-write` | any trace with a span carrying `krateo.audit.recorded = true` (AUDIT-9): a request that wrote an audit record, so the audit view's trace link resolves (within the 7-day TTL) |
+  | `audited-write` | any trace with a span carrying `krateo.audit.recorded = true` (installer#415): a request that wrote an audit record, so the audit view's trace link resolves (within the 7-day TTL) |
   | `sample-5pct` | 5% of what's left, hashed on TraceId |
 
 - **Late spans.** `decision_cache` makes a span that arrives after its trace was decided follow that
