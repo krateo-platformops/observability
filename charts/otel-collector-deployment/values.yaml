@@ -133,10 +133,37 @@ opentelemetry-collector:
   podAnnotations:
     checksum/config: '{{ include "otel-collector-deployment.configMap" . | sha256sum }}'
 
+  # PORTS AND RECEIVERS ARE KEPT TOGETHER. Upstream opens a container port and a Service port for
+  # each of its default receivers (otlp 4317/4318, jaeger 6831/14250/14268, zipkin 9411), and this
+  # collector runs none of them: its receivers, k8sobjects and k8s_cluster, read the Kubernetes API
+  # and listen on nothing. A port with no receiver behind it refuses every connection, so it is
+  # closed here. Adding a receiver that listens means enabling its port here too, or nothing can
+  # reach it; tests/collector-helm4-render.py fails on either half missing. `metrics` (8888, the
+  # collector's own telemetry) is already off upstream and stays off: nothing scrapes it.
+  ports:
+    otlp:
+      enabled: false
+    otlp-http:
+      enabled: false
+    jaeger-compact:
+      enabled: false
+    jaeger-thrift:
+      enabled: false
+    jaeger-grpc:
+      enabled: false
+    zipkin:
+      enabled: false
+  # No Service: with every port closed it would have no ports, and Kubernetes rejects a ClusterIP
+  # Service without one. Nothing connects to this collector (see ports above); the health probes
+  # are the kubelet's and go to the pod directly.
+  service:
+    enabled: false
+
   config:
     receivers:
       # Upstream's default jaeger, otlp and zipkin receivers are not run: this collector receives
-      # nothing over the network (templates/_collector-config.tpl leaves them out).
+      # nothing over the network (templates/_collector-config.tpl leaves them out), and their ports
+      # are closed (ports above). A receiver added here that listens needs its port enabled there.
       #
       # Prometheus -> OTLP bridge receiver — LEFT OUT by default (like jaeger/otlp/zipkin).
       #

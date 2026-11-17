@@ -262,6 +262,11 @@ All under `opentelemetry-collector:` (the upstream dep):
   out `prometheus` is load-bearing: the minimal `krateo-otel-collector` image compiles in only
   `k8sobjects`+`k8s_cluster`, and the collector type-validates every *declared* receiver —
   declaring `prometheus` crashloops the default install.
+- **No ports, no Service** (0.3.22): neither receiver listens, so every upstream default port
+  (`ports.{otlp,otlp-http,jaeger-compact,jaeger-thrift,jaeger-grpc,zipkin}.enabled: false`) is
+  closed, and `service.enabled: false`, because a ClusterIP Service with no ports is invalid.
+  Ports and receivers go together: a receiver added that listens needs its port enabled (and
+  `service.enabled: true` for a Service); `tests/collector-helm4-render.py` fails otherwise.
 - **Prometheus→OTLP bridge (scaffolded, off):** `collector.prometheusScrape.enabled` is a
   MARKER only. Enabling the bridge is a three-part change: (1) a collector image built WITH
   the prometheus receiver, (2) set `config.receivers.prometheus` to the scrape config preserved
@@ -293,6 +298,13 @@ Wraps the same upstream chart in `daemonset` mode, stock
   (`<release>-opentelemetry-collector.<ns>.svc:4317` grpc / `:4318` http; under the
   installer the release is `otel-collector-daemonset`, which is the endpoint core-provider's
   `otel.endpoint` points at). Headless → consumes no Service-CIDR address.
+- **OTLP ports only** (0.1.34): the container ports, hostPorts and Service ports are `otlp`
+  (4317) and `otlp-http` (4318). Upstream's default `jaeger` and `zipkin` receivers, which no
+  pipeline ran, are left out of the config by the chart's own ConfigMap template
+  (`templates/configmap.yaml`, the same design as the deployment collector), and their ports
+  (`jaeger-compact`, `jaeger-thrift`, `jaeger-grpc`, `zipkin`) are `enabled: false`. Ports and
+  receivers go together: a receiver added that listens needs its port enabled;
+  `tests/collector-helm4-render.py` fails otherwise.
 - `presets`: `logsCollection` (without collector logs), `hostMetrics`,
   `kubernetesAttributes` (with `extractAllPodLabels`), `kubeletMetrics`.
 - `config.receivers`: `filelog` with a container parser + multiline recombine;
