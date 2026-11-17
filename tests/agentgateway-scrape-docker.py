@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Functional test of otel-collector-daemonset's agentgateway scrape job (OTEL-14(a), installer#406).
+"""Functional test of otel-collector-daemonset's agentgateway scrape job (installer#406).
 
 Kubernetes service discovery can't run in Docker, so this renders the chart, keeps the job's
 relabel_configs exactly as rendered, and swaps only the discovery: file_sd targets that carry the

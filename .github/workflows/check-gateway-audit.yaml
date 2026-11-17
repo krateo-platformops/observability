@@ -1,4 +1,4 @@
-# The gateway audit projection (AUDIT-4, observability#138), run in the pinned collector image.
+# The gateway audit projection (observability#138), run in the pinned collector image.
 #
 # `otelcol validate` accepts a config whose OTTL is wrong (it doesn't compile the statements), and
 # the projection is only correct if the audit library's own checker says so. This renders the chart,

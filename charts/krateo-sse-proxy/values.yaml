@@ -46,7 +46,7 @@ auth:
 
 clickhouse:
   url: "http://krateo-clickstack-clickhouse-clickhouse-headless.krateo-system.svc:8123"
-  # sse-proxy's OWN ClickHouse user (lockdown S2, Diego 2026-11-11). krateo-observability >= 0.1.42
+  # sse-proxy's OWN ClickHouse user (a ClickHouse lockdown step, Diego 2026-11-11). krateo-observability >= 0.1.42
   # creates the user `sse_proxy` (profile portal_reader: readonly=2, per-table SELECT on what
   # /events, /audit and /notifications read) and the Secret below, with keys `username` and
   # `password`. Both env vars come from that Secret, so the chart never names the user and the

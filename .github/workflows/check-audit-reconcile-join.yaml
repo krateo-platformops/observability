@@ -1,4 +1,4 @@
-# The OTEL-8 audit-to-reconcile join (ops/audit-reconcile-join/query.sql), run in the ClickHouse
+# The audit-to-reconcile join (ops/audit-reconcile-join/query.sql), run in the ClickHouse
 # version krateo-057 runs, against tables created from 057's own DDL (tests/fixtures/).
 #
 # The query can't be exercised on a cluster until composition controllers export reconcile spans,

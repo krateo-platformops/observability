@@ -6,7 +6,7 @@
 # `breached` state. The OTel DaemonSet collects the line into `otel_logs`
 # exactly like any other pod log — no new pipeline component.
 #
-# Log-line shape (D19a): the line follows the OTel Logs Data Model —
+# Log-line shape: the line follows the OTel Logs Data Model —
 # `timestamp`, `severity_text`/`severity_number` (warning→WARN/13,
 # breached→ERROR/17), `body`, `trace_id`/`span_id` and semconv-style
 # `attributes` (`event.name`, `service.name`, `krateo.budget.*`) — so a

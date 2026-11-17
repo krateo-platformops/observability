@@ -317,7 +317,7 @@ def check_render(root, docs, default):
     for p in sorted(found & DEAD_AFTER_ROTATION):
         print(f"     note: dead after rotation; emptied in the follow-up: {p}")
     for p in sorted(found & CLICKHOUSE_APP):
-        print(f"     note: the same literal is still the ClickHouse app user's password (lockdown S9/S10): {p}")
+        print(f"     note: the same literal is still the ClickHouse app user's password (until a later lockdown step): {p}")
     return pw, uri, inits.get(INIT)
 
 

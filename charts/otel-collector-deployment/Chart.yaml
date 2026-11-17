@@ -85,7 +85,9 @@ type: application
 # schema_url is now ignored instead of rejected (this chart sets none).
 # 0.3.19: comments only: neutral wording in comments (no internal ids or private repo
 # references); no rendered object changes.
-version: 0.3.19
+# 0.3.20: comments only: neutral wording (no internal work-item or plan ids);
+# no rendered object changes.
+version: 0.3.20
 appVersion: "1.0.9"
 dependencies:
   - name: opentelemetry-collector

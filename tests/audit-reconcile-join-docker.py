@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Functional test of the OTEL-8 audit-to-reconcile join (ops/audit-reconcile-join/query.sql).
+"""Functional test of the audit-to-reconcile join (ops/audit-reconcile-join/query.sql).
 
 Runs the query in a throwaway ClickHouse of the version krateo-057 runs, against krateo_audit and
 otel_traces created from krateo-057's own DDL (tests/fixtures/*.sql, from SHOW CREATE TABLE). It

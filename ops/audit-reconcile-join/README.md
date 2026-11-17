@@ -1,6 +1,6 @@
-# Audit-to-reconcile join (OTEL-8)
+# Audit-to-reconcile join
 
-`query.sql` answers installer#400 (OTEL-8): given a portal action, which reconciles did it cause,
+`query.sql` answers installer#400: given a portal action, which reconciles did it cause,
 and who acted. It joins **out of band**, at query time. Nothing is stamped on the user's object, so
 there's no new ResourceVersion, no informer churn, and no inherited sampling decision.
 

@@ -3,7 +3,7 @@
   Additional LoadBalancer Service for the HyperDX UI. The upstream clickstack
   chart only emits a ClusterIP Service (krateo-clickstack-app); this exposes the
   same pods externally without an imperative `kubectl patch`. The cloud assigns
-  the external IP (no hardcoded loadBalancerIP — that was install.sh phase 2b).
+  the external IP (no hardcoded loadBalancerIP — that was a step of install.sh).
   Selector mirrors the upstream krateo-clickstack-app Service.
 */}}
 apiVersion: v1

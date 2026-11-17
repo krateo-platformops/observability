@@ -433,7 +433,7 @@ from `integer` to number-or-string. crdgen types a bare `number` as a string in 
 and collapses exactly this union to `string`, so in a composition's `spec` a threshold is written
 quoted (`"0.001"`). The template renders it as a number and refuses a string that isn't a plain decimal.
 
-## `sre-credential-header-in-traces` (0.1.38, S1)
+## `sre-credential-header-in-traces` (0.1.38)
 
 `sre-jwt-in-traces` matches JWT-shaped **values**, so it can't see an opaque bearer token or a session
 cookie. This alert matches the **key** instead: any span or span-event attribute whose key contains

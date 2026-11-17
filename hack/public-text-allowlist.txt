@@ -1,5 +1,9 @@
-# Decision-id-shaped tokens that are not decision ids, for hack/public-text-check.py.
-# One per line: <path> <token, exact case> <reason>. Only this pattern can be allowlisted.
+# Id-shaped tokens that are not internal ids, for hack/public-text-check.py: decision-id,
+# work-item-id and plan-step shapes that are really a variable, a code or a name.
+# One per line: <path> <token, exact case> <reason>. It exempts that token in that file only.
+# Token families that are technical anywhere (CVE, RFC, UTF, SHA, ...) are STANDARD in the
+# check itself, not here. An entry that matches nothing fails the check. A numbered plan stage
+# ("lockdown" or "phase" and a number) is two words and cannot be listed: reword it.
 charts/krateo-slo-rollup/tests/e2e-kind.sh D1 shell variable: the fixture's third day (D3 + 2 days), a window edge
 charts/krateo-slo-rollup/tests/e2e-kind.sh D2 shell variable: the fixture's second day (D3 + 1 day), a window edge
 charts/krateo-slo-rollup/tests/e2e-kind.sh D3 shell variable: the fixture's first day, read from otel_metrics_sum
@@ -9,3 +13,21 @@ tests/clickstack-upgrade-kind.py d2 Python variable: the second HyperDX dashboar
 tests/clickstack-upgrade-kind.py d3 Python variable: the third HyperDX dashboard the test creates
 charts/krateo-sse-proxy/Chart.yaml d3 part of the cluster name a0-openstack-d3
 docs/log.md d3 part of the cluster name a0-openstack-d3
+LICENSE LICENSE-2 part of the Apache License 2.0 URL (licenses/LICENSE-2.0)
+charts/krateo-slo-rollup/tests/e2e-kind.sh B11 shell variable: the fixture's 11 histogram bucket bounds
+charts/krateo-sse-proxy/values.yaml L4 network layer 4: an L4 (TCP) LoadBalancer
+docs/configuration.md L4 network layer 4: an L4 (TCP) LoadBalancer
+charts/otel-collector-daemonset/values.yaml DEBUG-4 a Go slog level (DEBUG minus 4), how slog prints a custom TRACE level
+hack/preflight-refs.py Z0 part of the regex character class a-zA-Z0-9
+hack/preflight-refs.py Z0-9 part of the regex character class a-zA-Z0-9
+tests/audit-reconcile-join-docker.py T0 Python variable: the fixture's first hour, relative to now
+tests/audit-reconcile-join-docker.py T1 Python variable: the fixture's first hour + 1 hour
+tests/audit-reconcile-join-docker.py T2 Python variable: the fixture's first hour + 2 hours
+tests/audit-reconcile-join-docker.py T3 Python variable: the fixture's first hour + 3 hours
+tests/audit-reconcile-join-docker.py T4 Python variable: the fixture's first hour + 4 hours
+tests/audit-reconcile-join-docker.py W1 fixture label: write 1 (two reconciles, one failed)
+tests/audit-reconcile-join-docker.py W2 fixture label: write 2 (ambiguous with write 3)
+tests/audit-reconcile-join-docker.py W3 fixture label: write 3 (ambiguous with write 2)
+tests/audit-reconcile-join-docker.py W4 fixture label: write 4 (cluster-scoped)
+tests/audit-reconcile-join-docker.py W5 fixture label: write 5 (nothing followed)
+tests/audit-reconcile-join-docker.py W6 fixture label: write 6 (pooled and new-cdc spans)

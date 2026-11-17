@@ -1,4 +1,4 @@
-# otel-collector-daemonset's agentgateway scrape job (OTEL-14(a), installer#406), run in the pinned
+# otel-collector-daemonset's agentgateway scrape job (installer#406), run in the pinned
 # collector image.
 #
 # lint.yaml renders the chart, but nothing there runs the scrape. Kubernetes discovery can't run in

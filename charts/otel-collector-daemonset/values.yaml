@@ -197,7 +197,7 @@ opentelemetry-collector:
           container.uptime:
             enabled: true
 
-      # The agentgateways' own metrics (OTEL-14(a), installer#406): requests by route and status,
+      # The agentgateways' own metrics (installer#406): requests by route and status,
       # latencies, and LLM token usage by team. agentgateway exposes them only as Prometheus on
       # :15020/metrics (its metrics policy has no OTLP push), so each node agent scrapes the gateway
       # pods on its own node. Scoped to the agentgateway gateway class, not to every pod with
@@ -258,7 +258,7 @@ opentelemetry-collector:
               # or added later -- is caught without enumerating the key. Enumerating is what let
               # http.path through on the traces side for days (installer#396).
               - 'replace_all_patterns(attributes, "value", "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>")'
-              # S1 (2026-11-09): drop any attribute whose KEY names a credential header, whatever its
+              # 2026-11-09: drop any attribute whose KEY names a credential header, whatever its
               # value, in any naming (http.header.Authorization, http.request.header.authorization,
               # http.request.header.cookie, ...). The JWT sweep above only catches JWT-shaped values;
               # an opaque bearer token or a session cookie passes it. Partial, case-insensitive match,
@@ -269,7 +269,7 @@ opentelemetry-collector:
           - context: span
             statements:
               - 'delete_key(attributes, "http.header.Authorization")'
-              # S1 (2026-11-09): upstream kagent tools copy the raw Authorization header into spans when
+              # 2026-11-09: upstream kagent tools copy the raw Authorization header into spans when
               # tracing is on, and the exact key above misses other namings
               # (http.request.header.authorization) and cookies. An opaque non-JWT token is not caught
               # by the JWT sweep below either. So drop any attribute whose KEY names a credential
@@ -474,13 +474,13 @@ opentelemetry-collector:
                 set(attributes["krateo.sli.error"], "true")
                 where attributes["http.response.status_code"] == nil
                 and status.code == STATUS_CODE_ERROR
-      # ============================ GATEWAY AUDIT (AUDIT-4, #138) ============================
-      # The agent gateway writes ONE OTLP access-log record per request (installer#716 F7). It keeps
+      # =============================== GATEWAY AUDIT (#138) =================================
+      # The agent gateway writes ONE OTLP access-log record per request (installer#716). It keeps
       # its home in otel_logs (logs/gateway), and logs/gateway-audit below projects an audit copy
       # of the acting hops into krateo_audit as writer `gateway` (G) of krateo-platformops/audit
       # schema v1. The facts come from agentgateway-policies >= 0.2.28 (`auditFacts`).
       #
-      # WHICH RECORDS (snowplow's ruling as AUDIT-4 lead, 2026-11-11). THIS PROCESSOR IS THE ONE
+      # WHICH RECORDS (snowplow's ruling as the gateway-audit lead, 2026-11-11). THIS PROCESSOR IS THE ONE
       # PLACE that decides, and both gateway-audit pipelines run it, so the two can never disagree:
       #   candidate  = an agentgateway access-log record (scope `request`, a `gateway` field) of
       #                protocol a2a, mcp or llm;
@@ -869,7 +869,7 @@ opentelemetry-collector:
       pipelines:
         # `otlp` ON THE LOGS PIPELINE — DO NOT REMOVE. Without it an OTLP log export has NO
         # CONSUMER on this agent: the records leave the exporting process and are dropped here,
-        # silently. snowplow's AuditEvent (internal/support/audit, D19a) is exactly such an
+        # silently. snowplow's AuditEvent (internal/support/audit) is exactly such an
         # exporter — it emits the canonical Krateo audit record as an OTLP LogRecord aimed at
         # otel_logs — and that is why the snowplow chart ships OTEL_LOGS_ENABLED="false"
         # EXPLICITLY even with the OTEL_ENABLED master on: without the override the per-signal
@@ -926,7 +926,7 @@ opentelemetry-collector:
           receivers: [otlp]
           processors: [memory_limiter, k8sattributes, transform, filter/gateway-access-log, batch]
           exporters: [clickhouse]
-        # THE GATEWAY'S AUDIT COPY (AUDIT-4, #138). A third consumer of the same otlp receiver, so
+        # THE GATEWAY'S AUDIT COPY (#138). A third consumer of the same otlp receiver, so
         # logs/gateway still writes every access-log record to otel_logs unchanged. This one keeps
         # the acting hops (transform/gateway-audit-classify), redacts like the others (`transform`
         # runs BEFORE the projection, so no token reaches a projected value), maps them to schema v1
@@ -947,7 +947,7 @@ opentelemetry-collector:
           receivers: [count/gateway-audit-excluded]
           processors: [memory_limiter, batch]
           exporters: [clickhouse]
-        # KOS-1 #112 bug #2: wire OTLP metrics -> ClickHouse. The reconcile RED suite
+        # Issue #112, bug #2: wire OTLP metrics -> ClickHouse. The reconcile RED suite
         # (unstructured_runtime.reconcile.*) + the kagent GenAI token metrics arrive as OTLP on the
         # node-local agent's otlp receiver (same one the traces pipeline below uses); without it in
         # this pipeline they had no consumer and never reached otel_metrics_*.
@@ -955,7 +955,7 @@ opentelemetry-collector:
           receivers: [hostmetrics, kubeletstats, otlp]
           processors: [memory_limiter, filter/pvc-volumes, k8sattributes, batch]
           exporters: [clickhouse]
-        # KOS-1 #112 bug #1: wire OTLP traces -> ClickHouse. Apps/agents send OTLP spans to the
+        # Issue #112, bug #1: wire OTLP traces -> ClickHouse. Apps/agents send OTLP spans to the
         # node-local agent (status.hostIP:4317 grpc / :4318 http, from chart-default otlp receiver);
         # previously the traces pipeline exported to debug only (chart default) so nothing landed
         # and otel_traces was never created. jaeger/zipkin receiver defaults stay defined-but-unused
@@ -988,7 +988,7 @@ opentelemetry-collector:
           receivers: [span_metrics]
           processors: [memory_limiter, batch]
           exporters: [clickhouse]
-        # The gateways' scraped Prometheus metrics (OTEL-14(a)). Their own pipeline so the scrape
+        # The gateways' scraped Prometheus metrics (installer#406). Their own pipeline so the scrape
         # can't change the `metrics` pipeline, and no k8sattributes: the scrape's connection is the
         # collector itself, and the receiver already names the namespace and pod from discovery.
         metrics/agentgateway:
