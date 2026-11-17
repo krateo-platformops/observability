@@ -245,8 +245,8 @@ of their own.
 
 The SLO alerts are the alert-provider Alerts `cmp-slo-api-p95`, `cmp-slo-api-error-ratio` and
 `cmp-slo-metrics-overflow`, over the Metrics `slo-span-calls` and `slo-span-duration` (the same span
-metrics). krateo-observability ships them as defaults from 0.1.52, with the specs of acmp's generator;
-see [alerts.md](alerts.md#the-x5-slo-alerts-0152).
+metrics). krateo-observability ships them as defaults from 0.1.52, with the specs of the CMP team's SLO
+generator; see [alerts.md](alerts.md#slo-objects-0152).
 [`ops/slo-alert/bootstrap-slo-alerts.sh`](../ops/slo-alert/bootstrap-slo-alerts.sh) also creates
 HyperDX saved-search breach alerts (span and log-line counts); they route through the standard
 alert channels (portal / alert-proxy / email).

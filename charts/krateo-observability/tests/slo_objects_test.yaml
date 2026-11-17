@@ -1,6 +1,6 @@
-suite: X5 SLO metrics and alerts (0.1.52)
-# The five objects acmp hand-applied on krateo-057, now chart defaults under the same names.
-# tests/x5-slo-defaults.py compares their specs with render.py's committed output; this suite pins
+suite: SLO metrics and alerts (0.1.52)
+# The five SLO objects proven on krateo-057 on 2026-11-10, now chart defaults under the same names.
+# tests/slo-defaults.py compares their specs with the generator's committed output; this suite pins
 # the names, labels and specs, and the template's threshold and ratio handling.
 templates:
   - default-alerts.yaml
@@ -9,7 +9,7 @@ release:
   name: krateo-observability
   namespace: krateo-system
 tests:
-  - it: renders Metric slo-span-calls with render.py's spec and the chart's labels
+  - it: renders Metric slo-span-calls with the generator's spec and the chart's labels
     template: default-metrics.yaml
     documentSelector:
       path: metadata.name
@@ -33,7 +33,7 @@ tests:
             collectedBy: otel-collector spanmetrics
             description: 'Calls per SLI span (DELTA), with krateo.sli.error = "true" on 5xx or no response.'
 
-  - it: renders Metric slo-span-duration with render.py's spec
+  - it: renders Metric slo-span-duration with the generator's spec
     template: default-metrics.yaml
     documentSelector:
       path: metadata.name
@@ -48,7 +48,7 @@ tests:
             collectedBy: otel-collector spanmetrics
             description: SLI span duration, buckets 25 ms to 10 s.
 
-  - it: renders Alert cmp-slo-api-p95 with render.py's spec and the chart's labels only
+  - it: renders Alert cmp-slo-api-p95 with the generator's spec and the chart's labels only
     template: default-alerts.yaml
     documentSelector:
       path: metadata.name
@@ -67,7 +67,7 @@ tests:
       - equal:
           path: spec
           value:
-            displayName: API p95 latency above its objective (X5 api-p95)
+            displayName: API p95 latency above its objective
             metricRef:
               name: slo-span-duration
             aggregation: p95
@@ -76,7 +76,7 @@ tests:
             interval: 1h
             threshold: 500
             thresholdType: above
-            description: "snowplow's p95 response time over the last 1h is above the 500 ms objective (X5 api-p95). The alert's percentile interpolates inside histogram buckets; assembly/slo/slis.py reports the exact bucket that holds the p95."
+            description: "snowplow's p95 response time over the last 1h is above the 500 ms objective. The percentile is interpolated inside histogram buckets, so it can sit a little either side of the exact bucket that holds the p95."
 
   - it: renders Alert cmp-slo-api-error-ratio with its ratio and a fractional threshold
     template: default-alerts.yaml
@@ -87,7 +87,7 @@ tests:
       - equal:
           path: spec
           value:
-            displayName: API error share above its objective (X5 api-error-ratio)
+            displayName: API error share above its objective
             metricRef:
               name: slo-span-calls
             aggregation: sum
@@ -100,11 +100,11 @@ tests:
             interval: 1h
             threshold: 0.001
             thresholdType: above
-            description: The share of snowplow requests that failed (5xx or no response; 4xx is not a failure, D3) over the last 1h is above the 0.001 objective (X5 api-error-ratio).
+            description: "The share of snowplow requests that failed (5xx or no response; a 4xx is not a failure) over the last 1h is above the 0.001 objective."
       - notExists:
           path: spec.where
 
-  - it: renders Alert cmp-slo-metrics-overflow with render.py's spec
+  - it: renders Alert cmp-slo-metrics-overflow with the generator's spec
     template: default-alerts.yaml
     documentSelector:
       path: metadata.name
@@ -113,7 +113,7 @@ tests:
       - equal:
           path: spec
           value:
-            displayName: SLI span metrics hit their cardinality cap (X5 SLIs unreliable)
+            displayName: SLI span metrics hit their cardinality cap (SLIs unreliable)
             metricRef:
               name: slo-span-calls
             aggregation: sum
@@ -122,7 +122,7 @@ tests:
             interval: 1h
             threshold: 1
             thresholdType: above
-            description: "The spanmetrics connector folded SLI span combinations into its overflow row: more label combinations than its cap (2,000 per service per agent per flush), most likely from new http.route values. Those calls no longer carry service.name, http.route or krateo.sli.error, so the X5 latency and error SLIs under-count without going NO DATA. Find the new routes in otel_traces and raise the cap or narrow the dimensions."
+            description: "The spanmetrics connector folded SLI span combinations into its overflow row: more label combinations than its cap (2,000 per service per agent per flush), most likely from new http.route values. Those calls no longer carry service.name, http.route or krateo.sli.error, so the latency and error SLIs under-count without going NO DATA. Find the new routes in otel_traces and raise the cap or narrow the dimensions."
 
   - it: ships the five in the core tier (31 Alerts, 4 Metrics by default)
     asserts:

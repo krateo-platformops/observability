@@ -1,6 +1,6 @@
-# The X5 SLO defaults (krateo-observability 0.1.52): the chart's cmp-slo-* Alerts and slo-span-*
-# Metrics must equal krateo-acmp's generator output, committed with its provenance in
-# tests/fixtures/x5-slo-render-acmp-b562e12.yaml. tests/x5-slo-defaults.py renders the chart and
+# The SLO defaults (krateo-observability 0.1.52): the chart's cmp-slo-* Alerts and slo-span-*
+# Metrics must equal the CMP SLO generator's output, committed with its provenance in
+# tests/fixtures/slo-objects-render.yaml. tests/slo-defaults.py renders the chart and
 # compares spec by spec (values and JSON types), checks the labels, the Metric references and the
 # Alert/Metric counts per gate; the helm-unittest suite pins the same five and the template's
 # threshold and ratio handling. No cluster needed.
@@ -8,21 +8,21 @@
 # It is a separate workflow on purpose. lint.yaml is the org-wide canonical chart-repo lint,
 # identical across every krateo-* chart repo.
 
-name: check-x5-slo-defaults
+name: check-slo-defaults
 
 on:
   pull_request:
     paths:
       - "charts/krateo-observability/**"
-      - "tests/x5-slo-defaults.py"
-      - "tests/fixtures/x5-slo-render-acmp-b562e12.yaml"
-      - ".github/workflows/check-x5-slo-defaults.yaml"
+      - "tests/slo-defaults.py"
+      - "tests/fixtures/slo-objects-render.yaml"
+      - ".github/workflows/check-slo-defaults.yaml"
   push:
     branches: [main]
     paths:
       - "charts/krateo-observability/**"
-      - "tests/x5-slo-defaults.py"
-      - "tests/fixtures/x5-slo-render-acmp-b562e12.yaml"
+      - "tests/slo-defaults.py"
+      - "tests/fixtures/slo-objects-render.yaml"
   workflow_dispatch:
 
 permissions:
@@ -49,7 +49,7 @@ jobs:
         run: |
           helm repo add clickstack https://clickhouse.github.io/ClickStack-helm-charts
           helm dependency build charts/krateo-observability
-      - name: Compare the rendered defaults with render.py's output
-        run: python3 tests/x5-slo-defaults.py .
+      - name: Compare the rendered defaults with the generator's output
+        run: python3 tests/slo-defaults.py .
       - name: helm unittest
         run: helm unittest charts/krateo-observability

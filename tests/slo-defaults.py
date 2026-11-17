@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""The X5 SLO defaults (0.1.52): the chart's cmp-slo-* Alerts and slo-span-* Metrics equal acmp's generator.
+"""The SLO defaults (0.1.52): the chart's cmp-slo-* Alerts and slo-span-* Metrics equal the CMP SLO generator's.
 
-acmp hand-applied five objects on krateo-057 on 2026-11-10, rendered by krateo-acmp's
-assembly/slo/alerts/render.py. From 0.1.52 the chart ships them, under the same names so the live CRs
-(and the HyperDX alerts alert-provider keeps their ids for) are adopted, not recreated. This test keeps
-the two sources from drifting apart:
+The five SLO objects were proven on krateo-057 on 2026-11-10, applied there from the CMP team's SLO
+generator. From 0.1.52 the chart ships them, under the same names so the live CRs (and the HyperDX
+alerts alert-provider keeps their ids for) are adopted, not recreated. This test keeps the two sources
+from drifting apart:
 
-1. Fixture. tests/fixtures/x5-slo-render-acmp-b562e12.yaml is render.py's output at the acmp commit its
-   header names. Every object in it must render from the chart with the same kind, apiVersion, name
-   and namespace, and a spec EQUAL to the fixture's: same keys, same values, same JSON types (500 an
+1. Fixture. tests/fixtures/slo-objects-render.yaml is the generator's output at the commit its header
+   names. Every object in it must render from the chart with the same kind, apiVersion, name and
+   namespace, and a spec EQUAL to the fixture's: same keys, same values, same JSON types (500 an
    integer, 0.001 a number, "true" a string). Nothing in the chart's render may carry one of those
    names without being in the fixture.
 2. Metadata. Each of the five carries exactly the chart's standard labels
    (app.kubernetes.io/managed-by: krateo-observability-defaults, app.kubernetes.io/part-of:
-   krateo-observability), not acmp's acmp.krateo.io/x5-slo, and no annotations (Helm adds its own
+   krateo-observability) and nothing else, and no annotations (Helm adds its own
    ownership metadata when it applies them).
 3. References. Every rendered metric Alert names a rendered Metric (alert-provider refuses one whose
    Metric is missing).
@@ -22,7 +22,7 @@ the two sources from drifting apart:
 5. Threshold. The `threshold` of every rendered Alert is a YAML number, and only the ratio alert's is a
    fraction.
 
-Run: python3 tests/x5-slo-defaults.py [repo-root]
+Run: python3 tests/slo-defaults.py [repo-root]
 Exit 0 = every expectation held, 1 = at least one did not.
 """
 import pathlib
@@ -32,7 +32,7 @@ import sys
 import yaml
 
 CHART = "charts/krateo-observability"
-FIXTURE = "tests/fixtures/x5-slo-render-acmp-b562e12.yaml"
+FIXTURE = "tests/fixtures/slo-objects-render.yaml"
 NAMESPACE = "krateo-system"
 RELEASE = "krateo-observability"
 STANDARD_LABELS = {
@@ -106,7 +106,7 @@ def main():
         check(got["metadata"]["namespace"] == want["metadata"]["namespace"] == NAMESPACE,
               f"{key[1]}: namespace {got['metadata']['namespace']}")
         d = diff(want["spec"], got["spec"])
-        check(not d, f"{key[1]}: spec equals render.py's" + ("" if not d else ": " + "; ".join(d)))
+        check(not d, f"{key[1]}: spec equals the generator's" + ("" if not d else ": " + "; ".join(d)))
         check(got["metadata"].get("labels") == STANDARD_LABELS,
               f"{key[1]}: labels are exactly the chart's standard two ({got['metadata'].get('labels')})")
         check(not got["metadata"].get("annotations"), f"{key[1]}: no annotations in the render")

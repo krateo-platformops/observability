@@ -1,0 +1,114 @@
+# PROVENANCE. Rendered from the CMP SLO generator at b971139f743e95668a6442ed5cbd957103c2d499
+# (2026-11-17, default 1h window). Everything below this header is its output, byte for byte
+# (sha256 566eb17dce79b871be1ba1a278655bae4c778d971822d5fa7690a2fc2424bbf9).
+#
+# tests/slo-defaults.py compares the chart's rendered cmp-slo-* Alerts and slo-span-* Metrics with
+# this file, so a change on either side (the generator's targets or wording, or the chart's values)
+# has to be made on both. To refresh: re-render at the new generator commit, replace everything
+# below this header with the output, and update the commit, hash and date here.
+---
+{
+  "apiVersion": "observability.krateo.io/v1alpha1",
+  "kind": "Metric",
+  "metadata": {
+    "name": "slo-span-calls",
+    "namespace": "krateo-system"
+  },
+  "spec": {
+    "metricName": "traces.span.metrics.calls",
+    "type": "sum",
+    "collectedBy": "otel-collector spanmetrics",
+    "description": "Calls per SLI span (DELTA), with krateo.sli.error = \"true\" on 5xx or no response."
+  }
+}
+---
+{
+  "apiVersion": "observability.krateo.io/v1alpha1",
+  "kind": "Metric",
+  "metadata": {
+    "name": "slo-span-duration",
+    "namespace": "krateo-system"
+  },
+  "spec": {
+    "metricName": "traces.span.metrics.duration",
+    "type": "histogram",
+    "unit": "ms",
+    "collectedBy": "otel-collector spanmetrics",
+    "description": "SLI span duration, buckets 25 ms to 10 s."
+  }
+}
+---
+{
+  "apiVersion": "observability.krateo.io/v1alpha1",
+  "kind": "Alert",
+  "metadata": {
+    "name": "cmp-slo-api-p95",
+    "namespace": "krateo-system"
+  },
+  "spec": {
+    "displayName": "API p95 latency above its objective",
+    "metricRef": {
+      "name": "slo-span-duration"
+    },
+    "aggregation": "p95",
+    "labels": {
+      "service.name": "snowplow"
+    },
+    "interval": "1h",
+    "threshold": 500,
+    "thresholdType": "above",
+    "description": "snowplow's p95 response time over the last 1h is above the 500 ms objective. The percentile is interpolated inside histogram buckets, so it can sit a little either side of the exact bucket that holds the p95."
+  }
+}
+---
+{
+  "apiVersion": "observability.krateo.io/v1alpha1",
+  "kind": "Alert",
+  "metadata": {
+    "name": "cmp-slo-api-error-ratio",
+    "namespace": "krateo-system"
+  },
+  "spec": {
+    "displayName": "API error share above its objective",
+    "metricRef": {
+      "name": "slo-span-calls"
+    },
+    "aggregation": "sum",
+    "labels": {
+      "service.name": "snowplow",
+      "krateo.sli.error": "true"
+    },
+    "ratio": {
+      "labels": {
+        "service.name": "snowplow"
+      }
+    },
+    "interval": "1h",
+    "threshold": 0.001,
+    "thresholdType": "above",
+    "description": "The share of snowplow requests that failed (5xx or no response; a 4xx is not a failure) over the last 1h is above the 0.001 objective."
+  }
+}
+---
+{
+  "apiVersion": "observability.krateo.io/v1alpha1",
+  "kind": "Alert",
+  "metadata": {
+    "name": "cmp-slo-metrics-overflow",
+    "namespace": "krateo-system"
+  },
+  "spec": {
+    "displayName": "SLI span metrics hit their cardinality cap (SLIs unreliable)",
+    "metricRef": {
+      "name": "slo-span-calls"
+    },
+    "aggregation": "sum",
+    "labels": {
+      "otel.metric.overflow": "true"
+    },
+    "interval": "1h",
+    "threshold": 1,
+    "thresholdType": "above",
+    "description": "The spanmetrics connector folded SLI span combinations into its overflow row: more label combinations than its cap (2,000 per service per agent per flush), most likely from new http.route values. Those calls no longer carry service.name, http.route or krateo.sli.error, so the latency and error SLIs under-count without going NO DATA. Find the new routes in otel_traces and raise the cap or narrow the dimensions."
+  }
+}

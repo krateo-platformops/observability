@@ -233,22 +233,23 @@ type: application
 # on both sides (alert-provider refuses it on log alerts; rest-dynamic-controller's request metric is
 # off without OTEL_ENABLED, unset on 057). Replay on 057's counts: the persistent alert fires once in
 # the 11-12 outage (15:30-15:45), silent on the isolated failures. Adds one Alert CR.
-# 0.1.52: the X5 SLO objects become chart defaults (Diego's decision; acmp agreed and asked that the
-# chart be their single source). Metrics slo-span-calls and slo-span-duration, and core Alerts
-# cmp-slo-api-p95 (p95 of snowplow's span duration above 500 ms), cmp-slo-api-error-ratio (the
-# krateo.sli.error="true" share of snowplow's calls above 0.001, a ratio alert) and
-# cmp-slo-metrics-overflow (any span-metrics overflow row), each over 1h. Specs are krateo-acmp's
-# assembly/slo/alerts/render.py output at b562e12, committed as tests/fixtures/x5-slo-render-acmp-
-# b562e12.yaml; check-x5-slo-defaults fails on any drift. Same names as the objects acmp applied by
-# hand on krateo-057, so an upgrade there ADOPTS them (and alert-provider keeps their HyperDX alert
-# ids); docs/alerts.md has the pre-check, and the one-time ownership step a plain `helm upgrade`
-# needs. Chart labels only, no acmp.krateo.io/x5-slo. Templates: alerts take `ratio` (labels), and a
-# fractional threshold renders as itself (it was cast to an integer); the schema types threshold as
-# number-or-string (was integer), which crdgen turns into a string in the composition CRD, so a
-# composition's spec writes it quoted. NEEDS alert-provider 0.2.68 for these five (description; the
-# chart already needs 0.2.69 since 0.1.40, unchanged), otel-collector-daemonset 0.1.26 (the span
-# metrics), and krateo.sli.error stamped by snowplow and the frontend. Adds 3 Alert and 2 Metric
-# CRs (31 Alerts and 4 Metrics by default, 36 Alerts with the extended tier).
+# 0.1.52: the SLO objects proven on krateo-057 on 2026-11-10 become chart defaults (Diego's decision;
+# the CMP team agreed and asked that the chart be their single source). Metrics slo-span-calls and
+# slo-span-duration, and core Alerts cmp-slo-api-p95 (p95 of snowplow's span duration above 500 ms),
+# cmp-slo-api-error-ratio (the krateo.sli.error="true" share of snowplow's calls above 0.001, a ratio
+# alert) and cmp-slo-metrics-overflow (any span-metrics overflow row), each over 1h. Specs are the CMP
+# team's SLO generator output, committed as tests/fixtures/slo-objects-render.yaml; check-slo-defaults
+# fails on any drift. Same names as the live objects on krateo-057, so an upgrade there ADOPTS them
+# (and alert-provider keeps their HyperDX alert ids); docs/alerts.md has the pre-check, and the
+# one-time ownership step a plain `helm upgrade` needs. The upgrade rewrites the three Alerts'
+# displayName and description (generic wording); nothing else in their specs changes. Chart labels
+# only. Templates: alerts take `ratio` (labels), and a fractional threshold renders as itself (it was
+# cast to an integer); the schema types threshold as number-or-string (was integer), which crdgen
+# turns into a string in the composition CRD, so a composition's spec writes it quoted. NEEDS
+# alert-provider 0.2.68 for these five (description; the chart already needs 0.2.69 since 0.1.40,
+# unchanged), otel-collector-daemonset 0.1.26 (the span metrics), and krateo.sli.error stamped by
+# snowplow and the frontend. Adds 3 Alert and 2 Metric CRs (31 Alerts and 4 Metrics by default, 36
+# Alerts with the extended tier).
 version: 0.1.52
 appVersion: "3.5.0"
 dependencies:

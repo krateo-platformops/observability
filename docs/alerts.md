@@ -1,7 +1,7 @@
 ---
 type: Configuration
 title: observability — the default alert set
-description: The 36 Alert CRs (31 core, 5 extended) and 4 Metric CRs the chart seeds, among them the X5 SLO alerts adopted from acmp (0.1.52), the measured evidence behind every filter and threshold, and the three rules that decide whether an Alert can fire at all — `where` is ClickHouse SQL and not the Lucene the CRD advertises, severity needs `otel-collector-daemonset` ≥ 0.1.17 and JSON logs, and log alerts must exclude the observability stack or they diagnose themselves. Event alerts skip the DELETED copy of an expired Event.
+description: The 36 Alert CRs (31 core, 5 extended) and 4 Metric CRs the chart seeds, among them the SLO objects adopted from krateo-057 (0.1.52), the measured evidence behind every filter and threshold, and the three rules that decide whether an Alert can fire at all — `where` is ClickHouse SQL and not the Lucene the CRD advertises, severity needs `otel-collector-daemonset` ≥ 0.1.17 and JSON logs, and log alerts must exclude the observability stack or they diagnose themselves. Event alerts skip the DELETED copy of an expired Event.
 resource: oci://ghcr.io/krateo-platformops/charts/krateo-observability
 tags: [alerting, alerts, observability, clickhouse, hyperdx, sre, runbook]
 timestamp: 2026-09-18T00:00:00Z
@@ -270,13 +270,14 @@ entry reusing the name of an alert someone hand-applied fails the upgrade outrig
 ownership error. A draft of this set did exactly that against a hand-applied CR on a live
 cluster.
 
-The X5 SLO set (`cmp-slo-*` and its Metrics `slo-span-*`, 0.1.52) is the one deliberate exception:
-it keeps the names acmp hand-applied on krateo-057, so those CRs are adopted rather than recreated.
+The SLO set (`cmp-slo-*` and its Metrics `slo-span-*`, 0.1.52) is the one deliberate exception: it
+keeps the names of the SLO objects proven on krateo-057 on 2026-11-10, so those CRs are adopted rather
+than recreated.
 See the next section for the adoption step.
 
-## The X5 SLO alerts (0.1.52)
+## SLO objects (0.1.52)
 
-acmp's API objectives (X5), as two Metrics and three core Alerts, each evaluated over the last hour:
+The CMP API objectives, as two Metrics and three core Alerts, each evaluated over the last hour:
 
 | object | what it reads | fires when |
 |---|---|---|
@@ -286,15 +287,14 @@ acmp's API objectives (X5), as two Metrics and three core Alerts, each evaluated
 | Alert `cmp-slo-api-error-ratio` | sum of `slo-span-calls` with `krateo.sli.error` = "true" (5xx or no response; 4xx is not a failure) over the sum of all of snowplow's, a `ratio` alert | a share of at least 0.001 |
 | Alert `cmp-slo-metrics-overflow` | sum of `slo-span-calls` rows with `otel.metric.overflow` = "true" | at least 1 row: the SLIs above under-count without going NO DATA |
 
-**Source.** The specs are krateo-acmp's `assembly/slo/alerts/render.py` output at commit b562e12, the
-render acmp applied by hand on krateo-057 on 2026-11-10. The chart is now their only source (acmp
-asked for that). The output is committed as
-[`tests/fixtures/x5-slo-render-acmp-b562e12.yaml`](../tests/fixtures/x5-slo-render-acmp-b562e12.yaml),
-with its provenance in the header, and `tests/x5-slo-defaults.py` (workflow `check-x5-slo-defaults`)
-fails when the chart's rendered specs differ from it in any field, value or JSON type. A change to a
-target or a description is made in acmp's generator and in `values.yaml` together, and the fixture is
-refreshed from the generator. The descriptions are the generator's, including its pointers to acmp's
-private `assembly/slo/slis.py` (which reports the exact p95 bucket) and to acmp's decision D3.
+**Source.** The specs are the CMP team's SLO generator output, the same objects that were proven on
+krateo-057 on 2026-11-10 (applied there by hand). The chart is now their only source, at the CMP
+team's request. The output is committed as
+[`tests/fixtures/slo-objects-render.yaml`](../tests/fixtures/slo-objects-render.yaml), with the
+generator commit in its header, and `tests/slo-defaults.py` (workflow `check-slo-defaults`) fails when
+the chart's rendered specs differ from it in any field, value or JSON type. A change to a target or a
+description is made in the generator and in `values.yaml` together, and the fixture is refreshed from
+the generator. displayName and description are the generator's text.
 
 **Needs:**
 
@@ -311,8 +311,8 @@ traffic: HyperDX evaluates an empty window as 0, and all three are `above`. They
 alert-provider marks an alert on an aggregated value `OpensIncidents=False` (`AggregatedValue`).
 
 **Labels.** The chart's standard two, `app.kubernetes.io/managed-by: krateo-observability-defaults` and
-`app.kubernetes.io/part-of: krateo-observability`, like every other default. Not acmp's
-`acmp.krateo.io/x5-slo: v1`: acmp doesn't select on it.
+`app.kubernetes.io/part-of: krateo-observability`, like every other default. The extra label the
+hand-applied objects carry on 057 is not rendered: nothing selects on it.
 
 ### Adoption on krateo-057
 
@@ -322,7 +322,8 @@ alert-provider keeps its `status.hyperdxAlertId` and the HyperDX alert it points
 would get a new HyperDX alert. Demo, and any new cluster, has none of them, so there they are created.
 
 **Pre-check (read-only).** Run before the roll. Each line should show an empty `managed-by` and
-`release`, `generation=1`, and, for the Alerts, a `hyperdxAlertId`. Note the ids, to compare after.
+`release`, `generation=1`, and, for the Alerts, a `hyperdxAlertId`. Note the ids, to compare after,
+and the `labels` (the extra label the hand apply added shows there).
 
 ```sh
 kubectl -n krateo-system get \
@@ -331,7 +332,7 @@ kubectl -n krateo-system get \
   alerts.observability.krateo.io/cmp-slo-metrics-overflow \
   metrics.observability.krateo.io/slo-span-calls \
   metrics.observability.krateo.io/slo-span-duration \
-  -o jsonpath='{range .items[*]}{.kind}/{.metadata.name}{"\t"}managed-by={.metadata.labels.app\.kubernetes\.io/managed-by}{"\t"}release={.metadata.annotations.meta\.helm\.sh/release-name}/{.metadata.annotations.meta\.helm\.sh/release-namespace}{"\t"}generation={.metadata.generation}{"\t"}hyperdxAlertId={.status.hyperdxAlertId}{"\n"}{end}'
+  -o jsonpath='{range .items[*]}{.kind}/{.metadata.name}{"\t"}managed-by={.metadata.labels.app\.kubernetes\.io/managed-by}{"\t"}release={.metadata.annotations.meta\.helm\.sh/release-name}/{.metadata.annotations.meta\.helm\.sh/release-namespace}{"\t"}generation={.metadata.generation}{"\t"}hyperdxAlertId={.status.hyperdxAlertId}{"\t"}labels={.metadata.labels}{"\n"}{end}'
 helm get metadata krateo-observability -n krateo-system
 ```
 
@@ -386,34 +387,33 @@ what you want here; don't add `--overwrite`. The `managed-by=Helm` label is temp
 renders `krateo-observability-defaults`, and the controller's next reconcile sets it, as on every other
 default alert.
 
-**What the upgrade changes on each live object.** On 2026-11-16 the five live specs equalled the
-chart's field for field. The only difference is `where: ""` on the three Alerts, the CRD's default,
-which the chart doesn't render: an adoption deletes nothing it didn't last apply, so it stays. So:
+**What the upgrade changes on each live object.** Compared on 2026-11-17 against the chart's render:
 
-- **spec:** no change on any of the five, and `metadata.generation` stays 1. alert-provider sees no new
-  spec, and `status.hyperdxAlertId`, `hyperdxDashboardId` and state are kept.
+- **The three Alerts' `displayName` and `description`.** The objects on 057 carry the generator's
+  earlier wording, which named internal identifiers; the chart ships the generator's current,
+  generic text. Nothing else in their specs changes: metricRef, aggregation, labels, ratio,
+  threshold, thresholdType and interval are identical. `metadata.generation` goes from 1 to 2, and
+  alert-provider updates the HyperDX alert of the same CR (expected to keep `status.hyperdxAlertId`;
+  the post-check confirms it).
+- **The two Metrics' specs:** no change.
+- **`where: ""`** on the three Alerts, the CRD's default, which the chart doesn't render, stays: an
+  adoption deletes nothing it didn't last apply.
 - **labels added:** `app.kubernetes.io/part-of: krateo-observability`; `app.kubernetes.io/managed-by`
   (`Helm` from the upgrade itself, then `krateo-observability-defaults` once the controller
   reconciles); the controller's `krateo.io/composition-*` labels (`composition-id`,
   `composition-installed-version`, and the rest, as on the 26 default alerts).
 - **annotations added:** `meta.helm.sh/release-name: krateo-observability`,
   `meta.helm.sh/release-namespace: krateo-system`, and the controller's `krateo.io/traceparent`.
-- **kept:** `acmp.krateo.io/x5-slo: v1`, `kubectl.kubernetes.io/last-applied-configuration`, the
+- **kept:** the hand apply's extra label, `kubectl.kubernetes.io/last-applied-configuration`, the
   finalizer `observability.krateo.io/hyperdx-cleanup` and the status. Helm's merge removes only keys
   the release applied before, and it never applied these.
 
 After the roll, re-run the pre-check. Each object should name `krateo-observability/krateo-system`, and
-each Alert's `hyperdxAlertId` should be unchanged. To drop acmp's leftovers (optional, nothing
-selects on them):
+each Alert's `hyperdxAlertId` should be unchanged. To drop the hand apply's leftovers (optional,
+nothing selects on them), remove the extra label the pre-check showed, with
+`kubectl -n krateo-system label <the five objects> <that-label-key>-`, and the last-applied annotation:
 
 ```sh
-kubectl -n krateo-system label \
-  alerts.observability.krateo.io/cmp-slo-api-p95 \
-  alerts.observability.krateo.io/cmp-slo-api-error-ratio \
-  alerts.observability.krateo.io/cmp-slo-metrics-overflow \
-  metrics.observability.krateo.io/slo-span-calls \
-  metrics.observability.krateo.io/slo-span-duration \
-  acmp.krateo.io/x5-slo-
 kubectl -n krateo-system annotate \
   alerts.observability.krateo.io/cmp-slo-api-p95 \
   alerts.observability.krateo.io/cmp-slo-api-error-ratio \

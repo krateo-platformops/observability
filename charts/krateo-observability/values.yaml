@@ -64,9 +64,9 @@ defaultMetrics:
     type: gauge
     collectedBy: k8sclusterreceiver
     description: 1 while a container passes its readiness probe, 0 otherwise. otel-collector-deployment reports it every 30s and drops it for Job pods.
-  # The X5 SLO metrics (0.1.52): the spanmetrics connector's output in otel-collector-daemonset
-  # >= 0.1.26, read by the cmp-slo-* alerts below. Specs as krateo-acmp's
-  # assembly/slo/alerts/render.py renders them (b562e12); tests/x5-slo-defaults.py fails on drift.
+  # The SLO metrics (0.1.52): the spanmetrics connector's output in otel-collector-daemonset
+  # >= 0.1.26, read by the cmp-slo-* alerts below. Specs as the CMP team's SLO generator renders them
+  # (tests/fixtures/slo-objects-render.yaml); tests/slo-defaults.py fails on drift.
   - name: slo-span-calls
     metricName: traces.span.metrics.calls
     type: sum
@@ -149,8 +149,9 @@ defaultAlerts:
   # NAMES ARE PREFIXED sre- because Helm will not adopt a resource it does not already own: an
   # entry reusing the name of an alert someone hand-applied fails the upgrade outright with an
   # ownership error, which a draft of this set did against a hand-applied CR on a live cluster.
-  # The one exception is the X5 SLO set (cmp-slo-*, 0.1.52): it keeps the names acmp hand-applied on
-  # krateo-057, so those CRs, and the HyperDX alerts they own, are adopted rather than recreated.
+  # The one exception is the SLO set (cmp-slo-*, 0.1.52): it keeps the names of the SLO objects
+  # proven on krateo-057 on 2026-11-10, so those CRs, and the HyperDX alerts they own, are adopted
+  # rather than recreated.
   # docs/alerts.md has the adoption step.
   alerts:
     - name: sre-pod-crashloop
@@ -505,11 +506,11 @@ defaultAlerts:
       interval: 15m
       description: "The telemetry database's disk has less than 3 GiB free, and audit partitions must never be dropped to free it."
       runbook: "1. Confirm the disk is the problem. A Ready ClickHouse pod is not evidence of a healthy disk. The definitive symptom is Code: 243 or 'Not enough space' in the ClickHouse log (kubectl logs -n krateo-system -l clickhouse.altinity.com/chi=krateo-clickstack-clickhouse --tail=200). 2. Find and stop the source first, or the disk fills again within the hour: SELECT ServiceName, count() FROM default.otel_logs WHERE Timestamp > now() - INTERVAL 1 HOUR GROUP BY ServiceName ORDER BY 2 DESC LIMIT 10 (works with the shipped otelcollector credentials). Rule out your own diagnostic Jobs, whose output the collectors scrape back into otel_logs. 3. Make room. Expand the volume through the Installer CR, componentValues krateo-observability clickstack.clickhouse.cluster.spec.dataVolumeClaimSpec.resources.requests.storage, never by editing the PVC (the reconciler reverts it). Expansion is one-way; FileSystemResizePending clears when the pod restarts. Or, with an ops principal, drop the oldest partition of otel_logs or otel_traces. 4. NEVER drop a partition of krateo_audit, krateo_audit_seal or krateo_audit_worm: the audit trail is sealed, and removing rows is indistinguishable from tampering. If the audit tables filled the disk, escalate instead. Full runbook: docs/clickhouse-disk-full.md in krateo-platformops/observability."
-    # THE X5 SLO ALERTS (0.1.52), acmp's API objectives over the span metrics above, each judged on
-    # the last hour. Their specs are krateo-acmp's assembly/slo/alerts/render.py output at b562e12
-    # (targets from its targets.yaml), which acmp applied by hand on krateo-057 on 2026-11-10; the
-    # chart is now their only source. Keep them equal to tests/fixtures/x5-slo-render-acmp-b562e12.yaml:
-    # tests/x5-slo-defaults.py fails on any difference, so a target change lands in both. Names
+    # THE SLO ALERTS (0.1.52), the CMP API objectives over the span metrics above, each judged on
+    # the last hour. Their specs are the CMP team's SLO generator output, the objects proven on
+    # krateo-057 on 2026-11-10; the chart is now their only source. Keep them equal to
+    # tests/fixtures/slo-objects-render.yaml: tests/slo-defaults.py fails on any difference, so a
+    # target change lands in both. Names
     # unprefixed on purpose (see NAMES above). Core: silent while the API meets its objectives, and
     # on a cluster without snowplow traffic (an empty window is 0, and every one is `above`).
     # Needs alert-provider 0.2.68 (spec.description; metricRef and p95 since 0.2.51, ratio since
@@ -517,7 +518,7 @@ defaultAlerts:
     # krateo.sli.error stamped on the SLI spans by snowplow and the frontend.
     - name: cmp-slo-api-p95
       tier: core
-      displayName: API p95 latency above its objective (X5 api-p95)
+      displayName: API p95 latency above its objective
       metricRef: slo-span-duration
       aggregation: p95
       labels:
@@ -525,12 +526,12 @@ defaultAlerts:
       threshold: 500
       thresholdType: above
       interval: 1h
-      description: "snowplow's p95 response time over the last 1h is above the 500 ms objective (X5 api-p95). The alert's percentile interpolates inside histogram buckets; assembly/slo/slis.py reports the exact bucket that holds the p95."
+      description: "snowplow's p95 response time over the last 1h is above the 500 ms objective. The percentile is interpolated inside histogram buckets, so it can sit a little either side of the exact bucket that holds the p95."
     # The failing share: the 5xx-or-no-response calls (krateo.sli.error "true") over all of
-    # snowplow's calls. 4xx is not a failure (acmp's D3).
+    # snowplow's calls. A 4xx is not a failure.
     - name: cmp-slo-api-error-ratio
       tier: core
-      displayName: API error share above its objective (X5 api-error-ratio)
+      displayName: API error share above its objective
       metricRef: slo-span-calls
       aggregation: sum
       labels:
@@ -542,12 +543,12 @@ defaultAlerts:
       threshold: 0.001
       thresholdType: above
       interval: 1h
-      description: "The share of snowplow requests that failed (5xx or no response; 4xx is not a failure, D3) over the last 1h is above the 0.001 objective (X5 api-error-ratio)."
+      description: "The share of snowplow requests that failed (5xx or no response; a 4xx is not a failure) over the last 1h is above the 0.001 objective."
     # Any span-metrics row folded into the connector's cardinality overflow: the two SLIs above would
     # under-count without going NO DATA. Needs no target.
     - name: cmp-slo-metrics-overflow
       tier: core
-      displayName: SLI span metrics hit their cardinality cap (X5 SLIs unreliable)
+      displayName: SLI span metrics hit their cardinality cap (SLIs unreliable)
       metricRef: slo-span-calls
       aggregation: sum
       labels:
@@ -555,7 +556,7 @@ defaultAlerts:
       threshold: 1
       thresholdType: above
       interval: 1h
-      description: "The spanmetrics connector folded SLI span combinations into its overflow row: more label combinations than its cap (2,000 per service per agent per flush), most likely from new http.route values. Those calls no longer carry service.name, http.route or krateo.sli.error, so the X5 latency and error SLIs under-count without going NO DATA. Find the new routes in otel_traces and raise the cap or narrow the dimensions."
+      description: "The spanmetrics connector folded SLI span combinations into its overflow row: more label combinations than its cap (2,000 per service per agent per flush), most likely from new http.route values. Those calls no longer carry service.name, http.route or krateo.sli.error, so the latency and error SLIs under-count without going NO DATA. Find the new routes in otel_traces and raise the cap or narrow the dimensions."
     - name: sre-rbac-denied-burst
       tier: extended
       displayName: Authorization failures elevated
