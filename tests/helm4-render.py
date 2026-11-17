@@ -15,7 +15,7 @@ platform injects), this renders the chart with both binaries and checks:
   3. the two renders are the same object for object, field for field, except:
      - values that differ between two renders by the SAME binary (generated passwords), and
      - ALLOWED: ClickHouseCluster spec.settings.logger, present under Helm 4 only. It stays null in
-       values.yaml (no value renders as "no logger" in both versions); once Helm fixes #32132 the
+       values.yaml (no value renders as "no logger" in both versions); once Helm 4 changes this (helm/helm#32132) the
        difference goes away, and this check still passes.
 Values are never printed for a Secret (path only).
 
@@ -56,7 +56,8 @@ def render(helm, root, args):
                        capture_output=True, text=True)
     if r.returncode != 0:
         # The error names the template and the guard; it carries no value.
-        return None, r.stderr.strip().splitlines()[-1:] or ["(no stderr)"]
+        errors = [l for l in r.stderr.splitlines() if l.startswith("Error")]
+        return None, (errors or r.stderr.strip().splitlines()[-1:] or ["(no stderr)"])[0][:300]
     docs = {}
     for d in yaml.safe_load_all(r.stdout):
         if d:

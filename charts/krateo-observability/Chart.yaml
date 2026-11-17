@@ -263,7 +263,7 @@ type: application
 # only by the disabled bundled collector), and HyperDX has no checksum of the ConfigMap, so nothing
 # restarts. clickhouse.cluster.spec.settings.logger stays null: no value renders as "no logger" in
 # both versions, so under Helm 4 the ClickHouseCluster spec gets upstream's logger (100M x 10)
-# until Helm fixes #32132; check-helm4-render allows exactly that difference. The platform renders
+# until Helm 4 changes this (helm/helm#32132); check-helm4-render allows exactly that difference. The platform renders
 # with Helm 3.20 and sees only the two empty keys.
 version: 0.1.54
 appVersion: "3.5.0"

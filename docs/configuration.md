@@ -206,7 +206,7 @@ null in a parent chart's own `values.yaml` before the subchart's defaults merge 
 [helm/helm#32132](https://github.com/helm/helm/issues/32132)), so a null there no longer deletes the
 subchart's key. Since 0.1.54 `hyperdx.config.MONGO_URI` and `HYPERDX_OTEL_EXPORTER_TABLES_TTL` are
 empty strings, not null, and render the same in both. `settings.logger` stays null: under Helm 4 the
-ClickHouseCluster spec gets upstream's logger (information, 100M x 10) until Helm fixes #32132.
+ClickHouseCluster spec gets upstream's logger (information, 100M x 10) until Helm 4 changes this (helm/helm#32132).
 `check-helm4-render` renders the chart under both and allows only that difference.
 The `wait-for-mongodb-auth` init container must run the app's image; the render now fails if it
 doesn't.
