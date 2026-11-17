@@ -1,0 +1,11 @@
+# Decision-id-shaped tokens that are not decision ids, for hack/public-text-check.py.
+# One per line: <path> <token, exact case> <reason>. Only this pattern can be allowlisted.
+charts/krateo-slo-rollup/tests/e2e-kind.sh D1 shell variable: the fixture's third day (D3 + 2 days), a window edge
+charts/krateo-slo-rollup/tests/e2e-kind.sh D2 shell variable: the fixture's second day (D3 + 1 day), a window edge
+charts/krateo-slo-rollup/tests/e2e-kind.sh D3 shell variable: the fixture's first day, read from otel_metrics_sum
+tests/clickstack-upgrade-kind.py D401 pydocstyle rule code in a `noqa` comment
+tests/clickstack-upgrade-kind.py d1 Python variable: the first HyperDX dashboard the test creates
+tests/clickstack-upgrade-kind.py d2 Python variable: the second HyperDX dashboard the test creates
+tests/clickstack-upgrade-kind.py d3 Python variable: the third HyperDX dashboard the test creates
+charts/krateo-sse-proxy/Chart.yaml d3 part of the cluster name a0-openstack-d3
+docs/log.md d3 part of the cluster name a0-openstack-d3

@@ -1,4 +1,4 @@
-# X5 performance runs, krateo-057, 2026-11-10/11
+# Performance test runs, krateo-057, 2026-11-10/11
 
 The raw inputs behind the rows in [docs/SLO.md → Performance results](../../../docs/SLO.md#performance-results).
 
@@ -9,4 +9,4 @@ The raw inputs behind the rows in [docs/SLO.md → Performance results](../../..
 - `compute.py` sums buckets per window and reports calls, SLI errors, 5xx, availability, and the p50/p95 bucket.
 - `results.tsv` is its output.
 
-Run details (scenario, VUs, steps, loadgen commit) are acmp's: krateo-blueprints/krateo-acmp#21.
+Run details (scenario, VUs, steps, load generator) are the CMP team's.

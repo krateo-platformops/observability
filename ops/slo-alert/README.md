@@ -35,7 +35,7 @@ layout change returns one row per layout and reports no percentile. The rules,
 and why a window must reach past the first collector flush after the period,
 are in the file's header and in [`docs/SLO.md`](../../docs/SLO.md#slis).
 `tests/sli-span-metrics-docker.py` runs every statement against fixture rows
-and the committed X5 rows.
+and the committed rows of the 2026-11-10 performance test.
 
 ## SLO targets
 
@@ -60,7 +60,7 @@ Targets are **configuration, not code** — set them in `.env` (defaults below):
 
 ## Dashboards and alerts
 
-- **HyperDX "CMP performance SLOs (X5)"** (12 tiles) exists on krateo-057,
+- **HyperDX dashboard of the CMP performance SLOs** (12 tiles) exists on krateo-057,
   created through the HyperDX API; it is not shipped by a chart yet. A
   reconciled, chart-shipped form is being proposed.
 - **Portal SLOs tab** on `/observability` is being designed by frontend.

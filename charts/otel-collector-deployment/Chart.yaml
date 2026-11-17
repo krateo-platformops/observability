@@ -83,7 +83,9 @@ type: application
 # Go 1.26.11, govulncheck clean (otel-collector#30). Collector core stays v0.118.0, so no config key
 # changes. One behaviour change in the collector's own telemetry: a service.telemetry.resource
 # schema_url is now ignored instead of rejected (this chart sets none).
-version: 0.3.18
+# 0.3.19: comments only: neutral wording in comments (no internal ids or private repo
+# references); no rendered object changes.
+version: 0.3.19
 appVersion: "1.0.9"
 dependencies:
   - name: opentelemetry-collector

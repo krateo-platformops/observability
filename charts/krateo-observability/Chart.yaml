@@ -180,10 +180,10 @@ type: application
 # mongodb-hyperdx-credentials/uri is refused: roll 0.1.44 or 0.1.45 first. The guard reads that
 # Secret, not the MongoDBCommunity: the composition controller may get Secrets but not
 # MongoDBCommunity objects (installer, 2026-11-11). No restart: no pod reads either Secret.
-# 0.1.47: ClickHouse user usage_collector for acmp's cmp-usage-collector, and the database `cmp` it
-# writes to. ONE grant statement, exactly INSERT, CREATE TABLE ON cmp.health_records: the collector
-# creates its table with CREATE TABLE IF NOT EXISTS and inserts, and can't read, create a database or
-# touch `default`. The platform creates `cmp` with a ClickHouse startup script
+# 0.1.47: ClickHouse user usage_collector for the CMP team's cmp-usage-collector, and the database
+# `cmp` it writes to. ONE grant statement, exactly INSERT, CREATE TABLE ON cmp.health_records: the
+# collector creates its table with CREATE TABLE IF NOT EXISTS and inserts, and can't read, create a
+# database or touch `default`. The platform creates `cmp` with a ClickHouse startup script
 # (settings.extraConfig.startup_scripts, CREATE DATABASE IF NOT EXISTS cmp ENGINE = Atomic), which
 # runs as the server before its client ports open, on every start. Secret
 # clickhouse-usage-collector-credentials (username, password, password_sha256_hex) is generated and
@@ -250,7 +250,9 @@ type: application
 # unchanged), otel-collector-daemonset 0.1.26 (the span metrics), and krateo.sli.error stamped by
 # snowplow and the frontend. Adds 3 Alert and 2 Metric CRs (31 Alerts and 4 Metrics by default, 36
 # Alerts with the extended tier).
-version: 0.1.52
+# 0.1.53: comments only: neutral wording in comments (no internal ids or private repo
+# references); no rendered object changes.
+version: 0.1.53
 appVersion: "3.5.0"
 dependencies:
   - name: clickstack

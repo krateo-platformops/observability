@@ -111,7 +111,7 @@ about whether your cluster has that problem.
 | `sre-pod-evicted` | core | events | above 0 | 5m | 0 |
 | `sre-pod-sandbox-failure` | core | events | above 0 | 5m | 0 |
 | `sre-probe-failing` | core | events, liveness or startup probe event repeated 3+ times | above 5 | 15m | 1 (0 firing windows) |
-| `sre-container-not-ready` | core | metric `k8s.container.ready`, max per container | below 1 for 5 consecutive 1m windows | 1m | 1 firing run (acmp's test) |
+| `sre-container-not-ready` | core | metric `k8s.container.ready`, max per container | below 1 for 5 consecutive 1m windows | 1m | 1 firing run (the CMP team's test) |
 | `sre-job-failed` | core | events | above 0 | 15m | 0 |
 | `sre-volume-attach-failure` | core | events | above 3 | 15m | 218 |
 | `sre-pvc-provisioning-failure` | core | events | above 0 | 15m | 0 |
@@ -459,14 +459,14 @@ same week that leaves 1 firing window: snowplow unready for 2 minutes, with 25 r
 was nearly all of it: in the 7 days to 2026-11-09 on krateo-057, 160 of the 161 repeated probe events
 and all 5 firing windows. Each window was a short dip: snowplow unready for about 2 minutes in three
 rolls, about a dozen krateo-system and sre-* test pods unready together at 03:53–03:58 on 2026-11-08,
-and acmp's deliberate test. A count of events can't tell a 2-minute dip in a roll from a container
+and the CMP team's deliberate test. A count of events can't tell a 2-minute dip in a roll from a container
 that stays out of its Service, and it can't name the container.
 
 `sre-container-not-ready` watches the readiness metric instead, one series per namespace, pod and
 container (`groupBy`, alert-provider 0.2.64). It fires when a container's highest readiness value
 stays below 1 for 5 consecutive 1-minute windows (`consecutiveWindows: 5`), and HyperDX's `Group:` line
 names the container. A window with no points restarts the count, so a deleted pod stops counting
-rather than firing. Over the same 7 days it would have fired once, for acmp's test pod (10 minutes
+rather than firing. Over the same 7 days it would have fired once, for the CMP team's test pod (10 minutes
 unready), and never for a roll.
 
 Two things make the metric usable, both from otel-collector-deployment 0.3.15:

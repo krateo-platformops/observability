@@ -4,10 +4,11 @@
 Runs every statement of the file, exactly as committed, with clickhouse-client's --param_start /
 --param_end, in a throwaway ClickHouse of the version krateo-057 runs. otel_metrics_sum and
 otel_metrics_histogram come from the DDL the daily rollup is tested against
-(charts/krateo-slo-rollup/tests/otel-metrics-tables.sql), minus its TTL: the replayed X5 rows are
-from 2026-11-10 and would otherwise expire under the test. The suite runs twice, once with that DDL
-as is (TimeUnix DateTime) and once with TimeUnix/StartTimeUnix as DateTime64(9), the precision the
-X5 export carries, so the queries are proven against either.
+(charts/krateo-slo-rollup/tests/otel-metrics-tables.sql), minus its TTL: the replayed
+performance-test rows are from 2026-11-10 and would otherwise expire under the test. The suite runs
+twice, once with that DDL as is (TimeUnix DateTime) and once with TimeUnix/StartTimeUnix as
+DateTime64(9), the precision the performance-test export carries, so the queries are proven against
+either.
 
 Cases (each in its own window, so no case sees another's rows):
   availability   per class, known calls/errors; a 4xx with krateo.sli.error false or absent is not
@@ -20,16 +21,17 @@ Cases (each in its own window, so no case sees another's rows):
   ui names       only the four UI latency interactions are in the UI query (not krateo.widget.fetch)
   layout         two ExplicitBounds in one window return two rows, one per layout
   edges          TimeUnix == start is in, TimeUnix == end is out
-  X5 replay      ops/perf/x5-2026-11-10's committed rows reproduce docs/SLO.md's X5 rows
+  perf replay    ops/perf/2026-11-10's committed rows reproduce docs/SLO.md's performance rows
 
 The 30-day statements (30d-1..3) read krateo_slo_daily, created from the CREATE TABLE in
 charts/krateo-slo-rollup/templates/configmap-scripts.yaml (the chart's real DDL, rollupTable's
 default name filled in) minus its TTL clause: the fixture days are fixed dates (2026-05..10), most
 already past `TTL day + ttlDays` (40 by default) and the rest soon, so a TTL merge could delete them
-under the test, as the 7-day TTL would the replayed X5 rows. (The clause is also templated on
-rollup.ttlDays, which this test does not render.) Merges are stopped, so two refreshes of one day
-stay two physical rows and only FINAL can pick the newer. Rows are inserted directly, as the view
-writes them (a histogram's calls is 0; one fixture breaks that on purpose to show the filter).
+under the test, as the 7-day TTL would the replayed performance-test rows. (The clause is also
+templated on rollup.ttlDays, which this test does not render.) Merges are stopped, so two refreshes
+of one day stay two physical rows and only FINAL can pick the newer. Rows are inserted directly, as
+the view writes them (a histogram's calls is 0; one fixture breaks that on purpose to show the
+filter).
 
 Cases (each in its own month):
   30d-1          availability, error_budget_calls, budget_remaining (a class that overspent reads
@@ -69,7 +71,7 @@ QUERIES = "ops/slo-alert/sli-span-metrics.sql"
 DDL = "charts/krateo-slo-rollup/tests/otel-metrics-tables.sql"
 ROLLUP_TEMPLATE = "charts/krateo-slo-rollup/templates/configmap-scripts.yaml"
 ROLLUP_VALUES = "charts/krateo-slo-rollup/values.yaml"
-X5_ROWS = "ops/perf/x5-2026-11-10/span-metrics-rows.jsonl"
+PERF_ROWS = "ops/perf/2026-11-10/span-metrics-rows.jsonl"
 STATEMENTS = ["availability", "api_latency", "ui_latency", "widget_fetch", "burn_rate",
               "30d-1", "30d-2", "30d-3"]
 LATENCY = ("api_latency", "ui_latency", "30d-2", "30d-3")
@@ -400,11 +402,11 @@ ROLLUP_CASES = {
 }
 
 
-# docs/SLO.md "Performance results", from the committed X5 rows (ops/perf/x5-2026-11-10). Calls rows
-# are the histogram rows' Count: the connector derives both metrics from the same spans, so a row's
-# calls Value equals its Count. Windows are compute.py's; none ends on a flush, so [start, end)
-# selects the same rows as its inclusive range.
-X5 = [
+# docs/SLO.md "Performance results", from the committed performance-test rows (ops/perf/2026-11-10).
+# Calls rows are the histogram rows' Count: the connector derives both metrics from the same spans,
+# so a row's calls Value equals its Count. Windows are compute.py's; none ends on a flush, so
+# [start, end) selects the same rows as its inclusive range.
+PERF_RUNS = [
     ("A steps 1-3, API baseline", "2026-11-10 13:56:52", "2026-11-10 14:17:50",
      {"availability:snowplow": (129939, 0, "100.000"), "api_latency": [((0, 25), (0, 25), 1)]}),
     ("A all steps, API stress", "2026-11-10 13:56:52", "2026-11-10 14:28:00",
@@ -481,9 +483,9 @@ def check_cases(r, label):
     return fails
 
 
-def check_x5(r, label):
+def check_perf(r, label):
     fails = 0
-    for name, start, end, expect in X5:
+    for name, start, end, expect in PERF_RUNS:
         for which, want in expect.items():
             if which.startswith("availability:"):
                 svc = which.split(":", 1)[1]
@@ -499,7 +501,7 @@ def check_x5(r, label):
                 want = [want]
             ok = same(have, want)
             fails += not ok
-            print(f"{'ok  ' if ok else 'FAIL'} [{label}] X5 {name} / {which}: got {have}"
+            print(f"{'ok  ' if ok else 'FAIL'} [{label}] perf {name} / {which}: got {have}"
                   + ("" if ok else f", expected {want}"))
     return fails
 
@@ -550,9 +552,9 @@ def load_rollup(port, ddl):
     return db, 0 if ok else 1
 
 
-def x5_rows(root):
+def perf_rows(root):
     sums, hists = [], []
-    for line in (root / X5_ROWS).read_text().splitlines():
+    for line in (root / PERF_ROWS).read_text().splitlines():
         x = json.loads(line)
         buckets = [int(v) for v in x["BucketCounts"]]
         hists.append(hist(x["ts"], x["ServiceName"], x["sn"], buckets, bounds=x["ExplicitBounds"],
@@ -569,7 +571,7 @@ def main():
         return 1
     daily_ddl = rollup_ddl(root)
     ddl = (root / DDL).read_text()
-    ddl = re.sub(r"^TTL .*\n", "", ddl, flags=re.M)  # replayed X5 rows are older than the TTL
+    ddl = re.sub(r"^TTL .*\n", "", ddl, flags=re.M)  # the replayed rows are older than the TTL
     if "TTL" in ddl:
         print(f"FAIL could not strip the TTL from {DDL}")
         return 1
@@ -584,7 +586,7 @@ def main():
 
     sums = [s for c in CASES.values() for s in c[2]]
     hists = [h for c in CASES.values() for h in c[3]]
-    xs, xh = x5_rows(root)
+    xs, xh = perf_rows(root)
 
     port = free_port()
     name = f"sli-span-metrics-test-{port}"
@@ -613,7 +615,7 @@ def main():
             print(f"--- {db}: TimeUnix {types}, {len(sums) + len(xs)} calls rows, {len(hists) + len(xh)} histogram rows")
             r = Runner(name, db, stmts)
             fails += check_cases(r, db)
-            fails += check_x5(r, db)
+            fails += check_perf(r, db)
         db, f = load_rollup(port, daily_ddl)
         fails += f + check_rollup(Runner(name, db, stmts))
     finally:

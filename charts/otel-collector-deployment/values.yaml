@@ -180,10 +180,10 @@ opentelemetry-collector:
         # 30s, not 60s (Diego, 2026-11-08). The per-pod "not Ready for 5 minutes" alert evaluates
         # 1-minute buckets, and HyperDX (2.35) checks [t-1m, t) at t+0.4s with no evaluation delay.
         # At 60s every point is stamped :59 and lands ~4s later, so every bucket was EMPTY when
-        # checked, and under `below 1` an empty bucket fires an ungrouped alert (measured by acmp on
-        # krateo-057, alert-provider 0.2.64). At 30s each minute also holds a :29 point that is
-        # already stored. Cost measured on krateo-057: +125,781 rows/hour, +24% of otel_metrics_gauge
-        # rows, ~+0.4 GiB over the 7-day TTL.
+        # checked, and under `below 1` an empty bucket fires an ungrouped alert (measured by the CMP
+        # team on krateo-057, alert-provider 0.2.64). At 30s each minute also holds a :29 point that
+        # is already stored. Cost measured on krateo-057: +125,781 rows/hour, +24% of
+        # otel_metrics_gauge rows, ~+0.4 GiB over the 7-day TTL.
         collection_interval: 30s
         node_conditions_to_report: [Ready, MemoryPressure, DiskPressure, PIDPressure]
         allocatable_types_to_report: [cpu, memory, ephemeral-storage]

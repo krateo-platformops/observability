@@ -5,7 +5,7 @@
 -- Availability, latency (API and UI) and the error-budget burn rate are NOT
 -- here: their single definition is sli-span-metrics.sql, over the span metrics
 -- (traces.span.metrics.calls / .duration) that the cmp-slo-* alerts and the
--- HyperDX "CMP performance SLOs (X5)" dashboard read. The otel_traces scans
+-- HyperDX dashboard of the CMP performance SLOs read. The otel_traces scans
 -- that used to live here were a second, competing definition and are gone.
 --
 -- The statement is standalone: paste it into a HyperDX chart (SQL mode) or run

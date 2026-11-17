@@ -1,0 +1,51 @@
+# This repository is public: no internal work-item or decision ids, no private repository name,
+# issue numbers or paths, no internal team short name (hack/public-text-check.py has the list).
+# SLO targets may be stated. Checks every tracked file's content and path; on a pull request
+# also its title, body and commit messages. Justified decision-id-shaped tokens that are not
+# decision ids live in hack/public-text-allowlist.txt, each with its reason.
+#
+# It is a separate workflow on purpose. lint.yaml is the org-wide canonical chart-repo lint,
+# identical across every krateo-* chart repo.
+
+name: check-public-text
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  public-text:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Collect the pull request's title, body and commit messages
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/public-text"
+          printf '%s\n' "$PR_TITLE" > "$RUNNER_TEMP/public-text/pr-title.txt"
+          printf '%s\n' "$PR_BODY" > "$RUNNER_TEMP/public-text/pr-body.txt"
+          git log --format='%H%n%B' "$BASE_SHA..$HEAD_SHA" > "$RUNNER_TEMP/public-text/commits.txt"
+      - name: Check tracked files, paths and pull request text
+        run: |
+          set -euo pipefail
+          args=()
+          for f in "$RUNNER_TEMP"/public-text/*.txt; do
+            [ -f "$f" ] && args+=(--text "$f")
+          done
+          python3 hack/public-text-check.py . "${args[@]}"

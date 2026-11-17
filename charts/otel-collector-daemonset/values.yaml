@@ -378,28 +378,29 @@ opentelemetry-collector:
         metrics:
           metric:
             - 'IsMatch(name, "^k8s\\.volume\\.") and resource.attributes["k8s.volume.type"] != "persistentVolumeClaim"'
-      # SLO SPAN METRICS (D5): the spans the performance SLOs are computed from, and nothing else.
+      # SLO SPAN METRICS: the spans the performance SLOs are computed from, and nothing else.
       # DROPS what matches (conditions are ORed). The first keeps only snowplow SERVER spans (the
       # API SLI) and krateo-frontend RUM spans re-exported by snowplow's rum-ingest (the UI SLIs);
       # every other service and snowplow's client/internal spans never reach the connector, which
       # is what keeps the metric series bounded.
-      # The second: SSE stream and the RUM ingest itself, excluded from the SLIs per X5 (acmp).
+      # The second: SSE stream and the RUM ingest itself, excluded from the SLIs by the CMP team's
+      # performance SLOs.
       # Done HERE rather than in the alert because alert-provider labels match data-point
       # Attributes by exact value only, so a Metric CR cannot say "route is NOT x". The strings
       # are snowplow's templates exactly: the path half of mux patterns "GET /refreshes" /
       # "POST /refreshes" (main.go) and rum.Path "/telemetry/v1/traces" (rum/handler.go).
       # snowplow gives the ingest route no Server span today (tracing/server.go unspannedRoutes),
       # so that half is a guard: it also covers a RUM krateo.widget.fetch naming it.
-      # The third: abandoned interactions are EXCLUDED from the SLIs per acmp's X5 span contract,
-      # not counted as errors. They stay in otel_traces (this pipeline gets its own copy of each
-      # span). acmp's abandoned_flag_selfcheck watches the abandoned share against its 7-day
-      # baseline, so a frontend bug that marks real slowness as abandoned cannot silently improve
-      # p95. SNOWPLOW DEPENDENCY: snowplow PR #1061 (Fixes #1060, in review, expected in snowplow
-      # 1.12.65) forwards the key only as a typed bool `true` (AnyValue_BoolValue), and only on
-      # krateo.composition.open, krateo.form.submit and krateo.page.publish; it drops false,
-      # strings, numbers and arrays. The comparison is against the BOOL true, so it matches exactly
-      # what snowplow forwards. Until that release no span carries the key and this rule matches
-      # nothing, which is harmless.
+      # The third: abandoned interactions are EXCLUDED from the SLIs per the CMP team's span
+      # contract for the performance SLOs, not counted as errors. They stay in otel_traces (this
+      # pipeline gets its own copy of each span). The CMP team's abandoned-flag self-check watches
+      # the abandoned share against its 7-day baseline, so a frontend bug that marks real slowness
+      # as abandoned cannot silently improve p95. SNOWPLOW DEPENDENCY: snowplow PR #1061 (Fixes
+      # #1060, in review, expected in snowplow 1.12.65) forwards the key only as a typed bool `true`
+      # (AnyValue_BoolValue), and only on krateo.composition.open, krateo.form.submit and
+      # krateo.page.publish; it drops false, strings, numbers and arrays. The comparison is against
+      # the BOOL true, so it matches exactly what snowplow forwards. Until that release no span
+      # carries the key and this rule matches nothing, which is harmless.
       # error_mode ignore: these conditions only compare fields and cannot error in practice; if one
       # ever did, the span would be KEPT, and the connector's aggregation_cardinality_limit below
       # still caps what that can cost.
@@ -442,7 +443,7 @@ opentelemetry-collector:
             statements:
               - 'keep_keys(attributes, ["service.name"])'
       # krateo.sli.error, the SLI's error flag, as an EXACT-VALUE attribute ("true"/"false") because
-      # alert-provider labels cannot express a numeric range (>= 500). The rule (D3: 4xx is NOT an
+      # alert-provider labels cannot express a numeric range (>= 500). The rule (a 4xx is NOT an
       # error):
       #   "true"  when http.response.status_code >= 500;
       #   "true"  when the span has NO http.response.status_code and its status is ERROR (no
@@ -808,7 +809,7 @@ opentelemetry-collector:
                 default_value: ""
               - key: http.method
                 default_value: ""
-      # SLO SPAN METRICS (D5). Turns the spans kept by filter/slo-spans into a call counter and a
+      # SLO SPAN METRICS. Turns the spans kept by filter/slo-spans into a call counter and a
       # duration histogram, written by the SAME `clickhouse` exporter as every other metric, so they
       # land in otel_metrics_sum / otel_metrics_histogram. `span_metrics` is the name otelcol-contrib
       # 0.158.0 registers (`spanmetrics` survives only as a deprecated alias) -- read from
@@ -853,7 +854,7 @@ opentelemetry-collector:
           # Fixed for a p95 that may sit anywhere from 50 ms to 10 s; NOT tuned to any target (the
           # targets are set at deploy time and never committed). The bucket bounds land in
           # ExplicitBounds as [25, 50, ..., 10000] (ms), plus the implicit +Inf bucket.
-          # 2000ms (0.1.26, acmp#21): the UI page-load objective is p95 <= 2000 ms, and without a
+          # 2000ms (0.1.26): the UI page-load objective is p95 <= 2000 ms, and without a
           # 2000 boundary a p95 between 1500 and 2500 ms could never be judged against it. A bucket
           # at an objective's boundary is the exception to "not tuned to any target": it doesn't
           # tune, it makes the objective decidable. Cost: one more count per histogram row.
@@ -969,7 +970,7 @@ opentelemetry-collector:
           # snowplow-pod guess on browser spans, which snowplow forwards.
           processors: [memory_limiter, k8sattributes, transform/browser-resource, transform, batch]
           exporters: [loadbalancing]
-        # SLO SPAN METRICS (D5): a SECOND consumer of the same otlp receiver. A receiver fans out to
+        # SLO SPAN METRICS: a SECOND consumer of the same otlp receiver. A receiver fans out to
         # every pipeline that names it, each getting its own copy, so the `traces` pipeline above is
         # byte-identical and every span still reaches otel_traces. This one keeps only the SLO spans
         # (filter first, so everything after it sees a handful of spans), redacts like `traces` does
