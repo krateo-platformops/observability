@@ -305,6 +305,12 @@ Wraps the same upstream chart in `daemonset` mode, stock
   (`jaeger-compact`, `jaeger-thrift`, `jaeger-grpc`, `zipkin`) are `enabled: false`. Ports and
   receivers go together: a receiver added that listens needs its port enabled;
   `tests/collector-helm4-render.py` fails otherwise.
+- **No unused receivers** (0.1.35): upstream's default `prometheus` receiver (a self-scrape of
+  the collector's own telemetry on `:8888`, named by no pipeline) is left out the same way, while
+  it holds upstream's default. To scrape with it, set `config.receivers.prometheus` to your own
+  scrape config and add `prometheus` to a pipeline's receivers: any value other than upstream's
+  default is kept. `prometheus/agentgateway` is unaffected. `tests/collector-helm4-render.py`
+  fails on a declared receiver that no pipeline names, in every collector chart.
 - `presets`: `logsCollection` (without collector logs), `hostMetrics`,
   `kubernetesAttributes` (with `extractAllPodLabels`), `kubeletMetrics`.
 - `config.receivers`: `filelog` with a container parser + multiline recombine;

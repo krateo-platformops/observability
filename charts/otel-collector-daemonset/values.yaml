@@ -56,9 +56,10 @@ opentelemetry-collector:
   # as otel-collector-deployment and otel-collector-tailsampling do. The config below is still the
   # place to set or override anything (componentValues opentelemetry-collector.config.*): the
   # template takes it as Helm merged it, upstream's defaults included, and builds it with upstream's
-  # own config template. It leaves out upstream's default jaeger and zipkin receivers while they still
-  # hold upstream's default value (templates/_collector-config.tpl); a null here would not, because
-  # Helm 4.2 and later drop a parent chart's own nulls. Same ConfigMap name as before.
+  # own config template. It leaves out upstream's default jaeger, prometheus (its self-scrape) and
+  # zipkin receivers, none named by a pipeline, while they still hold upstream's default value
+  # (templates/_collector-config.tpl); a prometheus receiver of your own is kept. A null would not,
+  # because Helm 4.2 and later drop a parent chart's own nulls. Same ConfigMap name as before.
   configMap:
     create: false
     existingName: '{{ include "otel-collector-daemonset.configMapName" . }}'

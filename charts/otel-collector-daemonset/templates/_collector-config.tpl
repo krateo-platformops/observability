@@ -2,8 +2,8 @@
 This chart renders the collector's ConfigMap itself (configmap.yaml), and the upstream
 opentelemetry-collector subchart mounts it (values.yaml: configMap.create false,
 configMap.existingName), as otel-collector-deployment and otel-collector-tailsampling do. Why: to
-leave out upstream's default jaeger and zipkin receivers, which this agent never runs. A `null` in
-values.yaml cannot do it: Helm 4.2 and later drop a parent chart's own nulls before the subchart's
+leave out upstream's default jaeger, prometheus and zipkin receivers, which this agent never runs.
+A `null` in values.yaml cannot do it: Helm 4.2 and later drop a parent chart's own nulls before the subchart's
 defaults merge in (upstream Helm change 31979), so under Helm 4 they would come back.
 
 Every template here takes the SUBCHART's context: (index .Subcharts "opentelemetry-collector") from
@@ -14,11 +14,14 @@ reach these, and both reach upstream's own helpers.
 
 {{/*
 Upstream 0.170.0's default config entries this agent does not run (upstream values.yaml,
-config.receivers.jaeger at lines 236-243 and config.receivers.zipkin at lines 259-260). No pipeline
-names them, so the collector never started them, and their ports are closed (values.yaml ports).
-Leaving them declared would be a trap: name one in a pipeline and it starts and binds inside the
-pod, but no port reaches it. Every other upstream default stays, the prometheus self-scrape
-included.
+config.receivers.jaeger at lines 236-243, config.receivers.prometheus at lines 251-258 and
+config.receivers.zipkin at lines 259-260). No pipeline names them, so the collector never started
+them. jaeger's and zipkin's ports are closed (values.yaml ports): leaving them declared would be a
+trap, since a pipeline that names one starts a receiver that binds inside the pod but no port
+reaches. prometheus is upstream's self-scrape of the collector's own telemetry on :8888; nothing
+here consumes it. A prometheus receiver set under config (a scrape config of your own, as in the
+Prometheus-to-OTLP procedure in docs/configuration.md) differs from this default and is kept;
+prometheus/agentgateway is a different id and is never touched.
 
 Each is left out of the config only while it still holds exactly upstream's default, i.e. nobody
 set it: a value set under opentelemetry-collector.config.<path> is kept. If a later upstream version
@@ -35,6 +38,15 @@ tests/collector-helm4-render.py fails on it.
         endpoint: ${env:MY_POD_IP}:14268
       thrift_compact:
         endpoint: ${env:MY_POD_IP}:6831
+- path: [receivers, prometheus]
+  default:
+    config:
+      scrape_configs:
+        - job_name: opentelemetry-collector
+          scrape_interval: 10s
+          static_configs:
+            - targets:
+                - ${env:MY_POD_IP}:8888
 - path: [receivers, zipkin]
   default:
     endpoint: ${env:MY_POD_IP}:9411

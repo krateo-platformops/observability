@@ -181,7 +181,14 @@ type: application
 # later names one cannot start a receiver no port reaches. A value set at either path is kept.
 # Every other receiver stays, the prometheus self-scrape included; otlp 4317/4318 stay on all three.
 # The config changes by those two receivers only, so checksum/config changes and the pods roll once.
-version: 0.1.34
+# 0.1.35: upstream's default prometheus receiver, a self-scrape of the collector's own telemetry
+# on :8888, is left out of the config too, the same way: declared but named by no pipeline, so the
+# agent never started it. Only while it still equals upstream's default: a prometheus receiver set
+# under config (a scrape config of your own) is kept, and prometheus/agentgateway is a different id.
+# Template only, no values change. The config loses that one receiver, so checksum/config changes
+# and the pods roll once. tests/collector-helm4-render.py now fails, in every collector chart, on
+# a declared receiver no pipeline names, or an extension missing from service.extensions.
+version: 0.1.35
 appVersion: "0.158.0"
 dependencies:
   - name: opentelemetry-collector
