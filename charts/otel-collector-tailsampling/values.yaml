@@ -31,11 +31,11 @@ opentelemetry-collector:
     enabled: true
     type: ClusterIP
     clusterIP: None
-  # OTLP/gRPC only. The daemonset is the only sender, and it speaks gRPC.
+  # OTLP/gRPC only. The daemonset is the only sender, and it speaks gRPC. (otlp's hostPort, 4317 by
+  # upstream default, is not set to anything here: upstream writes a hostPort only in daemonset mode.)
   ports:
     otlp:
       enabled: true
-      hostPort: null
     otlp-http:
       enabled: false
     jaeger-compact:
@@ -77,16 +77,32 @@ opentelemetry-collector:
   readinessProbe:
     timeoutSeconds: 5
     failureThreshold: 3
+  # THIS CHART RENDERS THE COLLECTOR'S CONFIGMAP (templates/configmap.yaml), and upstream mounts it.
+  # The config below is still the place to set or override anything (opentelemetry-collector.config.*):
+  # the template takes it as Helm merged it, upstream's defaults included, and builds it with
+  # upstream's own config template. What changes is how upstream's default jaeger, prometheus and
+  # zipkin receivers, otlp's http protocol and its default logs and metrics pipelines are left out.
+  # They used to be set to null here, but Helm 4.2 and later drop a parent chart's own nulls before
+  # the subchart's defaults merge in (upstream Helm change 31979), so they came back. The template now
+  # leaves each out while it still holds upstream's default value; set one under config and it is
+  # kept (templates/_collector-config.tpl). Same name, same text: the ConfigMap is the one upstream
+  # rendered, and checksum/config still hashes it, so pods roll on a config change.
+  configMap:
+    create: false
+    existingName: '{{ include "otel-collector-tailsampling.configMapName" . }}'
+  # Upstream's own checksum/config hashes its configmap.yaml, which renders nothing now; this one
+  # hashes this chart's ConfigMap instead (tpl'd by upstream in its own context).
+  enableConfigChecksumAnnotation: false
+  podAnnotations:
+    checksum/config: '{{ include "otel-collector-tailsampling.configMap" . | sha256sum }}'
   config:
+    # OTLP/gRPC in, nothing else: upstream's default jaeger, prometheus and zipkin receivers and
+    # otlp's http protocol are left out (templates/_collector-config.tpl).
     receivers:
-      jaeger: null
-      zipkin: null
-      prometheus: null
       otlp:
         protocols:
           grpc:
             endpoint: ${env:MY_POD_IP}:4317
-          http: null
     processors:
       memory_limiter:
         check_interval: 5s
@@ -285,9 +301,9 @@ opentelemetry-collector:
           max_interval: 30s
           max_elapsed_time: 300s
     service:
+      # Traces only: upstream's default logs and metrics pipelines are left out
+      # (templates/_collector-config.tpl).
       pipelines:
-        logs: null
-        metrics: null
         traces:
           receivers: [otlp]
           processors: [memory_limiter, tail_sampling, batch]

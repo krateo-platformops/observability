@@ -87,7 +87,16 @@ type: application
 # references); no rendered object changes.
 # 0.3.20: comments only: neutral wording (no internal work-item or plan ids);
 # no rendered object changes.
-version: 0.3.20
+# 0.3.21: the chart renders the collector's ConfigMap itself (templates/configmap.yaml) and the
+# upstream subchart mounts it (configMap.create false + configMap.existingName). values.yaml used
+# to drop upstream's default jaeger, otlp, prometheus and zipkin receivers and its traces pipeline
+# with null; Helm 4.2 and later drop a parent chart's nulls before the subchart's defaults merge
+# in (upstream Helm change 31979), so under Helm 4 they came back. The template now leaves each out
+# while it holds upstream's default; no null is left in values.yaml. Under Helm 3 the render is the
+# same object for object, ConfigMap name, labels and checksum/config value included, so pods do
+# not restart; Helm 4 renders the same. Overrides under opentelemetry-collector.config keep their
+# meaning. tests/collector-helm4-render.py.
+version: 0.3.21
 appVersion: "1.0.9"
 dependencies:
   - name: opentelemetry-collector

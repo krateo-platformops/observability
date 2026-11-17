@@ -10,6 +10,12 @@
 # here (the same as in the release notes). The repo's other workflows use azure/setup-helm, which
 # installs one Helm on PATH; this one needs two side by side.
 #
+# The same holds for the collector charts: tests/collector-helm4-render.py renders
+# otel-collector-deployment, otel-collector-tailsampling and otel-collector-daemonset under both, and
+# fails on any difference, on an upstream default receiver or pipeline the chart does not run (the
+# wrappers used to drop those with nulls, which Helm 4 no longer applies), or on a pod template
+# whose checksum/config does not follow the config.
+#
 # It is a separate workflow on purpose. lint.yaml is the org-wide canonical chart-repo lint,
 # identical across every krateo-* chart repo.
 
@@ -19,14 +25,22 @@ on:
   pull_request:
     paths:
       - "charts/krateo-observability/**"
+      - "charts/otel-collector-deployment/**"
+      - "charts/otel-collector-tailsampling/**"
+      - "charts/otel-collector-daemonset/**"
       - "tests/helm4-render.py"
+      - "tests/collector-helm4-render.py"
       - ".github/ci/injected-global.yaml"
       - ".github/workflows/check-helm4-render.yaml"
   push:
     branches: [main]
     paths:
       - "charts/krateo-observability/**"
+      - "charts/otel-collector-deployment/**"
+      - "charts/otel-collector-tailsampling/**"
+      - "charts/otel-collector-daemonset/**"
       - "tests/helm4-render.py"
+      - "tests/collector-helm4-render.py"
       - ".github/ci/injected-global.yaml"
   workflow_dispatch:
 
@@ -69,5 +83,19 @@ jobs:
       - name: Render under both and compare
         run: >-
           python3 tests/helm4-render.py .
+          "$RUNNER_TEMP/helm3/linux-amd64/helm"
+          "$RUNNER_TEMP/helm4/linux-amd64/helm"
+      - name: Build the collector charts' dependency
+        if: ${{ !cancelled() }}
+        run: |
+          helm3="$RUNNER_TEMP/helm3/linux-amd64/helm"
+          "$helm3" repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+          for chart in otel-collector-deployment otel-collector-tailsampling otel-collector-daemonset; do
+            "$helm3" dependency build "charts/$chart"
+          done
+      - name: Render the collector charts under both and compare
+        if: ${{ !cancelled() }}
+        run: >-
+          python3 tests/collector-helm4-render.py .
           "$RUNNER_TEMP/helm3/linux-amd64/helm"
           "$RUNNER_TEMP/helm4/linux-amd64/helm"

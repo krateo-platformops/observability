@@ -146,10 +146,10 @@ sse-proxy can resolve `krateo-clickstack-clickhouse-clickhouse-headless`.
 A single-replica `opentelemetry-collector` in `deployment` mode running the custom
 `krateo-otel-collector` image. Pipelines: `logs` (`k8sobjects` Events →
 `memory_limiter, k8sattributes, resource, compositionresolver, transform, batch` → ClickHouse) and
-`metrics` (`k8s_cluster` → ClickHouse); `traces: null`. The `compositionresolver` processor
+`metrics` (`k8s_cluster` → ClickHouse); no `traces` pipeline. The `compositionresolver` processor
 stamps `krateo.io/composition-id`. It ships its own ClusterRole (read on K8s workloads + `get`
 on the Krateo CR groups) and pulls ClickHouse creds from the `otel-clickhouse-credentials`
-Secret via `extraEnvs`. A Prometheus→OTLP bridge is scaffolded but **nulled by default** (the
+Secret via `extraEnvs`. A Prometheus→OTLP bridge is scaffolded but **off by default** (the
 minimal collector image has no `prometheus` receiver — see
 [configuration](./configuration.md)).
 

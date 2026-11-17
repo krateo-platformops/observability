@@ -250,15 +250,23 @@ All under `opentelemetry-collector:` (the upstream dep):
   `widgets.templates.krateo.io`, `deployment.krateo.io`, `core.krateo.io`) — needed so
   `compositionresolver` can resolve an involvedObject to its owning composition.
 - `presets` all disabled (the chart hand-rolls `config`).
-- `config.receivers`: `k8sobjects` (watch Events) + `k8s_cluster` (60s);
-  `jaeger`/`otlp`/`zipkin`/`prometheus` are **nulled**. The `prometheus` null is
-  load-bearing: the minimal `krateo-otel-collector` image compiles in only
+- **The chart renders the collector's ConfigMap** (`templates/configmap.yaml`, 0.3.21) and
+  upstream mounts it (`configMap.create: false`, `configMap.existingName`). It takes
+  `config` as Helm merged it, upstream's defaults included, leaves out upstream's default
+  receivers and pipelines it does not run, and builds the result with upstream's own config
+  template; `checksum/config` hashes it. Override `config.*` as before.
+- `config.receivers`: `k8sobjects` (watch Events) + `k8s_cluster` (30s);
+  upstream's default `jaeger`/`otlp`/`zipkin`/`prometheus` receivers and its `traces`
+  pipeline are **left out** while they hold upstream's default value (no `null`: Helm 4 no
+  longer applies a parent chart's nulls to a subchart, upstream Helm change 31979). Leaving
+  out `prometheus` is load-bearing: the minimal `krateo-otel-collector` image compiles in only
   `k8sobjects`+`k8s_cluster`, and the collector type-validates every *declared* receiver —
   declaring `prometheus` crashloops the default install.
 - **Prometheus→OTLP bridge (scaffolded, off):** `collector.prometheusScrape.enabled` is a
   MARKER only. Enabling the bridge is a three-part change: (1) a collector image built WITH
-  the prometheus receiver, (2) restore the scrape config preserved in comments under
-  `config.receivers`, (3) add `prometheus` to the metrics pipeline receivers.
+  the prometheus receiver, (2) set `config.receivers.prometheus` to the scrape config preserved
+  in comments there (any value other than upstream's default is kept), (3) add `prometheus` to
+  the metrics pipeline receivers.
 - `config.processors`: `memory_limiter` (75% / 20% spike), `k8sattributes` (metadata + all
   pod labels), `resource` (inserts `telemetry.source: k8s-events`), `compositionresolver`
   (`cache_ttl 5m`, `negative_cache_ttl 30s`, `label_key: krateo.io/composition-id`), `batch`.
@@ -414,6 +422,11 @@ made at the gateway: agentgateway decides sampling when a request arrives, befor
   | `audited-write` | any trace with a span carrying `krateo.audit.recorded = true` (installer#415): a request that wrote an audit record, so the audit view's trace link resolves (within the 7-day TTL) |
   | `sample-5pct` | 5% of what's left, hashed on TraceId |
 
+- **Config.** OTLP/gRPC in, one `traces` pipeline out. The chart renders the collector's ConfigMap
+  (`templates/configmap.yaml`, 0.1.16) and upstream mounts it, leaving out upstream's default
+  `jaeger`/`prometheus`/`zipkin` receivers, `otlp`'s http protocol and its `logs`/`metrics`
+  pipelines while they hold upstream's default value; no `null` in `values.yaml`, so Helm 3 and
+  Helm 4 render the same.
 - **Late spans.** `decision_cache` makes a span that arrives after its trace was decided follow that
   decision. snowplow's `GET /refreshes` (SSE) span ends only when the stream closes.
 - **The SLIs are not sampled.** They come from the daemonset's `traces/slo` pipeline, which turns
