@@ -188,6 +188,11 @@ type: application
 # Template only, no values change. The config loses that one receiver, so checksum/config changes
 # and the pods roll once. tests/collector-helm4-render.py now fails, in every collector chart, on
 # a declared receiver no pipeline names, or an extension missing from service.extensions.
+# The rule for leaving a default receiver out is: it equals upstream's default AND no pipeline
+# names it (an extension: service.extensions does not name it). So naming prometheus, jaeger or
+# zipkin in a pipeline without configuring it keeps upstream's default receiver instead of leaving
+# the pipeline pointing at an undeclared one, which the collector refuses at startup. The same rule
+# is in otel-collector-deployment 0.3.23 and otel-collector-tailsampling 0.1.17.
 version: 0.1.35
 appVersion: "0.158.0"
 dependencies:

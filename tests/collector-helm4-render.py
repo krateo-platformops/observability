@@ -31,6 +31,11 @@ For each chart, with its default values and again with .github/ci/injected-globa
      under `receivers:` is named by a pipeline and every extension under `extensions:` is in
      `service.extensions`, and the other way round. A declared receiver no pipeline names is never
      started, so it only reads as if it were.
+Then, for each wrapper, with one of upstream's default receivers named by a pipeline and its config
+left alone (NAMED_DEFAULTS below), under both binaries:
+  8. the receiver is in the config with upstream's default value, and check 7 holds: a wrapper leaves
+     a default receiver out only while no pipeline names it, so a pipeline never names a receiver
+     that is not declared, which the collector refuses at startup.
 
 Run: python3 tests/collector-helm4-render.py <repo-root> <helm3-binary> <helm4-binary>
 Each chart's dependency must already be built (helm dependency build charts/<chart>).
@@ -74,6 +79,33 @@ CHARTS = {
         ("receivers", "prometheus"): "upstream default self-scrape; no pipeline runs it",
     }),
 }
+
+# Upstream 0.170.0's default config of the receivers the wrappers leave out (upstream values.yaml,
+# config.receivers at lines 236-260).
+UPSTREAM_RECEIVER_DEFAULTS = {
+    "jaeger": {"protocols": {"grpc": {"endpoint": "${env:MY_POD_IP}:14250"},
+                             "thrift_http": {"endpoint": "${env:MY_POD_IP}:14268"},
+                             "thrift_compact": {"endpoint": "${env:MY_POD_IP}:6831"}}},
+    "otlp": {"protocols": {"grpc": {"endpoint": "${env:MY_POD_IP}:4317"},
+                           "http": {"endpoint": "${env:MY_POD_IP}:4318"}}},
+    "prometheus": {"config": {"scrape_configs": [{
+        "job_name": "opentelemetry-collector", "scrape_interval": "10s",
+        "static_configs": [{"targets": ["${env:MY_POD_IP}:8888"]}]}]}},
+    "zipkin": {"endpoint": "${env:MY_POD_IP}:9411"},
+}
+# A wrapper leaves out an upstream default receiver only while no pipeline names it. Each case
+# names one in a pipeline without setting its config, and the receiver must then be in the config
+# with upstream's default, never left out (which would make the collector fail at startup on a
+# pipeline naming an undeclared receiver). (chart, receiver, --set arguments)
+NAMED_DEFAULTS = [
+    ("otel-collector-daemonset", "prometheus",
+     ["opentelemetry-collector.config.service.pipelines.metrics.receivers={hostmetrics,kubeletstats,otlp,prometheus}"]),
+    ("otel-collector-deployment", "otlp",
+     ["opentelemetry-collector.config.service.pipelines.traces.receivers={otlp}",
+      "opentelemetry-collector.config.service.pipelines.traces.exporters={clickhouse}"]),
+    ("otel-collector-tailsampling", "zipkin",
+     ["opentelemetry-collector.config.service.pipelines.traces.receivers={otlp,zipkin}"]),
+]
 
 # Receiver types that listen, by protocol (the key under `protocols`, or None for a receiver with
 # one endpoint): (default port, TCP or UDP). A configured endpoint's port overrides the default.
@@ -316,6 +348,25 @@ def main():
             for line in unexpected[:40]:
                 print(f"      {line}")
             check(not unexpected, f"{tag}: {v3} and {v4} render the same ({len(unexpected)} difference(s))")
+    for chart, receiver, args in NAMED_DEFAULTS:
+        kind = CHARTS[chart][0]
+        tag = f"{chart}, {receiver} named by a pipeline, its config left at upstream's default"
+        relays = {}
+        for v, helm in ((v3, h3), (v4, h4)):
+            sets = [x for a in args for x in ("--set", a)]
+            docs, err = render(helm, root, chart, sets)
+            relay, where = relay_of(docs, kind) if docs else (None, err)
+            check(relay is not None, f"{tag}, {v}: renders and mounts its config ({where})")
+            if relay is None:
+                continue
+            relays[v] = relay
+            got = dig(relay, ("receivers", receiver))
+            check(got == UPSTREAM_RECEIVER_DEFAULTS[receiver],
+                  f"{tag}, {v}: receivers.{receiver} is kept, with upstream's default "
+                  f"({'kept' if got is not None else 'left out'})")
+            check_declared_used(f"{tag}, {v}", relay)
+        if len(relays) == 2:
+            check(relays[v3] == relays[v4], f"{tag}: {v3} and {v4} render the same collector config")
     print(f"\n{len(failures)} check(s) failed" if failures else "\nall checks passed")
     sys.exit(1 if failures else 0)
 
