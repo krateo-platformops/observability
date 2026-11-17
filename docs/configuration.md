@@ -133,7 +133,7 @@ top-level `global` propagates into clickstack and all its subcharts
   unused, so closing `default` later is a hot reload rather than a ClickHouse restart.
   `tests/clickhouse-users-docker.py` (workflow `check-clickhouse-users`) checks the rendered config
   and loads it into ClickHouse 26.10.3.7.
-- **`usage_collector` and the `cmp` database** (`0.1.47`): the user for acmp's cmp-usage-collector,
+- **`usage_collector` and the `cmp` database** (`0.1.47`): the user for the CMP team's cmp-usage-collector,
   profile `default`, ONE grant statement, `GRANT INSERT, CREATE TABLE ON cmp.health_records`. The
   collector runs `CREATE TABLE IF NOT EXISTS cmp.health_records` and inserts; it can't read the
   table back, create a database or reach `default`. Its Secret is
@@ -324,7 +324,7 @@ Wraps the same upstream chart in `daemonset` mode, stock
 - Pipelines: `logs` (filelog), `metrics` (`hostmetrics, kubeletstats, otlp`), `traces`
   (`otlp`) — the `otlp` entries are how engine/cdc/app OTLP metrics and traces reach
   ClickHouse (KOS-1 #112).
-- **SLO span metrics** (0.1.15, decision D5): two more pipelines, added next to `traces` without
+- **SLO span metrics** (0.1.15, performance alerts built from span metrics): two more pipelines, added next to `traces` without
   changing it. The `otlp` receiver fans out to every pipeline that names it, so every span still
   reaches `otel_traces`.
   - `traces/slo`: `otlp` → `memory_limiter`, `filter/slo-spans` (keeps only `snowplow` SERVER

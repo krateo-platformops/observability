@@ -42,7 +42,9 @@ type: application
 # snowplow.upstream.joiners > 0 (a wire request that answered other concurrent readers, snowplow #1322)
 # is kept whole, so the joiners' span links resolve instead of only for the 5% sample. Matches nothing
 # until snowplow ships #1322. tests/tailsampling-docker.py.
-version: 0.1.13
+# 0.1.14: comments only: neutral wording in comments (no internal ids or private repo
+# references); no rendered object changes.
+version: 0.1.14
 # The collector this chart renders: the upstream chart's own appVersion picks the image tag.
 # Keep equal to otel-collector-daemonset's appVersion, so both tiers run the same build.
 appVersion: "0.158.0"

@@ -76,7 +76,7 @@ type: application
 # 0.1.14: metadata only -- `sources` names this repo by its current name, krateo-platformops/observability
 # (was the old clickstack-chart, which only redirects). Bumped so the next tag does not overwrite
 # 0.1.13 with different metadata: consumers cache by version (see krateo-observability 0.1.3).
-# 0.1.15: SLO span metrics (D5). Performance alerts are built from the span_metrics connector, so
+# 0.1.15: SLO span metrics. Performance alerts are built from the span_metrics connector, so
 # this agent gains a SECOND consumer of its otlp receiver: `traces/slo` keeps only snowplow SERVER
 # spans and krateo-frontend spans from the `snowplow/rum-ingest` scope, and feeds them to
 # `span_metrics`, whose output (`metrics/slo`) goes out through the existing `clickhouse` exporter
@@ -90,7 +90,8 @@ type: application
 # the deployment chart). Dimensions, buckets and the series bound: docs/SLO.md.
 # Also in 0.1.15: the SLI pipeline drops /refreshes and /telemetry/v1/traces and adds the
 # krateo.sli.error dimension ("true" for >= 500 or no code with status ERROR; 4xx is "false"),
-# because alert-provider labels match exact Attribute values and cannot say NOT or >= (acmp).
+# because alert-provider labels match exact Attribute values and cannot say NOT or >= (raised by the
+# CMP team).
 # appVersion "0.1.0" -> "0.158.0". For a wrapper chart appVersion names the app it deploys (as
 # krateo-observability's 3.2.0 names ClickStack), and "0.1.0" matched neither our tags nor the
 # image. 0.158.0 is the collector this chart RENDERS: the wrapper sets only image.repository, and
@@ -99,12 +100,13 @@ type: application
 # Metadata only: the wrapper's appVersion does not feed that template, so the image is unchanged.
 # Keep the two equal when the dependency is bumped.
 # 0.1.16: the SLI pipeline also drops spans with krateo.interaction.abandoned == true (bool):
-# abandoned interactions are EXCLUDED from the SLIs per acmp's X5 span contract, not counted as
-# errors, and stay in otel_traces. acmp's abandoned_flag_selfcheck watches the abandoned share
-# against its 7-day baseline, so a frontend bug marking real slowness as abandoned cannot silently
-# improve p95. Depends on snowplow #1061 (Fixes #1060, expected in 1.12.65), which forwards the key
-# only as bool true on krateo.composition.open / form.submit / page.publish; until then it matches
-# nothing. The traces/logs/metrics pipelines are unchanged.
+# abandoned interactions are EXCLUDED from the SLIs per the CMP team's span contract for the
+# performance SLOs, not counted as errors, and stay in otel_traces. The CMP team's abandoned-flag
+# self-check watches the abandoned share against its 7-day baseline, so a frontend bug marking real
+# slowness as abandoned cannot silently improve p95. Depends on snowplow #1061 (Fixes #1060,
+# expected in 1.12.65), which forwards the key only as bool true on krateo.composition.open /
+# form.submit / page.publish; until then it matches nothing. The traces/logs/metrics pipelines are
+# unchanged.
 # 0.1.17: #54 — filelog promotes `level` or `severity_text`, and a W3C `trace_id` with `span_id`, from
 # JSON log lines into SeverityText, SeverityNumber, TraceId and SpanId. Body stays the raw line and
 # LogAttributes are unchanged, because the parsed copy is scratch space removed in the receiver.
@@ -130,7 +132,7 @@ type: application
 # gcp.vertex.agent.{tool_response,tool_call_args,llm_request,llm_response} and gen_ai prompt/completion/
 # message keys, on spans and span events (Diego, 2026-11-10: strip all content, keep kagent.user_id).
 # Ships BEFORE kagent agent tracing is switched on. tests/agent-content-keys-docker.py runs it.
-# 0.1.26: the span-metrics duration histogram gains a 2000 ms boundary (acmp#21), so the UI
+# 0.1.26: the span-metrics duration histogram gains a 2000 ms boundary, so the UI
 # page-load objective (p95 <= 2000 ms) is decidable instead of falling in (1500, 2500]. A layout
 # change: krateo-slo-rollup keeps rows per bounds and reports no p95 over a window that spans both
 # layouts, so a 30-day p95 that includes the change day is unavailable until the window passes
@@ -166,7 +168,9 @@ type: application
 # before the health_check extension listens (it is ready 2.6-5.0s in), so every new pod logged one
 # "Readiness probe failed ... connection refused" Unhealthy event (14 per roll on krateo-057) and
 # became Ready at the 10s probe regardless. Same Ready time, no failing probe. No other change.
-version: 0.1.31
+# 0.1.32: comments only: neutral wording in comments (no internal ids or private repo
+# references); no rendered object changes.
+version: 0.1.32
 appVersion: "0.158.0"
 dependencies:
   - name: opentelemetry-collector

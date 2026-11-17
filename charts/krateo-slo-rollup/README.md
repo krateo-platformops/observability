@@ -139,9 +139,9 @@ that needs a different query changes that file, not a copy of it. The rules they
   than pick a row.
 
 Counts are of the spans the services export, and nothing in the rollup scales them. On 2026-11-10
-snowplow exported every SERVER span: X5 Load A step 4's span-metric calls (158,332) equalled the load
-generator's request count
-([`ops/perf/x5-2026-11-10/results.tsv`](../../ops/perf/x5-2026-11-10/results.tsv)). If snowplow's
+snowplow exported every SERVER span: the performance test's Load A step 4's span-metric calls
+(158,332) equalled the load generator's request count
+([`ops/perf/2026-11-10/results.tsv`](../../ops/perf/2026-11-10/results.tsv)). If snowplow's
 SERVER spans are ever sampled, `calls` becomes a sample and every ratio and percentile here an
 estimate.
 

@@ -222,7 +222,7 @@ defaultAlerts:
     # that is gone stops counting. Needs alert-provider 0.2.64 (groupBy, consecutiveWindows) and
     # otel-collector-deployment 0.3.15 (30s readiness, no Job pods: a finished Job pod is unready
     # for good, 895 such 5-minute runs in 7 days before 0.3.15). In the 7 days to 2026-11-09 on
-    # krateo-057 it would have fired once: acmp's deliberate readiness test.
+    # krateo-057 it would have fired once: the CMP team's deliberate readiness test.
     - name: sre-container-not-ready
       tier: core
       displayName: Container not ready for 5 minutes
@@ -716,7 +716,8 @@ clickstack:
                 secretKeyRef:
                   name: clickhouse-slo-rollup-credentials
                   key: password_sha256_hex
-            # acmp's cmp-usage-collector (0.1.47). A new variable, so 0.1.47 ROLLS ClickHouse once.
+            # the CMP team's cmp-usage-collector (0.1.47). A new variable, so 0.1.47 ROLLS
+            # ClickHouse once.
             - name: CLICKHOUSE_USER_USAGE_COLLECTOR_SHA256
               valueFrom:
                 secretKeyRef:
@@ -1070,11 +1071,12 @@ clickstack:
                       GRANT SELECT ON default.otel_metrics_sum, SELECT ON default.otel_metrics_histogram,
                       SELECT, INSERT, CREATE TABLE, ALTER MODIFY TTL ON default.krateo_slo_daily,
                       CREATE VIEW ON default.krateo_slo_daily_mv
-              # usage_collector: acmp's cmp-usage-collector, writing service health rows (0.1.47,
-              # Diego 2026-11-16). It runs CREATE TABLE IF NOT EXISTS cmp.health_records itself and
-              # then INSERTs, so it gets those two privileges on that one table. No SELECT: it never
-              # reads back. No CREATE DATABASE: the platform creates `cmp` (extraConfig.startup_scripts
-              # below), so the collector's credential can't create databases. Nothing in `default`.
+              # usage_collector: the CMP team's cmp-usage-collector, writing service health rows
+              # (0.1.47, Diego 2026-11-16). It runs CREATE TABLE IF NOT EXISTS cmp.health_records
+              # itself and then INSERTs, so it gets those two privileges on that one table. No
+              # SELECT: it never reads back. No CREATE DATABASE: the platform creates `cmp`
+              # (extraConfig.startup_scripts below), so the collector's credential can't create
+              # databases. Nothing in `default`.
               usage_collector:
                 password_sha256_hex:
                   "@from_env": CLICKHOUSE_USER_USAGE_COLLECTOR_SHA256

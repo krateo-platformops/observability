@@ -1,6 +1,6 @@
 -- ---------------------------------------------------------------------------------------------
 -- THE SLI definitions: the single source for every reader (the cmp-slo-* alerts, the HyperDX
--- "CMP performance SLOs (X5)" dashboard, the portal's SLOs tab, docs/SLO.md's performance rows).
+-- dashboard of the CMP performance SLOs, the portal's SLOs tab, docs/SLO.md's performance rows).
 -- A reader that needs a different number changes THIS file, not its own copy.
 --
 -- Inputs: the span metrics written by otel-collector-daemonset (>= 0.1.15) -- see docs/SLO.md
@@ -28,8 +28,9 @@
 -- a layout change returns one row per layout, and a reader must then report NO percentile for that
 -- window (as krateo-slo-rollup does) rather than pick one.
 --
--- Counts are of the spans the services export. snowplow exported every SERVER span during X5
--- (its step-4 calls equalled the load generator's request count exactly).
+-- Counts are of the spans the services export. snowplow exported every SERVER span during the
+-- 2026-11-10 performance test (its step-4 calls equalled the load generator's request count
+-- exactly).
 -- ---------------------------------------------------------------------------------------------
 
 -- === SLI 1: Availability, one figure per SLI class ============================================

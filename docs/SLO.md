@@ -49,8 +49,8 @@ the one the alerts read) and are gone.
   window ending exactly on that flush's `TimeUnix` leaves it out.
 
 [`tests/sli-span-metrics-docker.py`](../tests/sli-span-metrics-docker.py) runs every statement in
-a throwaway ClickHouse against fixture rows for each rule above, and against the committed X5 rows,
-which it reproduces (e.g. `krateo.form.submit` p95 (100, 250]).
+a throwaway ClickHouse against fixture rows for each rule above, and against the committed rows of the
+2026-11-10 performance test, which it reproduces (e.g. `krateo.form.submit` p95 (100, 250]).
 
 ## Span metrics (the inputs for performance alerts)
 
@@ -68,14 +68,14 @@ is described in [configuration](./configuration.md#chartsotel-collector-daemonse
 | `krateo-frontend` | instrumentation ScopeName `snowplow/rum-ingest` | UI (`krateo.page.load`, `krateo.composition.open`, `krateo.form.submit`, `krateo.page.publish`, `krateo.widget.fetch`) |
 
 Spans whose `http.route` is `/refreshes` (the SSE stream) or `/telemetry/v1/traces` (the RUM
-ingest itself) are **dropped** before the connector (X5, acmp). They are excluded here rather than
+ingest itself) are **dropped** before the connector (the CMP team's performance SLOs). They are excluded here rather than
 in the `Metric` CR because alert-provider labels match `Attributes` by exact value only, so a CR
 cannot say "route is not x". They are still in `otel_traces`.
 
-**Abandoned interactions are excluded, not counted as errors** (acmp's X5 span contract;
+**Abandoned interactions are excluded, not counted as errors** (the CMP team's span contract for the performance SLOs;
 otel-collector-daemonset ≥ 0.1.16). A span with `krateo.interaction.abandoned` equal to the
-**bool** `true` is dropped before the connector and stays in `otel_traces`. acmp's
-`abandoned_flag_selfcheck` watches the abandoned share against its 7-day baseline, so a frontend
+**bool** `true` is dropped before the connector and stays in `otel_traces`. The CMP team's
+abandoned-flag self-check watches the abandoned share against its 7-day baseline, so a frontend
 bug that marks real slowness as abandoned cannot silently improve p95. The flag comes from
 snowplow's rum-ingest, which forwards it only as a bool `true` and only on
 `krateo.composition.open`, `krateo.form.submit` and `krateo.page.publish` (snowplow #1061, Fixes
@@ -111,7 +111,7 @@ rule: the span is counted (snowplow never forwards one).
   matters. `span.kind` and `collector.instance.id`, which the connector adds by default, are
   turned off (see configuration).
 - **`ScopeName`**: `spanmetricsconnector`.
-- **`krateo.sli.error` is the SLI's error flag; 4xx is not an error (D3).** It is set before the
+- **`krateo.sli.error` is the SLI's error flag; 4xx is not an error.** It is set before the
   connector:
   - `true` when `http.response.status_code >= 500`;
   - `true` when the span has **no** `http.response.status_code` and its status is `ERROR` (no
@@ -204,10 +204,9 @@ kept for 40 days by default and refreshed hourly from the two metrics above.
   chart's README reads the table the same way, and its kind proof (`tests/e2e-kind.sh`) runs these
   three statements against the rollup it builds (0.1.3; up to 0.1.2 it had an interpolating query
   of its own).
-- **Counts are of the spans snowplow exports.** On 2026-11-10 that was every SERVER span: X5 Load A
+- **Counts are of the spans snowplow exports.** On 2026-11-10 that was every SERVER span: the performance test's Load A
   step 4's span-metric calls (158,332) equalled the load generator's request count exactly
-  ([`ops/perf/x5-2026-11-10/results.tsv`](../ops/perf/x5-2026-11-10/results.tsv); run details
-  krateo-acmp#21). Nothing in the rollup scales counts, so if snowplow's SERVER spans are ever
+  ([`ops/perf/2026-11-10/results.tsv`](../ops/perf/2026-11-10/results.tsv)). Nothing in the rollup scales counts, so if snowplow's SERVER spans are ever
   sampled, `calls` becomes a sample and error ratios and percentiles become estimates.
 - **Coverage starts at install**, plus up to 6 days of backfill. A window reaching further back is
   incomplete, and has to be reported as such.
@@ -234,7 +233,7 @@ signal.
 
 ## Dashboards
 
-- **HyperDX "CMP performance SLOs (X5)"**, 12 tiles over the span metrics. It exists on
+- **HyperDX dashboard of the CMP performance SLOs**, 12 tiles over the span metrics. It exists on
   krateo-057, created through the HyperDX API, and is not shipped by a chart yet; a reconciled,
   chart-shipped form is being proposed.
 - **Portal SLOs tab** on `/observability`, being designed by frontend.
@@ -258,20 +257,20 @@ baselines. Record one row per run:
 
 | Date | Scenario | Load | Availability | API p95 (ms) | UI p95 (ms) | Notes |
 |------|----------|------|--------------|--------------|-------------|-------|
-| 2026-11-10 13:56:52–14:17:50Z | X5 Load A steps 1–3: **API baseline**, in-cluster, API only | 6 → 12 → 25 VUs, 55–150 req/s, 129,939 requests | 100.000 % (0 SLI errors) | (0, 25] | — | Error-free envelope of Load A. Real portal reads (58 dashboard + 11 blueprint-form GETs) straight to `snowplow:8081` (not through the gateway) as 3 tenant users; loadgen krateo-acmp b562e12, `rum_upload: false`. |
-| 2026-11-10 13:56:52–14:26:30Z (aborted) | X5 Load A, all steps: **API stress**, in-cluster | up to 50 VUs, ~310 req/s; 288,271 requests (step 4: 158,332) | 99.960 % (114 SLI errors, all HTTP 5xx; step 4: 99.928 %) | (0, 25] | — | All 114 5xx fell at 14:25–14:27Z, 98 of them slower than 5 s (83 over 10 s). ClickHouse sat at its 4-CPU limit from step 1 and sse-proxy `/events` timed out from step 2, before sse-proxy's ClickHouse fix. **Stress, not a baseline.** |
-| 2026-11-10 15:12–15:41Z | X5 Load B: UI key actions, real browser | 1 tenant, 60 iterations (form → Review → Create → Confirm → composition page), portal 1.8.106 | 100.000 % (0 of 4,715 widget fetches failed) | — | composition.open (250, 500]; form.submit (100, 250]; widget.fetch (100, 250] | p50: composition.open (250, 500], form.submit (50, 100], widget.fetch (50, 100]. 60 composition.open and 60 form.submit spans. |
-| 2026-11-11 09:30–10:00Z | X5 page load (after otel-collector-daemonset 0.1.26 added the 2000 ms bound) | 60 document loads on /dashboard, /blueprints, /compositions as a tenant | 100.000 % | — | page.load (500, 750]: **PASS** (target ≤ 2000) | p50 (500, 750]. |
+| 2026-11-10 13:56:52–14:17:50Z | Load A steps 1–3: **API baseline**, in-cluster, API only | 6 → 12 → 25 VUs, 55–150 req/s, 129,939 requests | 100.000 % (0 SLI errors) | (0, 25] | — | Error-free envelope of Load A. Real portal reads (58 dashboard + 11 blueprint-form GETs) straight to `snowplow:8081` (not through the gateway) as 3 tenant users; the CMP team's load generator, `rum_upload: false`. |
+| 2026-11-10 13:56:52–14:26:30Z (aborted) | Load A, all steps: **API stress**, in-cluster | up to 50 VUs, ~310 req/s; 288,271 requests (step 4: 158,332) | 99.960 % (114 SLI errors, all HTTP 5xx; step 4: 99.928 %) | (0, 25] | — | All 114 5xx fell at 14:25–14:27Z, 98 of them slower than 5 s (83 over 10 s). ClickHouse sat at its 4-CPU limit from step 1 and sse-proxy `/events` timed out from step 2, before sse-proxy's ClickHouse fix. **Stress, not a baseline.** |
+| 2026-11-10 15:12–15:41Z | Load B: UI key actions, real browser | 1 tenant, 60 iterations (form → Review → Create → Confirm → composition page), portal 1.8.106 | 100.000 % (0 of 4,715 widget fetches failed) | — | composition.open (250, 500]; form.submit (100, 250]; widget.fetch (100, 250] | p50: composition.open (250, 500], form.submit (50, 100], widget.fetch (50, 100]. 60 composition.open and 60 form.submit spans. |
+| 2026-11-11 09:30–10:00Z | Page load (after otel-collector-daemonset 0.1.26 added the 2000 ms bound) | 60 document loads on /dashboard, /blueprints, /compositions as a tenant | 100.000 % | — | page.load (500, 750]: **PASS** (target ≤ 2000) | p50 (500, 750]. |
 
 Not yet measured: `krateo.page.publish` (needs frontend ≥ 1.8.37 and a disposable install).
 
 All figures come from the span metrics on krateo-057 (`traces.span.metrics.calls/duration`, delta
 histograms with bounds 25, 50, 100, 250, 500, 750, 1000, 1500, 2500, 5000, 10000 ms), so a
 percentile is the bucket it falls in, not an interpolated value. The rows, the script and its
-output are in [`ops/perf/x5-2026-11-10/`](../ops/perf/x5-2026-11-10/): re-run them with
-`python3 ops/perf/x5-2026-11-10/compute.py`. A window ends at the first collector flush after it
+output are in [`ops/perf/2026-11-10/`](../ops/perf/2026-11-10/): re-run them with
+`python3 ops/perf/2026-11-10/compute.py`. A window ends at the first collector flush after it
 closes, not at the wall-clock end: Load A's 5xx landed in the 14:26:43Z and 14:27:43Z flushes,
-after the 14:26:30Z abort. Run details are acmp's (krateo-acmp#21). The source rows left
+after the 14:26:30Z abort. Run details (scenario, VUs, steps) are the CMP team's. The source rows left
 ClickHouse's 7-day retention on 2026-11-17 and 2026-11-18, so the committed rows are the only copy.
 
 How to capture a run:
@@ -284,4 +283,4 @@ How to capture a run:
    flush's `TimeUnix`, e.g. the next whole minute). If the window spans a bucket-layout change
    (two rows for one percentile), report no percentile for it.
 3. Append the resulting numbers to the table above, and commit the raw rows (the otel_* tables
-   keep 7 days) next to the run's output, as `ops/perf/x5-2026-11-10/` does.
+   keep 7 days) next to the run's output, as `ops/perf/2026-11-10/` does.

@@ -57,12 +57,13 @@ type: application
 # about 1 event in 9 was dropped that way (sse-proxy#30). Up to about 500 events held per client.
 # 0.1.24: bump the sse-proxy image to 1.5.0 (sse-proxy#45). /events reads are time-bounded on
 # otel_logs.TimestampTime (default 7 days, the TTL) and pruned by the namespace bloom index: one
-# request went from ~4.2 to ~0.1 CPU-s on krateo-057, which is what saturated ClickHouse under the X5
-# load. A 4 s budget answers 200 with a partial body (X-Events-Status). Every query sends readonly=2,
-# cancel-on-close and max_execution_time, so an abandoned query stops in ClickHouse. A caller that
-# leaves gets 499 (not 500/ERROR) and its ClickHouse span isn't an error. Events carry
-# composition {id, namespace, name} (names need otel-collector-deployment >= 0.3.17). /audit gets the
-# same limits and its empty fields now carry values. Auth 503s are logged. No new env required.
+# request went from ~4.2 to ~0.1 CPU-s on krateo-057, which is what saturated ClickHouse under the
+# 2026-11-10 performance test's load. A 4 s budget answers 200 with a partial body
+# (X-Events-Status). Every query sends readonly=2, cancel-on-close and max_execution_time, so an
+# abandoned query stops in ClickHouse. A caller that leaves gets 499 (not 500/ERROR) and its
+# ClickHouse span isn't an error. Events carry composition {id, namespace, name} (names need
+# otel-collector-deployment >= 0.3.17). /audit gets the same limits and its empty fields now carry
+# values. Auth 503s are logged. No new env required.
 # 0.1.25: bump the sse-proxy image to 1.5.1 (sse-proxy#46). Concurrent RBAC scope misses for one
 # identity share ONE resolution, so a burst after an idle gap no longer runs a SubjectAccessReview
 # fan-out per request. On krateo-057's load A (2026-11-11), the 25->50 VU step sent 31 /events past
@@ -78,7 +79,9 @@ type: application
 # the chart named a Secret `clickhouse-credentials` that nothing created, optional, so sse-proxy ran
 # as `default` with an empty password. clickhouse.user and clickhouse.passwordSecret are removed;
 # set clickhouse.credentialsSecret instead.
-version: 0.1.26
+# 0.1.27: comments only: neutral wording in comments (no internal ids or private repo
+# references); no rendered object changes.
+version: 0.1.27
 appVersion: "1.5.1"
 home: https://krateo.io
 icon: https://github.com/krateoplatformops/krateo/blob/main/docs/media/logo.svg

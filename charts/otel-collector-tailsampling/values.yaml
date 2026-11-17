@@ -119,7 +119,8 @@ opentelemetry-collector:
           # EXCEPT 499 (0.1.10, Diego 2026-11-10): sse-proxy >= 1.5.0 answers 499 when its CALLER went
           # away (e.g. snowplow's 10 s page budget cut the request). That's not a failure of the
           # span's own service, so it doesn't keep the trace; whatever made the caller give up keeps
-          # it through the caller's own error. Under X5's load these were ~10,900 kept spans/min.
+          # it through the caller's own error. Under the 2026-11-10 performance test's load these
+          # were ~10,900 kept spans/min.
           - name: http-status-400-or-more
             type: ottl_condition
             ottl_condition:
