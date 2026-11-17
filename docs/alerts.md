@@ -357,8 +357,19 @@ and upgraded there by the composition-dynamic-controller (2.13.105 on 2026-11-16
 v1.80.0 and Helm v3.20.2), and it passes `TakeOwnership: true` on install, reconcile and upgrade
 (core-provider `go/composition-dynamic-controller/internal/composition/composition.go`). Its reconcile
 also treats a live object that the stored manifest lacks as last applied in its rendered form
-(plumbing `helm/v3/reconcile.go`). So the roll to 0.1.52 needs no manual step there. This was read
-from the source, not exercised on a cluster.
+(plumbing `helm/v3/reconcile.go`), and three-way merges it to the render, so the live object takes
+the chart's spec. So the roll to 0.1.52 needs no manual step there. plumbing's envtest exercises that
+adoption (`reconcile_test.go`: a live object missing from the stored manifest is patched to the
+rendered value) with an object that already carries Helm's ownership metadata. The unowned case on
+057 was read from the source: the dry-run render passes `TakeOwnership` through (`config.go`).
+
+**A plain `helm upgrade` adopts without writing the spec.** Measured on kind on 2026-11-17 with Helm
+v3.20.2, both with `--take-ownership` and after the ownership step below: the upgrade puts the
+hand-applied Alert into the release, but leaves its spec as it was (`generation` 1, the old
+`displayName` and `description`), and the next upgrade only adds Helm's ownership metadata. Helm
+patches from the object it last applied, and for an adopted object that is the render itself, so a
+later upgrade writes a field only when the chart changes it. Today no cluster upgraded by plain Helm
+has these objects: they were hand-applied on 057 only.
 
 **The one-time ownership step**, needed only where the upgrade runs without `TakeOwnership` (a plain
 `helm upgrade` by hand, or a controller older than that). Run it once, right before the upgrade. It
@@ -387,7 +398,8 @@ what you want here; don't add `--overwrite`. The `managed-by=Helm` label is temp
 renders `krateo-observability-defaults`, and the controller's next reconcile sets it, as on every other
 default alert.
 
-**What the upgrade changes on each live object.** Compared on 2026-11-17 against the chart's render:
+**What the controller's reconcile changes on each live object on 057.** Compared on 2026-11-17
+against the chart's render (0.1.55, with 057's values):
 
 - **The three Alerts' `displayName` and `description`.** The objects on 057 carry the generator's
   earlier wording, which named internal identifiers; the chart ships the generator's current,
