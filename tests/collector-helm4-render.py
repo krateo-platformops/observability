@@ -8,7 +8,7 @@ longer deletes the subchart's key. otel-collector-deployment 0.3.20 and otel-col
 receivers and default pipelines that way, and under Helm 4.3.2 they came back into the collector
 config. Since 0.3.21 / 0.1.16 each wrapper renders the collector's ConfigMap itself and no null is
 left in its values.yaml; otel-collector-daemonset does the same since 0.1.34, to leave out
-upstream's jaeger and zipkin receivers.
+upstream's jaeger and zipkin receivers, and since 0.1.35 its prometheus self-scrape.
 
 For each chart, with its default values and again with .github/ci/injected-global.yaml (the
 `global` block the platform injects), this renders with both binaries and checks:
@@ -26,9 +26,16 @@ For each chart, with its default values and again with .github/ci/injected-globa
      receiver, or the health_check extension or the collector's own telemetry, which need no port
      but may have one). A receiver only declared under `receivers:` is never started, so it counts
      as no listener. A port with nothing behind it refuses every connection; a listener with no
-     port is unreachable.
-otel-collector-daemonset keeps upstream's other default receivers (its prometheus self-scrape among
-them), so FORBIDDEN lists only jaeger and zipkin for it.
+     port is unreachable;
+  7. nothing is declared that does not run, and nothing runs that is not declared: every receiver
+     under `receivers:` is named by a pipeline and every extension under `extensions:` is in
+     `service.extensions`, and the other way round. A declared receiver no pipeline names is never
+     started, so it only reads as if it were.
+Then, for each wrapper, with one of upstream's default receivers named by a pipeline and its config
+left alone (NAMED_DEFAULTS below), under both binaries:
+  8. the receiver is in the config with upstream's default value, and check 7 holds: a wrapper leaves
+     a default receiver out only while no pipeline names it, so a pipeline never names a receiver
+     that is not declared, which the collector refuses at startup.
 
 Run: python3 tests/collector-helm4-render.py <repo-root> <helm3-binary> <helm4-binary>
 Each chart's dependency must already be built (helm dependency build charts/<chart>).
@@ -69,8 +76,36 @@ CHARTS = {
     "otel-collector-daemonset": ("DaemonSet", {
         ("receivers", "jaeger"): "upstream default receiver; no pipeline runs it, its ports are closed",
         ("receivers", "zipkin"): "upstream default receiver; no pipeline runs it, its port is closed",
+        ("receivers", "prometheus"): "upstream default self-scrape; no pipeline runs it",
     }),
 }
+
+# Upstream 0.170.0's default config of the receivers the wrappers leave out (upstream values.yaml,
+# config.receivers at lines 236-260).
+UPSTREAM_RECEIVER_DEFAULTS = {
+    "jaeger": {"protocols": {"grpc": {"endpoint": "${env:MY_POD_IP}:14250"},
+                             "thrift_http": {"endpoint": "${env:MY_POD_IP}:14268"},
+                             "thrift_compact": {"endpoint": "${env:MY_POD_IP}:6831"}}},
+    "otlp": {"protocols": {"grpc": {"endpoint": "${env:MY_POD_IP}:4317"},
+                           "http": {"endpoint": "${env:MY_POD_IP}:4318"}}},
+    "prometheus": {"config": {"scrape_configs": [{
+        "job_name": "opentelemetry-collector", "scrape_interval": "10s",
+        "static_configs": [{"targets": ["${env:MY_POD_IP}:8888"]}]}]}},
+    "zipkin": {"endpoint": "${env:MY_POD_IP}:9411"},
+}
+# A wrapper leaves out an upstream default receiver only while no pipeline names it. Each case
+# names one in a pipeline without setting its config, and the receiver must then be in the config
+# with upstream's default, never left out (which would make the collector fail at startup on a
+# pipeline naming an undeclared receiver). (chart, receiver, --set arguments)
+NAMED_DEFAULTS = [
+    ("otel-collector-daemonset", "prometheus",
+     ["opentelemetry-collector.config.service.pipelines.metrics.receivers={hostmetrics,kubeletstats,otlp,prometheus}"]),
+    ("otel-collector-deployment", "otlp",
+     ["opentelemetry-collector.config.service.pipelines.traces.receivers={otlp}",
+      "opentelemetry-collector.config.service.pipelines.traces.exporters={clickhouse}"]),
+    ("otel-collector-tailsampling", "zipkin",
+     ["opentelemetry-collector.config.service.pipelines.traces.receivers={otlp,zipkin}"]),
+]
 
 # Receiver types that listen, by protocol (the key under `protocols`, or None for a receiver with
 # one endpoint): (default port, TCP or UDP). A configured endpoint's port overrides the default.
@@ -251,6 +286,22 @@ def check_ports(tag, relay, docs, kind):
           f"without a container port {no_port}; on no Service {no_service})")
 
 
+def check_declared_used(tag, relay):
+    service = relay.get("service") or {}
+    declared = set(relay.get("receivers") or {})
+    connectors = set(relay.get("connectors") or {})
+    named = {r for p in (service.get("pipelines") or {}).values() for r in p.get("receivers") or []}
+    unused, undeclared = sorted(declared - named), sorted(named - declared - connectors)
+    check(not unused and not undeclared,
+          f"{tag}: every declared receiver is in a pipeline and every pipeline receiver is declared "
+          f"(in no pipeline {unused}; not declared {undeclared})")
+    ext_declared = set(relay.get("extensions") or {})
+    ext_named = set(service.get("extensions") or [])
+    check(ext_declared == ext_named,
+          f"{tag}: every declared extension is in service.extensions and the other way round "
+          f"(not enabled {sorted(ext_declared - ext_named)}; not declared {sorted(ext_named - ext_declared)})")
+
+
 def checksum(docs, kind):
     wl = workload(docs, kind)
     return ((wl or {}).get("spec", {}).get("template", {}).get("metadata", {}).get("annotations") or {}).get("checksum/config")
@@ -280,6 +331,7 @@ def main():
                     check(not present, f"{tag}, {v}: no {'.'.join(path)} in the collector config ({why})")
                 if relay is not None:
                     check_ports(f"{tag}, {v}", relay, docs, kind)
+                    check_declared_used(f"{tag}, {v}", relay)
                 if forbidden:
                     before = checksum(docs, kind)
                     changed, err = render(helm, root, chart, [*args, "--set", CHANGE])
@@ -296,6 +348,25 @@ def main():
             for line in unexpected[:40]:
                 print(f"      {line}")
             check(not unexpected, f"{tag}: {v3} and {v4} render the same ({len(unexpected)} difference(s))")
+    for chart, receiver, args in NAMED_DEFAULTS:
+        kind = CHARTS[chart][0]
+        tag = f"{chart}, {receiver} named by a pipeline, its config left at upstream's default"
+        relays = {}
+        for v, helm in ((v3, h3), (v4, h4)):
+            sets = [x for a in args for x in ("--set", a)]
+            docs, err = render(helm, root, chart, sets)
+            relay, where = relay_of(docs, kind) if docs else (None, err)
+            check(relay is not None, f"{tag}, {v}: renders and mounts its config ({where})")
+            if relay is None:
+                continue
+            relays[v] = relay
+            got = dig(relay, ("receivers", receiver))
+            check(got == UPSTREAM_RECEIVER_DEFAULTS[receiver],
+                  f"{tag}, {v}: receivers.{receiver} is kept, with upstream's default "
+                  f"({'kept' if got is not None else 'left out'})")
+            check_declared_used(f"{tag}, {v}", relay)
+        if len(relays) == 2:
+            check(relays[v3] == relays[v4], f"{tag}: {v3} and {v4} render the same collector config")
     print(f"\n{len(failures)} check(s) failed" if failures else "\nall checks passed")
     sys.exit(1 if failures else 0)
 

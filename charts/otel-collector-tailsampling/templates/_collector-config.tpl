@@ -20,6 +20,10 @@ upstream's default, i.e. nobody set it: a value set under opentelemetry-collecto
 kept, as Helm 3 kept a user's value over this chart's old null. If a later upstream version changes
 one of these defaults, it no longer matches and appears in the config, and
 tests/collector-helm4-render.py fails on it.
+
+A whole receiver is also kept, default or not, while a pipeline names it (an extension: while
+service.extensions names it): the collector refuses to start on a pipeline naming an undeclared
+receiver. Default pipelines in the list are left out first, so their receivers do not count.
 */}}
 {{- define "otel-collector-tailsampling.upstreamDefaultsNotRun" -}}
 - path: [receivers, jaeger]
@@ -66,7 +70,12 @@ pass apply exactly as when upstream rendered the ConfigMap.
 */}}
 {{- define "otel-collector-tailsampling.collectorConfig" -}}
 {{- $ctx := deepCopy . }}
-{{- range $drop := include "otel-collector-tailsampling.upstreamDefaultsNotRun" . | fromYamlArray }}
+{{- $drops := include "otel-collector-tailsampling.upstreamDefaultsNotRun" . | fromYamlArray }}
+{{- /* Pipelines first, so a receiver named only by a default pipeline left out here counts as
+       unused; then receivers and extensions. */}}
+{{- range $pass := list "service" "components" }}
+{{- range $drop := $drops }}
+  {{- if eq (eq (first $drop.path) "service") (eq $pass "service") }}
   {{- $parent := $ctx.Values.config }}
   {{- range $key := initial $drop.path }}
     {{- if and (kindIs "map" $parent) (hasKey $parent $key) }}
@@ -76,9 +85,25 @@ pass apply exactly as when upstream rendered the ConfigMap.
     {{- end }}
   {{- end }}
   {{- $leaf := last $drop.path }}
-  {{- if and (kindIs "map" $parent) (hasKey $parent $leaf) (eq (toJson (index $parent $leaf)) (toJson $drop.default)) }}
+  {{- /* A whole receiver or extension the config uses stays, default or not: a pipeline that names
+         prometheus, or service.extensions naming an extension, must find it declared. A protocol
+         under a receiver (a longer path) is not a component and is left out regardless. */}}
+  {{- $used := false }}
+  {{- $service := $ctx.Values.config.service | default dict }}
+  {{- if and (eq (len $drop.path) 2) (eq (first $drop.path) "receivers") }}
+    {{- range $pipeline := ($service.pipelines | default dict) }}
+      {{- if and (kindIs "map" $pipeline) (has $leaf ($pipeline.receivers | default list)) }}
+        {{- $used = true }}
+      {{- end }}
+    {{- end }}
+  {{- else if and (eq (len $drop.path) 2) (eq (first $drop.path) "extensions") }}
+    {{- $used = has $leaf ($service.extensions | default list) }}
+  {{- end }}
+  {{- if and (not $used) (kindIs "map" $parent) (hasKey $parent $leaf) (eq (toJson (index $parent $leaf)) (toJson $drop.default)) }}
     {{- $_ := unset $parent $leaf }}
   {{- end }}
+  {{- end }}
+{{- end }}
 {{- end }}
 {{- if eq $ctx.Values.mode "daemonset" }}
 {{- include "opentelemetry-collector.daemonsetConfig" $ctx }}

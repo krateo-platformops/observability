@@ -55,7 +55,14 @@ type: application
 # (ports.otlp.hostPort: null is gone too: upstream writes a hostPort only in daemonset mode). Under
 # Helm 3 the render is the same object for object, ConfigMap name, labels and checksum/config value
 # included, so pods do not restart; Helm 4 renders the same. tests/collector-helm4-render.py.
-version: 0.1.16
+# 0.1.17: an upstream default receiver a pipeline names is kept. templates/_collector-config.tpl
+# left out upstream's jaeger, prometheus and zipkin receivers whenever they held upstream's default,
+# so a pipeline that named one (say zipkin, with its config left alone) pointed at an undeclared
+# receiver and the collector would refuse to start. A whole receiver is now left out only while it
+# equals upstream's default AND no pipeline names it (an extension: while service.extensions does
+# not name it). The default render is the same byte for byte, checksum/config included, so pods
+# do not restart.
+version: 0.1.17
 # The collector this chart renders: the upstream chart's own appVersion picks the image tag.
 # Keep equal to otel-collector-daemonset's appVersion, so both tiers run the same build.
 appVersion: "0.158.0"

@@ -261,7 +261,10 @@ All under `opentelemetry-collector:` (the upstream dep):
   longer applies a parent chart's nulls to a subchart, upstream Helm change 31979). Leaving
   out `prometheus` is load-bearing: the minimal `krateo-otel-collector` image compiles in only
   `k8sobjects`+`k8s_cluster`, and the collector type-validates every *declared* receiver —
-  declaring `prometheus` crashloops the default install.
+  declaring `prometheus` crashloops the default install. A left-out receiver comes back when a
+  pipeline names it (0.3.23), with upstream's default config unless you set one: all three
+  wrappers leave a default receiver out only while it equals upstream's default **and** no
+  pipeline names it.
 - **No ports, no Service** (0.3.22): neither receiver listens, so every upstream default port
   (`ports.{otlp,otlp-http,jaeger-compact,jaeger-thrift,jaeger-grpc,zipkin}.enabled: false`) is
   closed, and `service.enabled: false`, because a ClusterIP Service with no ports is invalid.
@@ -305,6 +308,13 @@ Wraps the same upstream chart in `daemonset` mode, stock
   (`jaeger-compact`, `jaeger-thrift`, `jaeger-grpc`, `zipkin`) are `enabled: false`. Ports and
   receivers go together: a receiver added that listens needs its port enabled;
   `tests/collector-helm4-render.py` fails otherwise.
+- **No unused receivers** (0.1.35): upstream's default `prometheus` receiver (a self-scrape of
+  the collector's own telemetry on `:8888`, named by no pipeline) is left out the same way, while
+  it holds upstream's default. To scrape with it, set `config.receivers.prometheus` to your own
+  scrape config and add `prometheus` to a pipeline's receivers: any value other than upstream's
+  default is kept, and so is the default itself once a pipeline names it.
+  `prometheus/agentgateway` is unaffected. `tests/collector-helm4-render.py`
+  fails on a declared receiver that no pipeline names, in every collector chart.
 - `presets`: `logsCollection` (without collector logs), `hostMetrics`,
   `kubernetesAttributes` (with `extractAllPodLabels`), `kubeletMetrics`.
 - `config.receivers`: `filelog` with a container parser + multiline recombine;
@@ -438,7 +448,8 @@ made at the gateway: agentgateway decides sampling when a request arrives, befor
   (`templates/configmap.yaml`, 0.1.16) and upstream mounts it, leaving out upstream's default
   `jaeger`/`prometheus`/`zipkin` receivers, `otlp`'s http protocol and its `logs`/`metrics`
   pipelines while they hold upstream's default value; no `null` in `values.yaml`, so Helm 3 and
-  Helm 4 render the same.
+  Helm 4 render the same. A left-out receiver that a pipeline names is kept (0.1.17), with
+  upstream's default unless you set one.
 - **Late spans.** `decision_cache` makes a span that arrives after its trace was decided follow that
   decision. snowplow's `GET /refreshes` (SSE) span ends only when the stream closes.
 - **The SLIs are not sampled.** They come from the daemonset's `traces/slo` pipeline, which turns
