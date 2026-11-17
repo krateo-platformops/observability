@@ -172,7 +172,16 @@ type: application
 # references); no rendered object changes.
 # 0.1.33: comments only: neutral wording (no internal work-item or plan ids);
 # no rendered object changes.
-version: 0.1.33
+# 0.1.34: only the OTLP ports. Upstream's default jaeger (6831, 14250, 14268) and zipkin (9411)
+# receivers were declared but named by no pipeline, so the agent never started them and their
+# container ports, hostPorts and Service ports refused every connection. Those four ports are
+# enabled: false, and the two receivers are left out of the config by this chart's own ConfigMap
+# template (templates/configmap.yaml, the design otel-collector-deployment 0.3.21 uses: configMap.create
+# false + existingName, its own checksum/config, the same under Helm 3 and 4), so a pipeline that
+# later names one cannot start a receiver no port reaches. A value set at either path is kept.
+# Every other receiver stays, the prometheus self-scrape included; otlp 4317/4318 stay on all three.
+# The config changes by those two receivers only, so checksum/config changes and the pods roll once.
+version: 0.1.34
 appVersion: "0.158.0"
 dependencies:
   - name: opentelemetry-collector

@@ -7,7 +7,8 @@ longer deletes the subchart's key. otel-collector-deployment 0.3.20 and otel-col
 0.1.15 left out upstream opentelemetry-collector's default jaeger, otlp, prometheus and zipkin
 receivers and default pipelines that way, and under Helm 4.3.2 they came back into the collector
 config. Since 0.3.21 / 0.1.16 each wrapper renders the collector's ConfigMap itself and no null is
-left in its values.yaml.
+left in its values.yaml; otel-collector-daemonset does the same since 0.1.34, to leave out
+upstream's jaeger and zipkin receivers.
 
 For each chart, with its default values and again with .github/ci/injected-global.yaml (the
 `global` block the platform injects), this renders with both binaries and checks:
@@ -18,8 +19,16 @@ For each chart, with its default values and again with .github/ci/injected-globa
      upstream's jaeger/zipkin receivers, its prometheus self-scrape, and so on);
   4. the workload mounts a ConfigMap of the render that holds `relay`, with --config=/conf/relay.yaml;
   5. the pods roll on a config change: a pod-template checksum/config annotation is there, is not
-     the hash of an empty template, and changes when one config value is overridden.
-otel-collector-daemonset is checked for 1, 2 and 4 only: it keeps upstream's default receivers.
+     the hash of an empty template, and changes when one config value is overridden;
+  6. ports and listeners match, both ways: every receiver a pipeline starts that listens has its
+     container port, and a Service port when the chart renders a Service; and every rendered
+     container port, hostPort and Service port has something listening behind it (a started
+     receiver, or the health_check extension or the collector's own telemetry, which need no port
+     but may have one). A receiver only declared under `receivers:` is never started, so it counts
+     as no listener. A port with nothing behind it refuses every connection; a listener with no
+     port is unreachable.
+otel-collector-daemonset keeps upstream's other default receivers (its prometheus self-scrape among
+them), so FORBIDDEN lists only jaeger and zipkin for it.
 
 Run: python3 tests/collector-helm4-render.py <repo-root> <helm3-binary> <helm4-binary>
 Each chart's dependency must already be built (helm dependency build charts/<chart>).
@@ -28,6 +37,7 @@ Exit 0 = every check passed, 1 = at least one did not.
 import hashlib
 import json
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -56,8 +66,23 @@ CHARTS = {
         ("service", "pipelines", "logs"): "upstream default pipeline",
         ("service", "pipelines", "metrics"): "upstream default pipeline",
     }),
-    "otel-collector-daemonset": ("DaemonSet", {}),
+    "otel-collector-daemonset": ("DaemonSet", {
+        ("receivers", "jaeger"): "upstream default receiver; no pipeline runs it, its ports are closed",
+        ("receivers", "zipkin"): "upstream default receiver; no pipeline runs it, its port is closed",
+    }),
 }
+
+# Receiver types that listen, by protocol (the key under `protocols`, or None for a receiver with
+# one endpoint): (default port, TCP or UDP). A configured endpoint's port overrides the default.
+LISTENING = {
+    "otlp": {"grpc": (4317, "TCP"), "http": (4318, "TCP")},
+    "jaeger": {"grpc": (14250, "TCP"), "thrift_http": (14268, "TCP"),
+               "thrift_compact": (6831, "UDP"), "thrift_binary": (6832, "UDP")},
+    "zipkin": {None: (9411, "TCP")},
+}
+# Receiver types that open no port: they read the Kubernetes API, files or the host, or scrape.
+# A pipeline receiver of a type in neither list fails the check until it is classified.
+PASSIVE = {"k8sobjects", "k8s_cluster", "k8s_events", "filelog", "hostmetrics", "kubeletstats", "prometheus"}
 
 failures = []
 
@@ -143,6 +168,89 @@ def dig(node, path):
     return node
 
 
+def port_of(endpoint, default):
+    m = re.search(r":(\d+)$", str(endpoint or ""))
+    return int(m.group(1)) if m else default
+
+
+def listeners(relay):
+    """(required, optional, problems), as sets of (port, TCP or UDP). required: what the receivers
+    named in a pipeline listen on. optional: the health_check extension (the kubelet probes it by
+    number) and the collector's own telemetry reader, which need no declared port."""
+    required, optional, problems = set(), set(), []
+    receivers = relay.get("receivers") or {}
+    connectors = relay.get("connectors") or {}
+    service = relay.get("service") or {}
+    started = {r for p in (service.get("pipelines") or {}).values() for r in p.get("receivers") or []}
+    for rid in sorted(started):
+        rtype = rid.split("/")[0]
+        if rid in connectors or rtype in PASSIVE:
+            continue
+        if rtype not in LISTENING:
+            problems.append(f"pipeline receiver {rid} is of a type this test does not know; "
+                            f"add it to LISTENING or PASSIVE")
+            continue
+        conf = receivers.get(rid) or {}
+        protocols = conf.get("protocols") or {}
+        for proto, (default, l4) in LISTENING[rtype].items():
+            if proto is None:
+                required.add((port_of(conf.get("endpoint"), default), l4))
+            elif proto in protocols:
+                required.add((port_of((protocols[proto] or {}).get("endpoint"), default), l4))
+    for ext in service.get("extensions") or []:
+        port = port_of(((relay.get("extensions") or {}).get(ext) or {}).get("endpoint"), None)
+        if port:
+            optional.add((port, "TCP"))
+    for reader in ((service.get("telemetry") or {}).get("metrics") or {}).get("readers") or []:
+        prom = ((reader.get("pull") or {}).get("exporter") or {}).get("prometheus") or {}
+        if prom.get("port"):
+            optional.add((int(prom["port"]), "TCP"))
+    return required, optional, problems
+
+
+def rendered_ports(docs, kind):
+    """({(port, protocol): [where]}, {Service name: {(target port, protocol)}}): the workload's container ports
+    and hostPorts, and every rendered Service's target ports."""
+    wl = workload(docs, kind)
+    containers = (wl or {}).get("spec", {}).get("template", {}).get("spec", {}).get("containers") or [{}]
+    ports = containers[0].get("ports") or []
+    by_name = {p.get("name"): p["containerPort"] for p in ports}
+    found = {}
+    for p in ports:
+        key = (p["containerPort"], p.get("protocol", "TCP"))
+        found.setdefault(key, []).append(f"containerPort {p.get('name')}")
+        if p.get("hostPort"):
+            found[key].append(f"hostPort {p['hostPort']}")
+    services = {}
+    for (k, name), d in docs.items():
+        if k != "Service":
+            continue
+        services[name] = set()
+        for p in d["spec"].get("ports") or []:
+            target = p.get("targetPort", p["port"])
+            key = (by_name.get(target, target), p.get("protocol", "TCP"))
+            services[name].add(key)
+            found.setdefault(key, []).append(f"Service {name} port {p.get('name')}")
+    return found, services
+
+
+def check_ports(tag, relay, docs, kind):
+    required, optional, problems = listeners(relay)
+    for problem in problems:
+        check(False, f"{tag}: {problem}")
+    found, services = rendered_ports(docs, kind)
+    dead = {key: where for key, where in found.items() if key not in required | optional}
+    for (port, l4), where in sorted(dead.items()):
+        print(f"      no listener on {port}/{l4}: {', '.join(where)}")
+    check(not dead, f"{tag}: every rendered port has a started listener ({len(dead)} without)")
+    container = {key for key, where in found.items() if any(w.startswith("containerPort") for w in where)}
+    no_port = sorted(required - container)
+    no_service = sorted(required - set().union(*services.values())) if services else []
+    check(not no_port and not no_service,
+          f"{tag}: every started listener has its port (listeners {sorted(required)}; "
+          f"without a container port {no_port}; on no Service {no_service})")
+
+
 def checksum(docs, kind):
     wl = workload(docs, kind)
     return ((wl or {}).get("spec", {}).get("template", {}).get("metadata", {}).get("annotations") or {}).get("checksum/config")
@@ -170,6 +278,8 @@ def main():
                 for path, why in forbidden.items():
                     present = relay is not None and dig(relay, path) is not None
                     check(not present, f"{tag}, {v}: no {'.'.join(path)} in the collector config ({why})")
+                if relay is not None:
+                    check_ports(f"{tag}, {v}", relay, docs, kind)
                 if forbidden:
                     before = checksum(docs, kind)
                     changed, err = render(helm, root, chart, [*args, "--set", CHANGE])

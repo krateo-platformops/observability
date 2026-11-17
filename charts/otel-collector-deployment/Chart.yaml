@@ -96,7 +96,15 @@ type: application
 # same object for object, ConfigMap name, labels and checksum/config value included, so pods do
 # not restart; Helm 4 renders the same. Overrides under opentelemetry-collector.config keep their
 # meaning. tests/collector-helm4-render.py.
-version: 0.3.21
+# 0.3.22: no container ports and no Service. Upstream opened ports for its default receivers
+# (otlp 4317/4318, jaeger 6831/14250/14268, zipkin 9411); this collector runs none of them, since
+# k8sobjects and k8s_cluster read the Kubernetes API and listen on nothing, so every one refused
+# connections. ports.<name>.enabled: false for all six, and service.enabled: false, because a
+# ClusterIP Service with no ports is rejected by the API server (spec.ports: Required value). The
+# collector config and checksum/config are unchanged; the pod rolls once for the pod-template ports.
+# A receiver added that listens needs its port enabled; tests/collector-helm4-render.py checks
+# ports and started receivers against each other, both ways.
+version: 0.3.22
 appVersion: "1.0.9"
 dependencies:
   - name: opentelemetry-collector
