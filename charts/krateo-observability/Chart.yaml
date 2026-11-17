@@ -252,7 +252,20 @@ type: application
 # Alerts with the extended tier).
 # 0.1.53: comments only: neutral wording in comments (no internal ids or private repo
 # references); no rendered object changes.
-version: 0.1.53
+# 0.1.54: renders under Helm 4. hyperdx.config.MONGO_URI and HYPERDX_OTEL_EXPORTER_TABLES_TTL are
+# empty strings where they were null. Helm 4.2 and later drop nulls from a parent chart's own
+# values.yaml before the subchart's defaults merge in (helm/helm#31979, first in v4.2.0; reported as
+# helm/helm#32132 and #32522, open), so under Helm 4.3.2 both came back with upstream's values, the
+# MongoDB URI with its default password among them, and the MONGO_URI guard refused the render, as it
+# should. An empty string overrides upstream the same way under Helm 3 and 4. The guard now refuses a
+# non-empty MONGO_URI (it refused the key's presence). clickstack-config gains the two keys, empty;
+# nothing reads either (HyperDX's env MONGO_URI from the Secret wins over envFrom; the TTL is read
+# only by the disabled bundled collector), and HyperDX has no checksum of the ConfigMap, so nothing
+# restarts. clickhouse.cluster.spec.settings.logger stays null: no value renders as "no logger" in
+# both versions, so under Helm 4 the ClickHouseCluster spec gets upstream's logger (100M x 10)
+# until Helm 4 changes this (helm/helm#32132); check-helm4-render allows exactly that difference. The platform renders
+# with Helm 3.20 and sees only the two empty keys.
+version: 0.1.54
 appVersion: "3.5.0"
 dependencies:
   - name: clickstack

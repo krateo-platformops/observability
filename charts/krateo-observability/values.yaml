@@ -809,6 +809,13 @@ clickstack:
           # 100M x 5, 0.1.22), and that is the one this chart keeps. null deletes upstream's key, so
           # the ClickHouseCluster spec stays as it was and the clickstack 3.5.0 upgrade changes
           # nothing in ClickHouse's config.
+          # HELM 4: this null holds under Helm 3 only, the version the platform renders with (3.20).
+          # Helm 4.2 and later drop nulls from a parent chart's own values.yaml before the subchart's
+          # defaults merge in (helm/helm#31979; reported as helm/helm#32132), so there the spec gets
+          # upstream's logger back: still bounded (information, 100M x 10), but a spec change. No
+          # value renders as "no logger" in both versions, and an explicit logger would change the
+          # spec under Helm 3 as well, so it stays null. tests/helm4-render.py allows exactly this
+          # difference between the two renders, and nothing else.
           logger: null
           # PORTAL READER USERS. sse-proxy and snowplow read ClickHouse as `default` today, which has
           # no password and GRANT ALL. These two users bound portal reads instead: read-only, a time
@@ -1232,17 +1239,22 @@ clickstack:
     # the full URI, with its public default password, into this ConfigMap in plain text, and the same
     # password into clickstack-secret and the MongoDB user's password Secret.
     #
-    # MONGO_URI: null deletes upstream's key, so clickstack-config holds no credential at all. HyperDX
-    # gets MONGO_URI from the Secret through deployment.env below; env wins over envFrom, but nothing
-    # in the ConfigMap is left to win over. The template refuses to render if this key comes back.
+    # MONGO_URI is EMPTY, so clickstack-config holds no credential at all. HyperDX gets MONGO_URI
+    # from the Secret through deployment.env below, and env wins over the envFrom ConfigMap. The
+    # template refuses to render if this key is not empty.
+    #
+    # Empty, not null (0.1.54). A null here deleted upstream's key under Helm 3, but Helm 4.2 and
+    # later drop nulls from a parent chart's own values.yaml before the subchart's defaults merge in
+    # (helm/helm#31979; reported as helm/helm#32132), so upstream's URI, with its default password,
+    # came back. An empty string overrides upstream's value the same way in every Helm version.
     config:
-      MONGO_URI: null
+      MONGO_URI: ""
       # Added by clickstack 3.5.0: the retention its bundled collector gives the tables it creates.
       # Only HyperDX's OpAMP config template reads it (opampController.js, with its own 720h
       # default), for the bundled collector this chart disables. The collectors that create otel_*
-      # here set their own ttl (168h). Deleted so clickstack-config doesn't state a 30-day
-      # retention that nothing applies.
-      HYPERDX_OTEL_EXPORTER_TABLES_TTL: null
+      # here set their own ttl (168h). Emptied so clickstack-config doesn't state a 30-day
+      # retention that nothing applies (empty, not null: see MONGO_URI above).
+      HYPERDX_OTEL_EXPORTER_TABLES_TTL: ""
     # MONGODB_PASSWORD is emptied (0.1.46). It is upstream's public default, rendered into
     # krateo-clickstack-mongodb-password and clickstack-secret. Nothing has read it since 0.1.44 (the
     # MongoDB user's passwordSecretRef names mongodb-hyperdx-credentials, HyperDX's MONGO_URI comes
