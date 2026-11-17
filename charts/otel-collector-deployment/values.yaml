@@ -6,15 +6,15 @@ global: {}
 # scrape them via kubernetes_sd_configs (pod role) and feed the metrics pipeline.
 #
 # STATUS: the bridge is NOT usable with the default (minimal) krateo-otel-collector image,
-# which does not compile in the prometheus receiver. The receiver is therefore nulled in
-# config.receivers below (see the detailed note there) — a default install runs clean.
+# which does not compile in the prometheus receiver. The receiver is therefore left out of the
+# rendered config (see the detailed note at config.receivers) — a default install runs clean.
 # Enabling it is a THREE-part change, not a one-flag switch (see that note):
 #   (1) a collector image built WITH the prometheus receiver,
 #   (2) restore the receiver config, and
 #   (3) add `prometheus` to the metrics pipeline.
 # `prometheusScrape.enabled` below is a MARKER only — it does NOT wire anything on its own
 # (a values-only wrapper around the upstream opentelemetry-collector chart cannot
-# conditionally omit a nested receiver key; the fix instead nulls the receiver by default).
+# conditionally omit a nested receiver key; the receiver is instead left out by default).
 #
 # TARGET COMPONENTS (OTLP-less today) that the bridge would scrape once enabled — they must
 # expose /metrics and carry prometheus.io/scrape|port|path annotations:
@@ -114,14 +114,33 @@ opentelemetry-collector:
     clusterMetrics:
       enabled: false
 
+  # THIS CHART RENDERS THE COLLECTOR'S CONFIGMAP (templates/configmap.yaml), and upstream mounts it.
+  # The config below is still the place to set or override anything (componentValues
+  # opentelemetry-collector.config.*): the template takes it as Helm merged it, upstream's defaults
+  # included, and builds it with upstream's own config template. What changes is how upstream's
+  # default jaeger, otlp, prometheus and zipkin receivers and its default traces pipeline are left
+  # out. They used to be set to null here, but Helm 4.2 and later drop a parent chart's own nulls
+  # before the subchart's defaults merge in (upstream Helm change 31979), so they came back. The
+  # template now leaves each out while it still holds upstream's default value; set one under
+  # config and it is kept (templates/_collector-config.tpl). Same name, same text: the ConfigMap is
+  # the one upstream rendered, and checksum/config still hashes it, so pods roll on a config change.
+  configMap:
+    create: false
+    existingName: '{{ include "otel-collector-deployment.configMapName" . }}'
+  # Upstream's own checksum/config hashes its configmap.yaml, which renders nothing now; this one
+  # hashes this chart's ConfigMap instead (tpl'd by upstream in its own context).
+  enableConfigChecksumAnnotation: false
+  podAnnotations:
+    checksum/config: '{{ include "otel-collector-deployment.configMap" . | sha256sum }}'
+
   config:
     receivers:
-      jaeger: null
-      otlp: null
-      zipkin: null
-      # Prometheus -> OTLP bridge receiver — NULLED by default (like jaeger/otlp/zipkin above).
+      # Upstream's default jaeger, otlp and zipkin receivers are not run: this collector receives
+      # nothing over the network (templates/_collector-config.tpl leaves them out).
       #
-      # WHY null and not just "declared but inert": the OTel Collector validates the TYPE of
+      # Prometheus -> OTLP bridge receiver — LEFT OUT by default (like jaeger/otlp/zipkin).
+      #
+      # WHY left out and not just "declared but inert": the OTel Collector validates the TYPE of
       # EVERY declared receiver at config load, used by a pipeline or not. The minimal
       # krateo-otel-collector image (builder-config.yaml) compiles in ONLY k8sobjects +
       # k8s_cluster — it has NO prometheus receiver — so merely DECLARING `prometheus` here
@@ -133,10 +152,10 @@ opentelemetry-collector:
       # To enable the Prometheus -> OTLP bridge you MUST:
       #   (1) run a collector image BUILT WITH the prometheus receiver
       #       (add receiver/prometheusreceiver to krateo-otel-collector/builder-config.yaml),
-      #   (2) replace this `null` with the krateo-pod-annotations scrape config (preserved
-      #       commented below for reference), and
+      #   (2) set `prometheus` here to the krateo-pod-annotations scrape config (preserved
+      #       commented below for reference); any value other than upstream's default self-scrape
+      #       is kept in the config, and
       #   (3) add `prometheus` to service.pipelines.metrics.receivers.
-      prometheus: null
       # prometheus:
       #   config:
       #     scrape_configs:
@@ -365,14 +384,14 @@ opentelemetry-collector:
           # at startup with: unknown type: "transform".
           processors: [memory_limiter, k8sattributes, resource, compositionresolver, transform, batch]
           exporters: [clickhouse]
-        # To enable the Prometheus -> OTLP bridge: restore the prometheus receiver (nulled by
+        # To enable the Prometheus -> OTLP bridge: restore the prometheus receiver (left out by
         # default under config.receivers — requires a prometheus-capable collector image) and
         # add it here, i.e. receivers: [k8s_cluster, prometheus].
         metrics:
           receivers: [k8s_cluster]
           processors: [memory_limiter, k8sattributes/run-to-completion, filter/run-to-completion-readiness, transform/drop-tmp-component, batch]
           exporters: [clickhouse]
-        traces: null
+        # No traces pipeline: upstream's default one is left out (templates/_collector-config.tpl).
 
   extraEnvs:
     - name: CH_USERNAME

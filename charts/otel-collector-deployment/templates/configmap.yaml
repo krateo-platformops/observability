@@ -1,0 +1,2 @@
+{{- /* The collector's ConfigMap; see _collector-config.tpl. */ -}}
+{{- include "otel-collector-deployment.configMap" (index .Subcharts "opentelemetry-collector") }}
