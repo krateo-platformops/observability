@@ -1,7 +1,7 @@
 ---
 type: Configuration
 title: observability — the default alert set
-description: The 33 Alert CRs the chart seeds, the measured evidence behind every filter and threshold, and the three rules that decide whether an Alert can fire at all — `where` is ClickHouse SQL and not the Lucene the CRD advertises, severity needs `otel-collector-daemonset` ≥ 0.1.17 and JSON logs, and log alerts must exclude the observability stack or they diagnose themselves. Event alerts skip the DELETED copy of an expired Event.
+description: The 36 Alert CRs (31 core, 5 extended) and 4 Metric CRs the chart seeds, among them the SLO objects adopted from krateo-057 (0.1.52), the measured evidence behind every filter and threshold, and the three rules that decide whether an Alert can fire at all — `where` is ClickHouse SQL and not the Lucene the CRD advertises, severity needs `otel-collector-daemonset` ≥ 0.1.17 and JSON logs, and log alerts must exclude the observability stack or they diagnose themselves. Event alerts skip the DELETED copy of an expired Event.
 resource: oci://ghcr.io/krateo-platformops/charts/krateo-observability
 tags: [alerting, alerts, observability, clickhouse, hyperdx, sre, runbook]
 timestamp: 2026-09-18T00:00:00Z
@@ -131,6 +131,9 @@ about whether your cluster has that problem.
 | `sre-jwt-in-traces` | core | traces | above 1 | 15m | 0 of 45,180 spans |
 | `sre-credential-header-in-traces` | core | traces | above 1 | 15m | 0 in 7 days (0.1.38) |
 | `sre-clickhouse-disk-headroom` | core | metric `k8s.volume.available`, min | below 3 GiB | 15m | n/a (0.1.30) |
+| `cmp-slo-api-p95` | core | metric `traces.span.metrics.duration` (snowplow), p95 | above 500 ms | 1h | n/a (0.1.52, see below) |
+| `cmp-slo-api-error-ratio` | core | metric `traces.span.metrics.calls` (snowplow), share with `krateo.sli.error` = "true" | above 0.001 | 1h | n/a (0.1.52) |
+| `cmp-slo-metrics-overflow` | core | metric `traces.span.metrics.calls`, overflow rows | above 1 | 1h | n/a (0.1.52) |
 | `sre-rbac-denied-burst` | extended | logs | above 20 | 15m | 3,240 |
 | `sre-upstream-timeouts` | extended | logs | above 50 | 15m | 1,217 |
 | `sre-volume-resize-issue` | extended | events | above 0 | 1h | 4 |
@@ -266,6 +269,169 @@ Entries are prefixed `sre-` because Helm will not adopt a resource it does not a
 entry reusing the name of an alert someone hand-applied fails the upgrade outright with an
 ownership error. A draft of this set did exactly that against a hand-applied CR on a live
 cluster.
+
+The SLO set (`cmp-slo-*` and its Metrics `slo-span-*`, 0.1.52) is the one deliberate exception: it
+keeps the names of the SLO objects proven on krateo-057 on 2026-11-10, so those CRs are adopted rather
+than recreated.
+See the next section for the adoption step.
+
+## SLO objects (0.1.52)
+
+The CMP API objectives, as two Metrics and three core Alerts, each evaluated over the last hour:
+
+| object | what it reads | fires when |
+|---|---|---|
+| Metric `slo-span-calls` | `traces.span.metrics.calls` (sum, DELTA) from the spanmetrics connector | |
+| Metric `slo-span-duration` | `traces.span.metrics.duration` (histogram, ms, buckets 25 ms to 10 s) | |
+| Alert `cmp-slo-api-p95` | p95 of `slo-span-duration`, `service.name` = snowplow | at least 500 ms |
+| Alert `cmp-slo-api-error-ratio` | sum of `slo-span-calls` with `krateo.sli.error` = "true" (5xx or no response; 4xx is not a failure) over the sum of all of snowplow's, a `ratio` alert | a share of at least 0.001 |
+| Alert `cmp-slo-metrics-overflow` | sum of `slo-span-calls` rows with `otel.metric.overflow` = "true" | at least 1 row: the SLIs above under-count without going NO DATA |
+
+**Source.** The specs are the CMP team's SLO generator output, the same objects that were proven on
+krateo-057 on 2026-11-10 (applied there by hand). The chart is now their only source, at the CMP
+team's request. The output is committed as
+[`tests/fixtures/slo-objects-render.yaml`](../tests/fixtures/slo-objects-render.yaml), with the
+generator commit in its header, and `tests/slo-defaults.py` (workflow `check-slo-defaults`) fails when
+the chart's rendered specs differ from it in any field, value or JSON type. A change to a target or a
+description is made in the generator and in `values.yaml` together, and the fixture is refreshed from
+the generator. displayName and description are the generator's text.
+
+**Needs:**
+
+- **alert-provider 0.2.68** for these five: `spec.description` (0.2.68's rename), `metricRef` and
+  `aggregation: p95` (0.2.51), `ratio` (0.2.58). The chart as a whole already needs 0.2.69, for
+  `runbook` (0.1.40), so the chart's minimum doesn't move.
+- **otel-collector-daemonset 0.1.26**: the spanmetrics connector that emits both metrics, with the
+  bucket bounds the descriptions name.
+- **`krateo.sli.error` stamped on the SLI spans by snowplow and the frontend.** Without it the error
+  ratio's numerator is empty and the alert reads 0.
+
+They are core. They stay silent while the API meets its objectives, and on a cluster with no snowplow
+traffic: HyperDX evaluates an empty window as 0, and all three are `above`. They don't open incidents:
+alert-provider marks an alert on an aggregated value `OpensIncidents=False` (`AggregatedValue`).
+
+**Labels.** The chart's standard two, `app.kubernetes.io/managed-by: krateo-observability-defaults` and
+`app.kubernetes.io/part-of: krateo-observability`, like every other default. The extra label the
+hand-applied objects carry on 057 is not rendered: nothing selects on it.
+
+### Adoption on krateo-057
+
+On krateo-057 the five already exist, applied with `kubectl apply` and carrying no Helm ownership. The
+chart renders them under the same names on purpose: an adopted CR is patched in place, so
+alert-provider keeps its `status.hyperdxAlertId` and the HyperDX alert it points to. A recreated CR
+would get a new HyperDX alert. Demo, and any new cluster, has none of them, so there they are created.
+
+**Pre-check (read-only).** Run before the roll. Each line should show an empty `managed-by` and
+`release`, `generation=1`, and, for the Alerts, a `hyperdxAlertId`. Note the ids, to compare after,
+and the `labels` (the extra label the hand apply added shows there).
+
+```sh
+kubectl -n krateo-system get \
+  alerts.observability.krateo.io/cmp-slo-api-p95 \
+  alerts.observability.krateo.io/cmp-slo-api-error-ratio \
+  alerts.observability.krateo.io/cmp-slo-metrics-overflow \
+  metrics.observability.krateo.io/slo-span-calls \
+  metrics.observability.krateo.io/slo-span-duration \
+  -o jsonpath='{range .items[*]}{.kind}/{.metadata.name}{"\t"}managed-by={.metadata.labels.app\.kubernetes\.io/managed-by}{"\t"}release={.metadata.annotations.meta\.helm\.sh/release-name}/{.metadata.annotations.meta\.helm\.sh/release-namespace}{"\t"}generation={.metadata.generation}{"\t"}hyperdxAlertId={.status.hyperdxAlertId}{"\t"}labels={.metadata.labels}{"\n"}{end}'
+helm get metadata krateo-observability -n krateo-system
+```
+
+A `release` naming anything but `krateo-observability/krateo-system` means another release owns the
+object: stop, and find out which.
+
+**Why a plain upgrade would fail.** Helm 3 refuses to put a resource that exists in the cluster but
+not in the release's previous manifest into the release, unless it already carries Helm's ownership
+metadata: `<kind> "<name>" in namespace "krateo-system" exists and cannot be imported into the current
+release: invalid ownership metadata`. The check is `checkOwnership` in Helm's
+`pkg/action/validate.go` (the same in v3.19.0 and v3.20.2), and it needs all three of:
+
+- label `app.kubernetes.io/managed-by` equal to exactly `Helm`;
+- annotation `meta.helm.sh/release-name` equal to the release name, `krateo-observability`;
+- annotation `meta.helm.sh/release-namespace` equal to the release namespace, `krateo-system`.
+
+Helm skips that check only with `TakeOwnership` (`helm upgrade --take-ownership`, Helm 3.17 and
+later), when it adopts whatever exists.
+
+**On krateo-057 the composition controller adopts them itself.** krateo-observability is installed
+and upgraded there by the composition-dynamic-controller (2.13.105 on 2026-11-16, built with plumbing
+v1.80.0 and Helm v3.20.2), and it passes `TakeOwnership: true` on install, reconcile and upgrade
+(core-provider `go/composition-dynamic-controller/internal/composition/composition.go`). Its reconcile
+also treats a live object that the stored manifest lacks as last applied in its rendered form
+(plumbing `helm/v3/reconcile.go`). So the roll to 0.1.52 needs no manual step there. This was read
+from the source, not exercised on a cluster.
+
+**The one-time ownership step**, needed only where the upgrade runs without `TakeOwnership` (a plain
+`helm upgrade` by hand, or a controller older than that). Run it once, right before the upgrade. It
+is harmless on 057 too, if you'd rather not depend on the controller's flag:
+
+```sh
+kubectl -n krateo-system label \
+  alerts.observability.krateo.io/cmp-slo-api-p95 \
+  alerts.observability.krateo.io/cmp-slo-api-error-ratio \
+  alerts.observability.krateo.io/cmp-slo-metrics-overflow \
+  metrics.observability.krateo.io/slo-span-calls \
+  metrics.observability.krateo.io/slo-span-duration \
+  app.kubernetes.io/managed-by=Helm
+kubectl -n krateo-system annotate \
+  alerts.observability.krateo.io/cmp-slo-api-p95 \
+  alerts.observability.krateo.io/cmp-slo-api-error-ratio \
+  alerts.observability.krateo.io/cmp-slo-metrics-overflow \
+  metrics.observability.krateo.io/slo-span-calls \
+  metrics.observability.krateo.io/slo-span-duration \
+  meta.helm.sh/release-name=krateo-observability \
+  meta.helm.sh/release-namespace=krateo-system
+```
+
+`kubectl label` and `annotate` refuse to change a key that's already set to something else, which is
+what you want here; don't add `--overwrite`. The `managed-by=Helm` label is temporary: the chart
+renders `krateo-observability-defaults`, and the controller's next reconcile sets it, as on every other
+default alert.
+
+**What the upgrade changes on each live object.** Compared on 2026-11-17 against the chart's render:
+
+- **The three Alerts' `displayName` and `description`.** The objects on 057 carry the generator's
+  earlier wording, which named internal identifiers; the chart ships the generator's current,
+  generic text. Nothing else in their specs changes: metricRef, aggregation, labels, ratio,
+  threshold, thresholdType and interval are identical. `metadata.generation` goes from 1 to 2, and
+  alert-provider updates the HyperDX alert of the same CR (expected to keep `status.hyperdxAlertId`;
+  the post-check confirms it).
+- **The two Metrics' specs:** no change.
+- **`where: ""`** on the three Alerts, the CRD's default, which the chart doesn't render, stays: an
+  adoption deletes nothing it didn't last apply.
+- **labels added:** `app.kubernetes.io/part-of: krateo-observability`; `app.kubernetes.io/managed-by`
+  (`Helm` from the upgrade itself, then `krateo-observability-defaults` once the controller
+  reconciles); the controller's `krateo.io/composition-*` labels (`composition-id`,
+  `composition-installed-version`, and the rest, as on the 26 default alerts).
+- **annotations added:** `meta.helm.sh/release-name: krateo-observability`,
+  `meta.helm.sh/release-namespace: krateo-system`, and the controller's `krateo.io/traceparent`.
+- **kept:** the hand apply's extra label, `kubectl.kubernetes.io/last-applied-configuration`, the
+  finalizer `observability.krateo.io/hyperdx-cleanup` and the status. Helm's merge removes only keys
+  the release applied before, and it never applied these.
+
+After the roll, re-run the pre-check. Each object should name `krateo-observability/krateo-system`, and
+each Alert's `hyperdxAlertId` should be unchanged. To drop the hand apply's leftovers (optional,
+nothing selects on them), remove the extra label the pre-check showed, with
+`kubectl -n krateo-system label <the five objects> <that-label-key>-`, and the last-applied annotation:
+
+```sh
+kubectl -n krateo-system annotate \
+  alerts.observability.krateo.io/cmp-slo-api-p95 \
+  alerts.observability.krateo.io/cmp-slo-api-error-ratio \
+  alerts.observability.krateo.io/cmp-slo-metrics-overflow \
+  metrics.observability.krateo.io/slo-span-calls \
+  metrics.observability.krateo.io/slo-span-duration \
+  kubectl.kubernetes.io/last-applied-configuration-
+```
+
+From then on, change these through the chart (or a composition's `defaultAlerts` values), never with
+`kubectl apply`: the next reconcile reverts a hand edit.
+
+**Schema and template changes this needed.** An Alert entry takes `ratio` (`labels`, rendered as
+`spec.ratio`; empty labels render `ratio: {}`). `threshold` was cast to an integer, which would have
+made 0.001 a 0: a whole number still renders as an integer, a fraction as itself. Its schema type moves
+from `integer` to number-or-string. crdgen types a bare `number` as a string in the composition CRD,
+and collapses exactly this union to `string`, so in a composition's `spec` a threshold is written
+quoted (`"0.001"`). The template renders it as a number and refuses a string that isn't a plain decimal.
 
 ## `sre-credential-header-in-traces` (0.1.38, S1)
 

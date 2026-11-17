@@ -325,8 +325,15 @@
                 "description": "Operator guidance, rendered as spec.runbook (alert-provider >= 0.2.69). It follows the description in the HyperDX notification (description, a blank line, the runbook; at most 4096 characters in all) and goes to the RCA prompt between <runbook> tags. No '{{' and no @word after whitespace: HyperDX compiles the message as Handlebars. The template refuses both, and the 4096 overflow."
               },
               "threshold": {
-                "type": "integer",
-                "description": "A row count, or a metric value for a metric alert. Typed integer, not number: crdgen types number as a string in the generated CRD."
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ],
+                "description": "A row count, or a metric value for a metric alert; a fraction for a ratio alert (e.g. 0.001). A number here, or a string holding a plain decimal ('0.001', '500'). The bare number-or-string pair is deliberate: crdgen types a bare `number` as a string in the generated composition CRD and collapses exactly this union to one, so in a composition's spec the threshold is written as a string. The template renders either as a number and refuses a string that is not a plain decimal. Integer-typed until 0.1.51."
               },
               "thresholdType": {
                 "type": "string",
@@ -384,7 +391,21 @@
                 "additionalProperties": {
                   "type": "string"
                 },
-                "description": "Metric alerts only: keep points whose attribute or resource attribute has this value. Resource attributes need alert-provider 0.2.61."
+                "description": "Metric alerts only: keep points whose attribute or resource attribute has this value. Resource attributes need alert-provider 0.2.61. With ratio, these select the numerator."
+              },
+              "ratio": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "labels": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "The denominator's points, ANDed; empty keeps every point of the metric."
+                  }
+                },
+                "description": "Metric alerts only, with aggregation sum or increase: compare a share, the aggregation of the points labels keep divided by that of the points ratio.labels keep. Needs alert-provider 0.2.58. Not with groupBy."
               },
               "metadataLabels": {
                 "type": "object",
