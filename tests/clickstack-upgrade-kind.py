@@ -24,7 +24,7 @@ After the upgrade it checks:
      and watch configmaps in krateo-system, get secrets), no provisioner process or log line, and a
      ConfigMap labelled hyperdx.io/dashboard=true in krateo-system is NOT provisioned (control);
   3. HyperDX's MongoDB credential: MONGO_URI from secretKeyRef mongodb-hyperdx-credentials/uri, the
-     pod's only secretKeyRef, and clickstack-config without MONGO_URI;
+     pod's only secretKeyRef, and clickstack-config without a MONGO_URI value (empty from 0.1.54);
   4. MongoDB data: the same team, the same access key (compared by hash), the webhook, both
      dashboards with their tile ids, the alert with its fields, the sources unchanged;
   5. alert-provider's calls still work: PUT of the alert and of the dashboard (same tile id, the
@@ -443,7 +443,7 @@ def main():
                        for e in c.get("env", []) if "secretKeyRef" in e.get("valueFrom", {})})
         check(refs == ["mongodb-hyperdx-credentials"], f"the pod's only secretKeyRef is mongodb-hyperdx-credentials ({refs})")
         cm = kube.json("get", "configmap", "clickstack-config")["data"]
-        check("MONGO_URI" not in cm, "clickstack-config still has no MONGO_URI")
+        check(not cm.get("MONGO_URI"), "clickstack-config still has no MONGO_URI value (absent, or empty from 0.1.54)")
 
         step("4. MongoDB data")
         hx = HyperDX(kube, email, password)

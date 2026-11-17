@@ -2,7 +2,8 @@
 """krateo-observability's HyperDX MongoDB credential: rendered, then used against MongoDB.
 
 1. Render (helm template, default values) and check:
-   - clickstack-config has no MONGO_URI and no mongodb://user:password@ anywhere;
+   - clickstack-config has no MONGO_URI value (the key is empty, 0.1.54) and no
+     mongodb://user:password@ anywhere;
    - every consumer (every container that envFroms clickstack-config, every container with a
      MONGO_URI, in any workload kind) gets MONGO_URI from secretKeyRef mongodb-hyperdx-credentials/uri,
      and no check-alerts CronJob renders (it has no env hook);
@@ -220,7 +221,8 @@ def mongo_uri_ref(c):
 def check_render(root, docs, default):
     by = {(d["kind"], d["metadata"]["name"]): d for d in docs}
     cm = by.get(("ConfigMap", "clickstack-config"), {})
-    check("MONGO_URI" not in (cm.get("data") or {}), "clickstack-config has no MONGO_URI")
+    # Empty, not absent, since 0.1.54: a null in values.yaml no longer deletes it under Helm 4.2+.
+    check((cm.get("data") or {}).get("MONGO_URI") == "", "clickstack-config's MONGO_URI is empty")
     creds_in_cm = [k for k, v in (cm.get("data") or {}).items()
                    if re.search(r"mongodb(\+srv)?://[^/\s@]*:[^/\s@]*@", str(v), re.I)]
     check(not creds_in_cm, f"clickstack-config has no mongodb://user:password@ anywhere ({creds_in_cm or 'none'})")
@@ -326,7 +328,7 @@ def check_guards(root):
         ("an initContainers override that drops the auth wait",
          {"clickstack": {"hyperdx": {"deployment": {"initContainers": []}}}}, "must contain wait-for-mongodb-auth"),
         ("MONGO_URI back in clickstack-config",
-         {"clickstack": {"hyperdx": {"config": {"MONGO_URI": "mongodb://h/x"}}}}, "MONGO_URI must stay null"),
+         {"clickstack": {"hyperdx": {"config": {"MONGO_URI": "mongodb://h/x"}}}}, "MONGO_URI must stay empty"),
         ("upstream's default MONGODB_PASSWORD put back",
          {"clickstack": {"hyperdx": {"secrets": {"MONGODB_PASSWORD": upstream_default(root)}}}},
          "MONGODB_PASSWORD must stay empty"),

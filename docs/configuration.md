@@ -195,9 +195,19 @@ steady 72-79Mi): raise it when turning it on.
 
 Also from clickstack 3.5.0: the readiness probe reads `/ready` (503 until MongoDB is connected)
 where it read `/health`; the default sources changed, which HyperDX applies only where none exist.
-Two upstream additions are nulled to keep what runs unchanged:
-`clickhouse.cluster.spec.settings.logger` (`extraConfig.logger` stays the bound) and
-`hyperdx.config.HYPERDX_OTEL_EXPORTER_TABLES_TTL` (read only by the disabled bundled collector).
+Two upstream additions are overridden to keep what runs unchanged:
+`clickhouse.cluster.spec.settings.logger` is null (`extraConfig.logger` stays the bound) and
+`hyperdx.config.HYPERDX_OTEL_EXPORTER_TABLES_TTL` is empty (read only by the disabled bundled
+collector).
+
+**Helm 3 and Helm 4.** The platform renders the chart with Helm 3 (3.20). Helm 4.2 and later drop a
+null in a parent chart's own `values.yaml` before the subchart's defaults merge in
+([helm/helm#31979](https://github.com/helm/helm/pull/31979), reported as
+[helm/helm#32132](https://github.com/helm/helm/issues/32132)), so a null there no longer deletes the
+subchart's key. Since 0.1.54 `hyperdx.config.MONGO_URI` and `HYPERDX_OTEL_EXPORTER_TABLES_TTL` are
+empty strings, not null, and render the same in both. `settings.logger` stays null: under Helm 4 the
+ClickHouseCluster spec gets upstream's logger (information, 100M x 10) until Helm fixes #32132.
+`check-helm4-render` renders the chart under both and allows only that difference.
 The `wait-for-mongodb-auth` init container must run the app's image; the render now fails if it
 doesn't.
 

@@ -1,0 +1,73 @@
+# krateo-observability under Helm 3 and Helm 4 (0.1.54). The platform renders the chart with Helm 3
+# (3.20); Helm 4.2 and later drop nulls from a parent chart's own values.yaml before the subchart's
+# defaults merge in (helm/helm#31979, reported as helm/helm#32132), which brought upstream's MongoDB
+# URI back into clickstack-config under 0.1.53. tests/helm4-render.py renders the default values, and
+# again with .github/ci/injected-global.yaml, under both, and fails on a non-empty MONGO_URI or any
+# difference between the two renders other than the one it allows (ClickHouseCluster
+# spec.settings.logger).
+#
+# Both binaries come from get.helm.sh at pinned versions, each checked against the sha256 written
+# here (the same as in the release notes). The repo's other workflows use azure/setup-helm, which
+# installs one Helm on PATH; this one needs two side by side.
+#
+# It is a separate workflow on purpose. lint.yaml is the org-wide canonical chart-repo lint,
+# identical across every krateo-* chart repo.
+
+name: check-helm4-render
+
+on:
+  pull_request:
+    paths:
+      - "charts/krateo-observability/**"
+      - "tests/helm4-render.py"
+      - ".github/ci/injected-global.yaml"
+      - ".github/workflows/check-helm4-render.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "charts/krateo-observability/**"
+      - "tests/helm4-render.py"
+      - ".github/ci/injected-global.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    env:
+      HELM3_VERSION: v3.20.2
+      HELM3_SHA256: 258e830a9e613c8a7a302d6059b4bb3b9758f2f3e1bb8ea0d707ce10a9a72fea
+      HELM4_VERSION: v4.3.2
+      HELM4_SHA256: d1c0278d46beab79582d7e50f5b3dc206944ba8e577cde618513fd07daa53983
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Download Helm 3 and Helm 4, verifying each sha256
+        run: |
+          set -euo pipefail
+          for pair in "3 $HELM3_VERSION $HELM3_SHA256" "4 $HELM4_VERSION $HELM4_SHA256"; do
+            set -- $pair
+            dir="$RUNNER_TEMP/helm$1"
+            mkdir -p "$dir"
+            tgz="$dir/helm-$2-linux-amd64.tar.gz"
+            curl -fsSL --retry 3 -o "$tgz" "https://get.helm.sh/helm-$2-linux-amd64.tar.gz"
+            echo "$3  $tgz" | sha256sum -c -
+            tar -xzf "$tgz" -C "$dir"
+            "$dir/linux-amd64/helm" version --short
+          done
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Build the chart's dependency
+        run: |
+          helm3="$RUNNER_TEMP/helm3/linux-amd64/helm"
+          "$helm3" repo add clickstack https://clickhouse.github.io/ClickStack-helm-charts
+          "$helm3" dependency build charts/krateo-observability
+      - name: Render under both and compare
+        run: >-
+          python3 tests/helm4-render.py .
+          "$RUNNER_TEMP/helm3/linux-amd64/helm"
+          "$RUNNER_TEMP/helm4/linux-amd64/helm"
