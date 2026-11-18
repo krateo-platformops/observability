@@ -11,7 +11,8 @@
 -- browser span without the rest of its trace is a join failure, not sampling.
 -- DONE when, over a window with real chat use: browser_spans > 0, and joined_to_gateway,
 -- joined_to_kagent and joined_to_agent all equal browser_spans (allow the documented exceptions:
--- a closed tab exports no browser span; a mid-stream abort is ERROR with no status code).
+-- a closed tab exports no browser span; a user stop is UNSET and a network or stream failure is
+-- ERROR, both with no status code).
 WITH
     t AS (
         SELECT TraceId,
