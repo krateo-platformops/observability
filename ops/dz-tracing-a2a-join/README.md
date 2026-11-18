@@ -12,8 +12,16 @@ clickhouse-client --readonly=1 --param_start='…' --param_end='…' --queries-f
 **Done:** over a window with real chat use after snowplow ≥ 1.12.71 is live (its rum-ingest
 allowlists the span name; earlier versions drop it and count `snowplow_rum_ingest_spans_total
 {outcome="dropped_name"}`), `browser_spans > 0` and `joined_to_gateway = joined_to_kagent =
-joined_to_agent = browser_spans`. A closed tab exports no browser span; a mid-stream abort is an
+joined_to_agent = browser_spans`. A closed tab exports no browser span. A turn the user stops is
+UNSET with no status code (a stop is not a failure), and a turn whose network or stream fails is
 ERROR with no status code; neither breaks the join.
 
 **Baseline on krateo-057** (2026-11-09 15:00 → 11-16 15:00Z, snowplow 1.12.70): 0 browser spans,
 as expected before the allowlist ships.
+
+**Done on krateo-057** (2026-11-18, snowplow 1.12.74; five portal chat turns, 04:01:30–04:08:48Z and
+06:33:32–06:44:15Z, one of them stopped by the user): `browser_traces = browser_spans =
+joined_to_gateway = joined_to_kagent = joined_to_agent = 5`, `browser_only_traces = 0`. Each browser
+span is its trace's root and lasts the whole turn (8.1 s to 438.6 s); the stopped turn is UNSET with
+no status code, the other four UNSET with 200. Over the same period rum-ingest accepted and forwarded
+294 browser spans and dropped none (`dropped_name` 0, where 1.12.70 had counted 3).
