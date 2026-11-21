@@ -83,8 +83,14 @@ type: application
 # references); no rendered object changes.
 # 0.1.28: comments only: neutral wording (no internal work-item or plan ids);
 # no rendered object changes.
-version: 0.1.28
-appVersion: "1.5.1"
+# 0.1.29: bump the sse-proxy image to 1.6.0 (sse-proxy#47). A /notifications stream now ends when
+# the token it was opened with expires (final `: token expired` comment), and with RBAC scoping on
+# it re-resolves the caller's scope every RBAC_SCOPING_CACHE_TTL while open, so a revoked
+# namespace stops arriving within at most twice the TTL; a scope that cannot be resolved ends the
+# stream (`: scope unavailable`). Clients reconnect with a current token, as for any closed stream.
+# No new env required.
+version: 0.1.29
+appVersion: "1.6.0"
 home: https://krateo.io
 icon: https://github.com/krateoplatformops/krateo/blob/main/docs/media/logo.svg
 keywords:
