@@ -420,6 +420,15 @@ two that need agentgateway-policies >= 0.2.28 are the subject's class in `krateo
 With older facts the record is still written and names what it lacks in `krateo.audit.incomplete`.
 `krateo.request.uri` is not written until the gateway proves no credential can reach the URI (#1251).
 
+**Both access-log shapes (0.1.36).** agentgateway 1.6 renamed its access log's OTLP scope from
+`request` to `agentgateway.access` and its HTTP keys to OTel semconv: `http.method` →
+`http.request.method`, `http.status` → `http.response.status_code`, `src.addr` → `client.address`
+(the peer IP, no port), `http.host` → `server.address`, `http.path` → `url.path` (+ `url.query`),
+`http.version` → `network.protocol.version`. `logs/gateway` writes either shape to `otel_logs` as
+sent, so a reader of `otel_logs` accepts both (portal agents-cost and obs-trace-detail do). The two
+audit pipelines adapt a 1.6+ record to the < 1.6 names first, in `transform/gateway-audit-classify`,
+so `krateo_audit` and `krateo.gateway_audit.excluded` are the same from either gateway.
+
 ## `charts/otel-collector-tailsampling` — the trace tail sampler
 
 Decides, per finished trace, whether it is stored (installer#402, design in

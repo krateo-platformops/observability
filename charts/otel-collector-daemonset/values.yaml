@@ -401,11 +401,15 @@ opentelemetry-collector:
       # stream whose pod logs filelog already collects.
       # error_mode:ignore RETAINS a record whose condition errors; neither operand can error
       # (a missing attribute resolves to nil).
+      # TWO SCOPES: agentgateway < 1.6 names its OTLP access-log scope `request`; from 1.6 it is
+      # `agentgateway.access` (upstream #3430), and the HTTP keys follow OTel semconv (#3182, see
+      # transform/gateway-audit-classify). The record is written to otel_logs AS SENT, in whichever
+      # shape: readers of otel_logs accept both (portal agents-cost, obs-trace-detail).
       filter/gateway-access-log:
         error_mode: ignore
         logs:
           log_record:
-            - 'not (instrumentation_scope.name == "request" and attributes["gateway"] != nil)'
+            - 'not ((instrumentation_scope.name == "request" or instrumentation_scope.name == "agentgateway.access") and attributes["gateway"] != nil)'
       # DROPS what matches. kubeletstats reports every pod volume, and nearly all of them are
       # projected service-account tokens, configmaps and emptyDirs: 431 volumes on krateo-057, 7 of
       # them claims. The rest would add series with no use, so only claims are kept. Other kubelet
@@ -538,6 +542,39 @@ opentelemetry-collector:
         log_statements:
           - context: log
             statements:
+              # THE 1.6+ SHAPE, ADAPTED ON ENTRY. agentgateway >= 1.6 writes its access log under scope
+              # `agentgateway.access` with semconv HTTP keys (telemetry/semconv.rs http_attribute):
+              # http.method -> http.request.method, http.status -> http.response.status_code,
+              # src.addr -> client.address (the peer IP, NO port), http.host -> server.address,
+              # http.path -> url.path (+ url.query), http.version -> network.protocol.version.
+              # Classification, the count's `http.method` dimension and the projection read the < 1.6
+              # names, and three of the new names are also PROJECTION OUTPUTS (http.request.method,
+              # http.response.status_code, server.address), so an input left under one would survive
+              # keep_keys with the gateway's raw value: server.address would be the Host header, a
+              # refused hop would carry a status code. So the keys these pipelines read go back to the
+              # < 1.6 names and the colliding ones are deleted, here, before anything reads them; the
+              # scope is set last because every statement here keys on it. Both audit pipelines start
+              # with this processor, and each pipeline has its own copy of the record, so otel_logs
+              # (logs/gateway) still gets what the gateway sent. Remove once no gateway < 1.6 runs AND
+              # the pipelines read the new names.
+              - >-
+                set(attributes["http.method"], attributes["http.request.method"])
+                where instrumentation_scope.name == "agentgateway.access" and attributes["gateway"] != nil
+                and attributes["http.request.method"] != nil
+              - >-
+                set(attributes["http.status"], attributes["http.response.status_code"])
+                where instrumentation_scope.name == "agentgateway.access" and attributes["gateway"] != nil
+                and attributes["http.response.status_code"] != nil
+              - >-
+                set(attributes["src.addr"], attributes["client.address"])
+                where instrumentation_scope.name == "agentgateway.access" and attributes["gateway"] != nil
+                and attributes["client.address"] != nil
+              - >-
+                delete_matching_keys(attributes, "^(http\\.request\\.method|http\\.response\\.status_code|client\\.address|server\\.address|server\\.port|url\\.(path|query|scheme)|network\\.protocol\\.version)$")
+                where instrumentation_scope.name == "agentgateway.access" and attributes["gateway"] != nil
+              - >-
+                set(instrumentation_scope.name, "request")
+                where instrumentation_scope.name == "agentgateway.access" and attributes["gateway"] != nil
               # FIRST, whatever its protocol: a request that matched NO route (the gateway's own 404;
               # the real record is protocol `http`, no `route`) has no target at all. Excluded and
               # counted before anything is derived, so its backend_host (the proxy's CEL cannot tell
@@ -691,7 +728,11 @@ opentelemetry-collector:
               - 'set(attributes["server.address"], attributes["backend_host"]) where attributes["backend_host"] != nil and attributes["backend_host"] != ""'
               - 'set(attributes["server.address"], attributes["endpoint"]) where attributes["server.address"] == nil and attributes["endpoint"] != nil and attributes["endpoint"] != ""'
               - 'set(cache["peer"], attributes["src.addr"]) where attributes["src.addr"] != nil'
-              - 'replace_pattern(cache["peer"], ":[0-9]+$", "") where cache["peer"] != nil'
+              # The peer without its port: [v6]:port and v4:port lose the port, a bare address (what
+              # agentgateway >= 1.6 sends as client.address, v4 or v6) is left whole. Stripping
+              # ":[0-9]+$" unconditionally would cut a bare v6 address (fd00::5 -> fd00:).
+              - 'replace_pattern(cache["peer"], "^\\[(.*)\\]:[0-9]+$", "$$1") where cache["peer"] != nil'
+              - 'replace_pattern(cache["peer"], "^([^:\\[\\]]+):[0-9]+$", "$$1") where cache["peer"] != nil'
               - 'replace_pattern(cache["peer"], "^\\[(.*)\\]$", "$$1") where cache["peer"] != nil'
               - 'set(cache["xff"], attributes["source_xff"]) where attributes["source_xff"] != nil and attributes["source_xff"] != ""'
               - 'replace_pattern(cache["xff"], "\\s+", "") where cache["xff"] != nil'

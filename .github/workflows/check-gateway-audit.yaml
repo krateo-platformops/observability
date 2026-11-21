@@ -16,6 +16,7 @@ on:
       - "charts/otel-collector-daemonset/**"
       - "tests/gateway-audit-docker.py"
       - "tests/fixtures/gateway-access-log.otlp.jsonl"
+      - "tests/agentgateway_access_log_v16.py"
       - ".github/workflows/check-gateway-audit.yaml"
   push:
     branches: [main]
@@ -23,6 +24,7 @@ on:
       - "charts/otel-collector-daemonset/**"
       - "tests/gateway-audit-docker.py"
       - "tests/fixtures/gateway-access-log.otlp.jsonl"
+      - "tests/agentgateway_access_log_v16.py"
   workflow_dispatch:
 
 permissions:
