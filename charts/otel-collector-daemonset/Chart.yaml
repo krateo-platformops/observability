@@ -193,7 +193,23 @@ type: application
 # zipkin in a pipeline without configuring it keeps upstream's default receiver instead of leaving
 # the pipeline pointing at an undeclared one, which the collector refuses at startup. The same rule
 # is in otel-collector-deployment 0.3.23 and otel-collector-tailsampling 0.1.17.
-version: 0.1.35
+# 0.1.36: reads agentgateway >= 1.6's access log as well as < 1.6's. 1.6 renamed its OTLP scope
+# `request` -> `agentgateway.access` (upstream #3430) and its HTTP keys to OTel semconv (#3182):
+# http.method -> http.request.method, http.status -> http.response.status_code, src.addr ->
+# client.address (no port), http.host -> server.address, http.path -> url.path (+ url.query),
+# http.version -> network.protocol.version. On 0.1.35 a 1.6+ gateway's access log would have been
+# dropped by filter/gateway-access-log, and krateo_audit would have got no gateway rows, with no
+# error. Now otel_logs takes both scopes AS SENT, and the two gateway-audit pipelines adapt a 1.6+
+# record to the < 1.6 names on entry (transform/gateway-audit-classify), so classification, the
+# excluded count's http.method dimension and the projection are unchanged; three of the new keys are
+# projection outputs, so they are deleted there, before anything reads them. The TCP peer in
+# krateo.request.source_ips keeps a bare IPv6 client.address whole (the old ":[0-9]+$" strip would
+# cut fd00::5 to fd00:). On a < 1.6 gateway nothing changes: every new statement is conditioned on
+# the new scope, and the peer rules give the same result for ip:port and [v6]:port.
+# tests/gateway-audit-docker.py runs every case in both shapes and requires the same projected
+# records and the same excluded counts; tests/otlp-log-routing-docker.py routes a 1.6+ record.
+# The config changes, so checksum/config changes and the agents roll once.
+version: 0.1.36
 appVersion: "0.158.0"
 dependencies:
   - name: opentelemetry-collector

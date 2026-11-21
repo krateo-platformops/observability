@@ -40,6 +40,9 @@ import uuid
 
 import yaml
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from agentgateway_access_log_v16 import SCOPE_V16, convert_request  # noqa: E402
+
 CHART = "charts/otel-collector-daemonset"
 PIPES = ["logs/audit", "logs/gateway"]
 FAILS = []
@@ -145,6 +148,10 @@ def build_cases(root):
         ("core-provider-slog", wrap("core-provider", cp, slog_record("core-provider-slog", "reconciling CompositionDefinition")), None),
         ("cdc-slog", wrap("composition-dynamic-controller", cdc, slog_record("cdc-slog", "helm upgrade done")), None),
         ("request-scope-no-gateway", wrap("some-service", "request", no_gw), None),
+        # agentgateway >= 1.6: scope agentgateway.access, semconv HTTP keys. Lands in otel_logs AS
+        # SENT (checked below); the same scope without a `gateway` field lands nowhere.
+        ("gateway-access-log-1.6", convert_request(gateway_record(root, "gateway-access-log-1.6")), "logs"),
+        ("access-scope-no-gateway", wrap("some-service", SCOPE_V16, slog_record("access-scope-no-gateway", "GET /healthz 200")), None),
     ]
 
 
@@ -161,6 +168,22 @@ def read_out(path):
                     a = {x["key"]: next(iter(x["value"].values()), None) for x in lr.get("attributes", [])}
                     recs.append(a.get("t"))
     return recs
+
+
+def read_full(path, tid):
+    """The scope name and attribute keys of the record tagged tid, as the collector wrote it."""
+    if not path.exists():
+        return None
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        for rl in json.loads(line).get("resourceLogs", []):
+            for sl in rl.get("scopeLogs", []):
+                for lr in sl.get("logRecords", []):
+                    keys = {x["key"]: next(iter(x["value"].values()), None) for x in lr.get("attributes", [])}
+                    if keys.get("t") == tid:
+                        return sl.get("scope", {}).get("name"), keys
+    return None
 
 
 def main():
@@ -200,7 +223,12 @@ def main():
             got = [d for d, out in (("audit", audit), ("logs", logs)) if tid in out]
             check(got == ([want] if want else []), f"{tid}: lands in {got or 'neither table'}, want {want or 'neither table'}")
         check(len(audit) == sum(1 for c in cases if c[2] == "audit"), f"krateo_audit got exactly the audit records ({len(audit)})")
-        check(len(logs) == sum(1 for c in cases if c[2] == "logs"), f"otel_logs got exactly the gateway record ({len(logs)})")
+        check(len(logs) == sum(1 for c in cases if c[2] == "logs"), f"otel_logs got exactly the gateway records ({len(logs)})")
+        new = read_full(work / "out" / "logs.jsonl", "gateway-access-log-1.6")
+        check(new is not None and new[0] == SCOPE_V16 and "client.address" in new[1] and "http.request.method" in new[1]
+              and "src.addr" not in new[1] and "http.method" not in new[1],
+              f"the 1.6+ access-log record reaches otel_logs AS SENT: its scope and semconv keys, not renamed back "
+              f"({new[0] if new else None})")
     finally:
         if os.environ.get("SHOW_LOGS") == "1":
             print(sh("docker", "logs", "--tail", "80", name, check=False).stderr[-6000:])

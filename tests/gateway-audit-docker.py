@@ -39,6 +39,9 @@ import time
 import urllib.request
 import uuid
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from agentgateway_access_log_v16 import convert_request  # noqa: E402
+
 import yaml
 
 CHART = "charts/otel-collector-daemonset"
@@ -46,9 +49,11 @@ AUDIT_LIB = "github.com/krateo-platformops/audit/cmd/auditschema@v0.13.0"
 SCOPE = "github.com/krateo-platformops/observability/gateway-audit"
 PIPES = ["logs/gateway-audit", "logs/gateway-audit-excluded", "metrics/gateway-audit-excluded"]
 FAILS = []
+LABEL = ""
 
 
 def check(cond, msg):
+    msg = f"[{LABEL}] {msg}" if LABEL else msg
     print(("PASS " if cond else "FAIL ") + msg)
     if not cond:
         FAILS.append(msg)
@@ -181,6 +186,11 @@ def build_cases(base):
     lr = add("dashboard-rest-write", a2a, "excluded"); set_attr(lr, "protocol", "http"); set_attr(lr, "a2a.method", None)
     set_attr(lr, "route", "krateo-system/agentgateway-policies-a2a"); set_attr(lr, "http.method", "POST")
     set_attr(lr, "user_agent", "facts-test/dashboard-rest")
+    # An IPv6 TCP peer. < 1.6 writes src.addr "[v6]:port", >= 1.6 writes client.address "v6" with no
+    # port: source_ips must end with the bare address either way (stripping ":[0-9]+$" from the
+    # bare form would cut it to "fd00:").
+    lr = add("ipv6-peer", a2a, "projected"); set_attr(lr, "src.addr", "[fd00::5]:41234")
+    set_attr(lr, "source_xff", None); set_attr(lr, "user_agent", "facts-test/ipv6-peer")
     # A refused-before-dial hop: no endpoint, so server.address is the route's configured target.
     lr = add("refused-before-dial", a2a, "projected"); set_attr(lr, "endpoint", None)
     set_attr(lr, "reason", "JwtAuth"); set_attr(lr, "http.status", 401)
@@ -210,13 +220,8 @@ def run_check(binary, record, work, name):
     return r.returncode, r.stdout + r.stderr
 
 
-def main():
-    root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
-    relay, image = render(root)
-    cfg = test_config(relay)
-    binary = auditschema()
-    base = fixtures(root)
-    cases = build_cases(base)
+def run(image, cfg, cases, binary):
+    """One collector, these cases sent to it, the checks on what it writes. Returns verify()'s reads."""
     work = pathlib.Path(tempfile.mkdtemp(prefix="gwaudit-"))
     os.chmod(work, 0o755)
     (work / "out").mkdir(); os.chmod(work / "out", 0o777)
@@ -245,12 +250,49 @@ def main():
         time.sleep(8)
         logs = sh("docker", "logs", name, check=False).stderr
         check("error" not in logs.lower() or "Everything is ready" in logs, "collector started the gateway-audit pipelines")
-        verify(work, cases, binary, logs)
+        return verify(work, cases, binary, logs)
     finally:
         if os.environ.get("SHOW_LOGS") == "1":
             print(sh("docker", "logs", "--tail", "80", name, check=False).stderr[-6000:])
         sh("docker", "rm", "-f", name, check=False)
         shutil.rmtree(work, ignore_errors=True)
+
+
+def main():
+    global LABEL
+    root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+    relay, image = render(root)
+    cfg = test_config(relay)
+    binary = auditschema()
+    cases = build_cases(fixtures(root))
+    # The same cases in the shape agentgateway >= 1.6 writes (scope agentgateway.access, semconv
+    # HTTP keys; tests/agentgateway_access_log_v16.py). Every check runs on each shape, and the two
+    # must then project the SAME audit records and count the SAME excluded hops.
+    shapes = (("agentgateway < 1.6", cases),
+              ("agentgateway >= 1.6", [(tid, convert_request(req), want) for tid, req, want in cases]))
+    check(all(sl["scope"]["name"] == "agentgateway.access" for _, req, _ in shapes[1][1]
+              for rl in req["resourceLogs"] for sl in rl["scopeLogs"]), "the 1.6+ cases carry scope agentgateway.access")
+    check(not any(a["key"] in ("http.method", "http.status", "src.addr", "http.host", "http.path")
+                  for _, req, _ in shapes[1][1] for rl in req["resourceLogs"] for sl in rl["scopeLogs"]
+                  for lr in sl["logRecords"] for a in lr["attributes"]), "the 1.6+ cases carry no < 1.6 HTTP key")
+    reads = {}
+    for label, shaped in shapes:
+        LABEL = label
+        print(f"\n== {label}: {len(shaped)} records")
+        reads[label] = run(image, cfg, shaped, binary)
+    LABEL = "both shapes"
+    (old_out, old_counts), (new_out, new_counts) = reads[shapes[0][0]], reads[shapes[1][0]]
+    a, b = projection_signature(old_out), projection_signature(new_out)
+    check(a == b and len(a) > 20, f"the 1.6+ shape projects exactly the records the < 1.6 shape does ({len(a)} vs {len(b)}, "
+          f"{len(set(a) ^ set(b))} differ)")
+    if a != b:
+        for x in sorted(set(a) - set(b))[:2]:
+            print("  only < 1.6:", x[:400])
+        for x in sorted(set(b) - set(a))[:2]:
+            print("  only 1.6+ :", x[:400])
+    check(old_counts == new_counts and sum(old_counts.values()) > 0,
+          f"the 1.6+ shape counts exactly the excluded hops the < 1.6 shape does, per protocol, route and method "
+          f"({sum(old_counts.values())} vs {sum(new_counts.values())})")
     print(f"\n{len(FAILS)} failed")
     sys.exit(1 if FAILS else 0)
 
@@ -305,7 +347,9 @@ def verify(work, cases, binary, logs):
     check(all(lr.get("eventName") == "audit" for _, _, lr in out), "every projected record has EventName=audit")
     leaked = allkeys & {"user", "team", "principal", "act", "subject_principal", "endpoint", "backend_host", "baggage_session",
                         "source_xff", "user_agent", "route", "tool", "agent", "tokens_in", "mcp.session.id", "jwt.sub", "t",
-                        "krateo.gateway_audit.class", "guardrail_detail", "http.method", "http.status", "protocol", "reason"}
+                        "krateo.gateway_audit.class", "guardrail_detail", "http.method", "http.status", "protocol", "reason",
+                        "src.addr", "http.host", "http.path", "http.version", "client.address", "server.port", "url.path",
+                        "url.query", "url.scheme", "network.protocol.version"}
     check(not leaked, f"closed set: no access-log key survives the projection ({sorted(leaked)})")
     blob = json.dumps([lr for _, _, lr in out])
     check("eyJ" not in blob, "no JWT-shaped value in any projected record")
@@ -372,6 +416,9 @@ def verify(work, cases, binary, logs):
     rbd = recs(lambda a: a.get("krateo.audit.outcome") == "denied" and a.get("server.address") == "k8s-agent.krateo-system.svc:8080"
                and "http.response.status_code" not in a)
     check(len(rbd) >= 1, "refused before dialing (JwtAuth, no endpoint): denied, server.address = the route's configured target")
+    v6 = recs(lambda a: a.get("user_agent.original") == "facts-test/ipv6-peer")
+    v6ips = [[v["stringValue"] for v in a["krateo.request.source_ips"]["values"]] for a in v6 if a.get("krateo.request.source_ips")]
+    check(v6ips == [["fd00::5"]], f"IPv6 TCP peer: source_ips is the bare address, port and brackets removed ({v6ips})")
     # Falsifier on the checker itself: strip krateo.audit.gateway.route from a projected record.
     res0, sc0, lr0 = next((r for r in out if attrs_of(r[2]).get("krateo.audit.gateway.route")))
     lr0 = copy.deepcopy(lr0); lr0["attributes"] = [x for x in lr0["attributes"] if x["key"] != "krateo.audit.gateway.route"]
@@ -422,6 +469,16 @@ def verify(work, cases, binary, logs):
               and a.get("http.request.method") == "POST")
     check(len(nm) >= 1, "the real MCP POST with no parsable method is PROJECTED")
     check(any(dict(k).get("mcp.method.name") == "initialize" for k in counts), "the count is per method (initialize seen)")
+    return out, counts
+
+
+def projection_signature(out):
+    """Each projected record as its sorted attributes, eventName and scope: everything but time."""
+    sig = []
+    for _, sc, lr in out:
+        sig.append(json.dumps({"scope": sc.get("name"), "eventName": lr.get("eventName"),
+                               "attributes": sorted(lr.get("attributes", []), key=lambda a: a["key"])}, sort_keys=True))
+    return sorted(sig)
 
 
 if __name__ == "__main__":
