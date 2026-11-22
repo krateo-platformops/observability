@@ -62,7 +62,12 @@ type: application
 # equals upstream's default AND no pipeline names it (an extension: while service.extensions does
 # not name it). The default render is the same byte for byte, checksum/config included, so pods
 # do not restart.
-version: 0.1.17
+# 0.1.18: keep rule credentialuse-degraded (Diego, 2026-11-22, provider-runtime#125): a trace whose
+# `credentialuse.acquire` span event has provider_runtime.credentialuse.outcome = degraded is kept
+# whole. A degraded pass ends OK, so no other rule keeps it. must_not_connect errors (kept by
+# error-status); conflict and ok stay sampled. Matches nothing until a provider enables credential-use.
+# tests/tailsampling-docker.py.
+version: 0.1.18
 # The collector this chart renders: the upstream chart's own appVersion picks the image tag.
 # Keep equal to otel-collector-daemonset's appVersion, so both tiers run the same build.
 appVersion: "0.158.0"

@@ -451,6 +451,7 @@ made at the gateway: agentgateway decides sampling when a request arrives, befor
   | `jwt-shaped-value` | the `sre-jwt-in-traces` pattern in span attributes, status message, resource attributes or event attributes, so sampling never hides a leaked token |
   | `alert-provider-incident` | any trace with an `incident.*` span: alert-provider's RCA path (`incident.fire`, `incident.compare`, `incident.analyze`), kept whole whatever else is in the trace |
   | `audited-write` | any trace with a span carrying `krateo.audit.recorded = true` (installer#415): a request that wrote an audit record, so the audit view's trace link resolves (within the 7-day TTL) |
+  | `credentialuse-degraded` | any trace with a `credentialuse.acquire` span event whose `provider_runtime.credentialuse.outcome` is `degraded` (provider-runtime#125): an established holder connected although some of its credentials weren't held. Such a pass ends OK, so the error rule misses it; `must_not_connect` errors and is kept by `error-status`, while `conflict` and `ok` stay sampled |
   | `sample-5pct` | 5% of what's left, hashed on TraceId |
 
 - **Config.** OTLP/gRPC in, one `traces` pipeline out. The chart renders the collector's ConfigMap
