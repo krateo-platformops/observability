@@ -19,6 +19,10 @@ on:
       app_version:
         description: "App image version (APP_VERSION). Default: latest tag of the app repo."
         required: false
+      dry_run:
+        description: "Rehearse: package and check every chart, push nothing. Untick to publish for real."
+        type: boolean
+        default: true
 
 jobs:
   release-oci:
@@ -29,3 +33,10 @@ jobs:
     with:
       chart_version: ${{ github.event.inputs.chart_version || '' }}
       app_version: ${{ github.event.inputs.app_version || '' }}
+      # A manual run is a rehearsal unless dry_run is unticked; a tag push always publishes.
+      dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+      # Required since krateo-platformops/.github 77bcf7f (release-oci 2.0.0): which krateo-blueprints index
+      # these charts go to. They are platform components published to krateo-platformops' registry and
+      # installed by installer, not blueprints, pages or operators, so they are deliberately not indexed.
+      # Without this input the run fails at startup and the tag publishes nothing.
+      index_channel: none
