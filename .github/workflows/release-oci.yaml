@@ -26,7 +26,12 @@ on:
 
 jobs:
   release-oci:
-    uses: krateo-platformops/.github/.github/workflows/release-oci.yaml@main
+    # Pinned by commit, never a branch: a moved ref would change what a tag publishes with no commit
+    # here. Dependabot (.github/dependabot.yml) proposes upgrades; rehearse each with dry_run first.
+    # Held at 1.1.0: 2.0.0 (b030d3f) requires index_channel (this repo's value: none, the charts are
+    # not indexed) and cannot publish yet: its package-and-push fails staging krateo-blueprints/charts
+    # at b1326a80 (dry run 45082862711).
+    uses: krateo-platformops/.github/.github/workflows/release-oci.yaml@f6185ef0a8161a4201217d6ce0953718fc736fe0 # 1.1.0
     permissions:
       contents: read
       packages: write
@@ -35,8 +40,3 @@ jobs:
       app_version: ${{ github.event.inputs.app_version || '' }}
       # A manual run is a rehearsal unless dry_run is unticked; a tag push always publishes.
       dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
-      # Required since krateo-platformops/.github 77bcf7f (release-oci 2.0.0): which krateo-blueprints index
-      # these charts go to. They are platform components published to krateo-platformops' registry and
-      # installed by installer, not blueprints, pages or operators, so they are deliberately not indexed.
-      # Without this input the run fails at startup and the tag publishes nothing.
-      index_channel: none
