@@ -94,9 +94,11 @@ def span(trace_id, service, name, attrs=None, status=0, message="", events=None,
     if links:
         s["links"] = [{"traceId": t, "spanId": sid} for t, sid in links]
     if events:
+        # An event is a dict of attributes (named "e") or a (name, attributes) tuple.
+        named = [ev if isinstance(ev, tuple) else ("e", ev) for ev in events]
         s["events"] = [
-            {"timeUnixNano": str(now), "name": "e", "attributes": [attr(k, v) for k, v in ev.items()]}
-            for ev in events
+            {"timeUnixNano": str(now), "name": n, "attributes": [attr(k, v) for k, v in ev.items()]}
+            for n, ev in named
         ]
     return service, s
 
@@ -171,6 +173,28 @@ def provider_reconcile(trace_id, svc, error=False):
     return [
         span(trace_id, svc, "reconcile", status=status),
         span(trace_id, svc, "observe", {"provider_runtime.step": "observe"}, status=status),
+    ]
+
+
+def credentialuse_pass(trace_id, svc, outcome, unheld=None, event="credentialuse.acquire"):
+    """A provider-runtime pass that ran credential-use Acquire (provider-runtime#125, 933a237): one
+    `credentialuse.acquire` event on the `reconcile` root (pkg/reconciler/credentialuse.go:770) with
+    refs, held, one unheld.<Reason> count per reason present, and the outcome (acquireAttributes,
+    :831). must_not_connect returns the Acquire error, so the root ends Error; conflict requeues with
+    a nil error (root Unset) and a k8s.conflict event, step credential_use, follows the acquire
+    event; ok and degraded end as the rest of the pass decides (Unset here)."""
+    unheld = unheld or {}
+    attrs = {"provider_runtime.credentialuse.refs": 2 + sum(unheld.values()),
+             "provider_runtime.credentialuse.held": 2,
+             "provider_runtime.credentialuse.outcome": outcome}
+    attrs.update({"provider_runtime.credentialuse.unheld." + r: n for r, n in unheld.items()})
+    events = [(event, attrs)]
+    if outcome == "conflict":
+        events.append(("k8s.conflict", {"provider_runtime.step": "credential_use"}))
+    status = 2 if outcome == "must_not_connect" else 0
+    return [
+        span(trace_id, svc, "reconcile", status=status, events=events),
+        span(trace_id, svc, "observe", {"provider_runtime.step": "observe"}),
     ]
 
 
@@ -366,6 +390,16 @@ def main():
              lambda t: [span(t, "krateo-core-provider", "reconcile", {"provider_runtime.acted": True})])
         case("core-provider reconcile that did NOT act", "sampled",
              lambda t: [span(t, "core-provider", "reconcile"), span(t, "core-provider", "observe", {"provider_runtime.step": "observe"})])
+        # provider-runtime#125 (Diego, 2026-11-22): a degraded Acquire is kept whole, on every sampled
+        # provider; must_not_connect is kept by error-status; conflict and ok stay sampled (asserted
+        # as rates below, since a single sampled trace proves nothing).
+        for _svc in ("krateo-alert-provider",) + PROVIDERS:
+            case(f"{_svc} credential-use Acquire degraded (unheld.ConsentWithdrawn=1)", True,
+                 lambda t, _svc=_svc: credentialuse_pass(t, _svc, "degraded", {"ConsentWithdrawn": 1}))
+        case("core-provider credential-use Acquire degraded, two reasons (Missing=2, Disowned=1)", True,
+             lambda t: credentialuse_pass(t, "core-provider", "degraded", {"Missing": 2, "Disowned": 1}))
+        case("core-provider credential-use Acquire must_not_connect (root Error)", True,
+             lambda t: credentialuse_pass(t, "core-provider", "must_not_connect", {"NotConsented": 1}))
         case("alert-provider reconcile whose HyperDX server answered 500", True,
              lambda t: alert_provider_reconcile(t) + hyperdx_server(t, status_code=500))
         for svc in PROVIDERS:
@@ -412,6 +446,20 @@ def main():
         pr_ids = [tid() for _ in range(400)]
         for n, t in enumerate(pr_ids):
             post(port, provider_reconcile(t, PROVIDERS[n % len(PROVIDERS)]))
+
+        # Credential-use passes that must NOT be kept whole (negative controls for
+        # credentialuse-degraded): routine ok Acquires, write conflicts, and a degraded outcome on
+        # an event of another name (a misspelt rule would keep it).
+        cu_ok_ids = [tid() for _ in range(400)]
+        for n, t in enumerate(cu_ok_ids):
+            post(port, credentialuse_pass(t, PROVIDERS[n % len(PROVIDERS)], "ok"))
+        cu_conflict_ids = [tid() for _ in range(400)]
+        for n, t in enumerate(cu_conflict_ids):
+            post(port, credentialuse_pass(t, PROVIDERS[n % len(PROVIDERS)], "conflict"))
+        cu_release_ids = [tid() for _ in range(400)]
+        for n, t in enumerate(cu_release_ids):
+            post(port, credentialuse_pass(t, PROVIDERS[n % len(PROVIDERS)], "degraded", {"Missing": 1},
+                                          event="credentialuse.release"))
 
         # provider-runtime v1.14.1 (#70), 400 objects each stamped with its own release apply R:
         # every object's first-acting pass. R (a cdc span + the act span) must be kept whole, since cdc
@@ -519,6 +567,14 @@ def main():
     within_pr = 6 <= n_pr <= 38
     failed |= not within_pr
     print(f"{'ok  ' if within_pr else 'FAIL'} routine provider reconcile traces (git/incident/core-provider) kept: {n_pr}/{len(pr_ids)}, expected about 5%")
+
+    for label, ids in (("credential-use Acquire ok", cu_ok_ids),
+                       ("credential-use Acquire conflict (k8s.conflict step=credential_use)", cu_conflict_ids),
+                       ("outcome=degraded on a credentialuse.release event (not the acquire event)", cu_release_ids)):
+        n = sum(1 for t in ids if t in kept)
+        within_n = 6 <= n <= 38
+        failed |= not within_n
+        print(f"{'ok  ' if within_n else 'FAIL'} {label} traces kept: {n}/{len(ids)}, expected about 5%")
 
     late_k = any(n == "GET /refreshes (late)" for _, n in kept.get(late_kept, []))
     late_d = late_dropped in kept
