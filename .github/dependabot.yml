@@ -1,0 +1,16 @@
+# Moves this repository's pinned GitHub Actions and reusable workflows, the krateo-platformops/.github
+# ones included (pinned by commit in .github/workflows). A reusable workflow's upgrade can add a required
+# input or change what a release publishes, so each one arrives as a reviewed pull request; rehearse a
+# release-oci upgrade with a dry_run workflow_dispatch of the PR branch before merging it.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      krateo-reusables:
+        patterns: ["krateo-platformops/*"]
+      actions:
+        patterns: ["*"]
+        exclude-patterns: ["krateo-platformops/*"]
