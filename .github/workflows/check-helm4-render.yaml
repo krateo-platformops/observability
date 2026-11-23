@@ -56,8 +56,8 @@ jobs:
       HELM4_VERSION: v4.3.2
       HELM4_SHA256: d1c0278d46beab79582d7e50f5b3dc206944ba8e577cde618513fd07daa53983
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Download Helm 3 and Helm 4, verifying each sha256
