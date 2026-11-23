@@ -325,8 +325,11 @@ Wraps the same upstream chart in `daemonset` mode, stock
   agent is down. `tests/filelog-checkpoint-docker.py` proves the first and prints the other two.
 - `securityContext` (0.1.37): root, because kubelet creates the hostPath as `root:root 0755`, with every
   capability dropped, a read-only root filesystem and no privilege escalation. `/var/lib/otelcol` is the
-  only writable hostPath. A cluster whose policy refuses root can set `storeCheckpoints: false` and its
-  own `securityContext`, and loses lines on restart again.
+  only writable hostPath. **To refuse root**, set `storeCheckpoints: false` and your own
+  `securityContext`; lines are lost on restart again. This works when the chart's values are set
+  directly. It does NOT work yet through installer's `componentValues`: installer declares neither key
+  for this chart, so a Helm write is refused, and a direct edit of the Installer CR **succeeds while
+  both keys are dropped**, leaving the agent as root. Check the DaemonSet, not the CR.
 - `config.receivers`: `filelog` with a container parser + multiline recombine;
   `hostmetrics`/`kubeletstats` at 60s (kubeletstats adds pod/container cpu+memory
   limit/request utilization and uptime metrics).
