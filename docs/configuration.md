@@ -317,6 +317,16 @@ Wraps the same upstream chart in `daemonset` mode, stock
   fails on a declared receiver that no pipeline names, in every collector chart.
 - `presets`: `logsCollection` (without collector logs), `hostMetrics`,
   `kubernetesAttributes` (with `extractAllPodLabels`), `kubeletMetrics`.
+- **Log checkpoints** (0.1.37, `presets.logsCollection.storeCheckpoints`): the agent saves its read
+  positions in `/var/lib/otelcol` on the node (hostPath, created if absent), so a stopped and restarted
+  agent resumes where it was, and a container that ran while it was down is read from its first line.
+  Before, each restart dropped the lines written meanwhile. Still lost: what the agent holds in memory
+  when it is killed rather than stopped, and the unread tail of a log file kubelet rotates while the
+  agent is down. `tests/filelog-checkpoint-docker.py` proves the first and prints the other two.
+- `securityContext` (0.1.37): root, because kubelet creates the hostPath as `root:root 0755`, with every
+  capability dropped, a read-only root filesystem and no privilege escalation. `/var/lib/otelcol` is the
+  only writable hostPath. A cluster whose policy refuses root can set `storeCheckpoints: false` and its
+  own `securityContext`, and loses lines on restart again.
 - `config.receivers`: `filelog` with a container parser + multiline recombine;
   `hostmetrics`/`kubeletstats` at 60s (kubeletstats adds pod/container cpu+memory
   limit/request utilization and uptime metrics).

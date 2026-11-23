@@ -88,6 +88,9 @@
                 },
                 "includeCollectorLogs": {
                   "type": "boolean"
+                },
+                "storeCheckpoints": {
+                  "type": "boolean"
                 }
               }
             },
@@ -570,6 +573,10 @@
               "type": "integer"
             }
           }
+        },
+        "securityContext": {
+          "type": "object",
+          "additionalProperties": true
         }
       },
       "description": "Values forwarded to the upstream opentelemetry-collector subchart."

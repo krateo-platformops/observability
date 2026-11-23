@@ -209,7 +209,12 @@ type: application
 # tests/gateway-audit-docker.py runs every case in both shapes and requires the same projected
 # records and the same excluded counts; tests/otlp-log-routing-docker.py routes a 1.6+ record.
 # The config changes, so checksum/config changes and the agents roll once.
-version: 0.1.36
+# 0.1.37: the agent checkpoints its log positions (presets.logsCollection.storeCheckpoints), so a
+# restart no longer drops the container log lines written meanwhile. NEW: a hostPath
+# /var/lib/otelcol on every node, and the container runs as root with every capability dropped, a
+# read-only root filesystem and no privilege escalation (it ran as the image's own user). Data in
+# the in-memory export queue is still lost if the agent is killed rather than stopped.
+version: 0.1.37
 appVersion: "0.158.0"
 dependencies:
   - name: opentelemetry-collector
