@@ -590,6 +590,24 @@
           "type": "boolean"
         }
       }
+    },
+    "auditCollector": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Replicated audit collector, off by default.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
     }
   }
 }

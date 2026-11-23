@@ -330,6 +330,14 @@ Wraps the same upstream chart in `daemonset` mode, stock
   directly. It does NOT work yet through installer's `componentValues`: installer declares neither key
   for this chart, so a Helm write is refused, and a direct edit of the Installer CR **succeeds while
   both keys are dropped**, leaving the agent as root. Check the DaemonSet, not the CR.
+- **`auditCollector`** (0.1.38, off by default): two copies of the agents' audit and gateway access-log
+  pipelines behind `<release>-audit` (4317 gRPC, 4318 HTTP), so a collector roll, a drain or a pod
+  deletion drops no record. Its config is cut out of the agents' rendered config; only the k8sattributes
+  node filter is left out. It runs as a non-root user, and `replicas` is at least 2. Enabling it changes
+  nothing until a sender's OTLP logs endpoint points at it: the agents keep their own audit pipelines.
+  Send each record to one of the two, never both. **Still lost:** what a crashed copy holds, and what is
+  refused until its endpoint is removed. Not tested: a node failure, ClickHouse being away, or a
+  cluster's NetworkPolicies, which must allow the senders and the copies' way to ClickHouse.
 - `config.receivers`: `filelog` with a container parser + multiline recombine;
   `hostmetrics`/`kubeletstats` at 60s (kubeletstats adds pod/container cpu+memory
   limit/request utilization and uptime metrics).

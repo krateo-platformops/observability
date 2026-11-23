@@ -7,6 +7,20 @@ global: {}
 localService:
   enabled: true
 
+# A replicated path for audit records (templates/audit-collector.yaml), so they survive a collector
+# roll, a drain or a pod deletion; a crash can still drop some. Off: nothing is rendered. On, nothing
+# changes until a sender's OTLP logs endpoint points at <release>-audit:4317 (gRPC) or :4318 (HTTP).
+auditCollector:
+  enabled: false
+  replicas: 2
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
 opentelemetry-collector:
   mode: daemonset
 

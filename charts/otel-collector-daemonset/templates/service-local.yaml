@@ -12,7 +12,8 @@
 
        ClusterIP + internalTrafficPolicy: Local means kube-proxy delivers to the agent on the sender's
        own node only. A DaemonSet has an agent on every schedulable node, so there is always a local
-       endpoint, except while that node's agent is restarting, when the sender's exporter retries.
+       endpoint, except while that node's agent is restarting: then connections are refused, and a
+       sender that does not retry a refused connection loses those records (see auditCollector).
 
        Senders use http://<release>-local.<namespace>.svc:4318 (OTLP/HTTP) or :4317 (OTLP/gRPC). */}}
 apiVersion: v1
