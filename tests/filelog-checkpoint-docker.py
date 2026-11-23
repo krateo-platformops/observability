@@ -93,6 +93,16 @@ open("/ctl/last-" + tag, "w").write(str(n))
 """
 
 
+def ranges(ns):
+    out = []
+    for n in ns:
+        if out and n == out[-1][1] + 1:
+            out[-1][1] = n
+        else:
+            out.append([n, n])
+    return [f"{a}-{b}" for a, b in out]
+
+
 class Case:
     def __init__(self, image, sc, cfg):
         self.id, self.image, self.sc = "ckpt-" + uuid.uuid4().hex[:8], image, sc
@@ -159,6 +169,7 @@ class Case:
         self.helper(WRITER, "a", "/pods/ns_app-a_0a/app/0.log", "1000000", "0.01", detach="wa")
         time.sleep(5)
         sh("docker", stop, *(["-t", "30"] if stop == "stop" else []), f"{self.id}-agent")
+        at_stop = int(self.helper("print(sum(1 for _ in open('/pods/ns_app-a_0a/app/0.log')))"))
         # A container that starts and finishes while the agent is down.
         self.helper(WRITER, "b", "/pods/ns_app-b_0b/app/0.log", "200", "0.005")
         if rotate:
@@ -169,18 +180,24 @@ class Case:
         time.sleep(5)
         self.helper("open('/ctl/stop','w')")
         sh("docker", "wait", f"{self.id}-wa")
-        last, prev = {"a": self.last("a"), "b": 200}, -1
-        for _ in range(40):
+        last = {"a": self.last("a"), "b": 200}
+        # Settled means nothing new for longer than the pipeline can hold a line: recombine keeps the
+        # last entry of a file until its flush timeout (5s, upstream's default) and batch waits
+        # another 5s. A shorter wait reports those lines as lost.
+        prev, quiet = -1, time.monotonic()
+        end = time.monotonic() + 120
+        while time.monotonic() < end and time.monotonic() - quiet < 20:
             got = self.got()
             size = sum(map(len, got.values()))
-            if size == prev:
-                break
-            prev = size
+            if size != prev:
+                prev, quiet = size, time.monotonic()
             time.sleep(2)
         res = {}
         for t, n in last.items():
             seen = got.get(t, [])
-            res[t] = {"written": n, "missing": n - len(set(seen)), "duplicates": len(seen) - len(set(seen))}
+            gone = sorted(set(range(1, n + 1)) - set(seen))
+            res[t] = {"written": n, "missing": len(gone), "duplicates": len(seen) - len(set(seen)), "ranges": ranges(gone)}
+        res["a"]["stop_returned_at"] = at_stop
         return res
 
     def close(self):
