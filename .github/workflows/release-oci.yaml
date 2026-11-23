@@ -28,7 +28,7 @@ jobs:
   release-oci:
     # Pinned by commit, never a branch: a moved ref would change what a tag publishes with no commit
     # here. Dependabot (.github/dependabot.yml) proposes upgrades; rehearse each with dry_run first.
-    uses: krateo-platformops/.github/.github/workflows/release-oci.yaml@7da11cb60cee5cbfc7d9e8c9328692807b43cefd # main 2026-11-22
+    uses: krateo-platformops/.github/.github/workflows/release-oci.yaml@7da11cb60cee5cbfc7d9e8c9328692807b43cefd # 2.0.0
     permissions:
       contents: read
       packages: write

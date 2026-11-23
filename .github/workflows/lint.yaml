@@ -17,7 +17,7 @@ jobs:
   # docs/ file set, frontmatter, link integrity, banned dead-org strings, examples
   # pairing.
   lint-docs:
-    uses: krateo-platformops/.github/.github/workflows/lint-docs.yaml@7da11cb60cee5cbfc7d9e8c9328692807b43cefd # main 2026-11-22
+    uses: krateo-platformops/.github/.github/workflows/lint-docs.yaml@7da11cb60cee5cbfc7d9e8c9328692807b43cefd # 2.0.0
   lint:
     runs-on: ubuntu-latest
     steps:
