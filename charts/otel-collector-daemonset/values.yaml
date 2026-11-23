@@ -30,6 +30,18 @@ opentelemetry-collector:
   image:
     repository: otel/opentelemetry-collector-contrib
 
+  # Root, and nothing beyond it (Diego, 2026-11-23). kubelet creates the checkpoint hostPath as
+  # root:root 0755, so a non-root agent cannot write it. Everything else root could use is taken
+  # away: no capabilities, no privilege escalation, read-only root filesystem. Setting this also
+  # replaces upstream's own bare runAsUser 0 for storeCheckpoints.
+  securityContext:
+    runAsUser: 0
+    runAsGroup: 0
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+
   command:
     name: otelcol-contrib
 
@@ -44,6 +56,13 @@ opentelemetry-collector:
     logsCollection:
       enabled: true
       includeCollectorLogs: false
+      # CHECKPOINTS (0.1.37). The agent saves how far it has read each container log in
+      # /var/lib/otelcol on the node, so a restarted agent resumes there. Without this it started at
+      # the END of every file (upstream's start_at), and each restart dropped whatever the node's
+      # containers wrote meanwhile: 8 s of a controller's log on krateo-057 at the 0.1.36 roll.
+      # With saved positions start_at no longer applies, so a container that started while the agent
+      # was down is read from its first line. tests/filelog-checkpoint-docker.py holds both.
+      storeCheckpoints: true
     hostMetrics:
       enabled: true
     kubernetesAttributes:

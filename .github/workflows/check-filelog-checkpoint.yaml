@@ -1,0 +1,41 @@
+# A restarted otel-collector-daemonset agent loses no container log lines (0.1.37), run in the pinned
+# collector image with the chart's rendered config and container securityContext.
+#
+# A separate workflow on purpose: lint.yaml is the org-wide canonical chart-repo lint.
+
+name: check-filelog-checkpoint
+
+on:
+  pull_request:
+    paths:
+      - "charts/otel-collector-daemonset/**"
+      - "tests/filelog-checkpoint-docker.py"
+      - ".github/workflows/check-filelog-checkpoint.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "charts/otel-collector-daemonset/**"
+      - "tests/filelog-checkpoint-docker.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checkpoint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v3.19.0
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Add the dependency repository
+        run: helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+      - name: Restart the agent under load and count the lines
+        run: python3 tests/filelog-checkpoint-docker.py .
