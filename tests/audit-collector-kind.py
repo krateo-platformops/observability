@@ -195,7 +195,13 @@ def main():
     try:
         node = os.environ.get("KIND_NODE_IMAGE")
         sh("kind", "create", "cluster", "--name", CLUSTER, "--kubeconfig", KC, "--wait", "120s", *(["--image", node] if node else []))
-        sh("kind", "load", "docker-image", "--name", CLUSTER, img, CH, PY)
+        # One platform only: `kind load docker-image` imports every platform an index names, and fails
+        # on those that were never pulled (Docker's containerd image store, CI 2026-11-23).
+        for n, i in enumerate((img, CH, PY)):
+            tar = str(WORK / f"image-{n}.tar")
+            plat = sh("docker", "image", "inspect", "-f", "{{.Os}}/{{.Architecture}}{{with .Variant}}/{{.}}{{end}}", i).strip()
+            sh("docker", "save", "--platform", plat, "-o", tar, i)
+            sh("kind", "load", "image-archive", "--name", CLUSTER, tar)
         sh("kubectl", "--kubeconfig", KC, "--context", f"kind-{CLUSTER}", "create", "ns", NS)
         k("apply", "-f", "-", input=manifests(secrets.token_hex(12)))
         k("rollout", "status", "deploy/ch", "--timeout=180s")
