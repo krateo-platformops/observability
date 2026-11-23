@@ -1,0 +1,155 @@
+{{- if .Values.auditCollector.enabled }}
+{{- /* A REPLICATED path for audit records, off by default (Diego, 2026-11-23).
+
+       The agents are one per node. While a node's agent restarts, its senders' OTLP connections are
+       refused, and neither agentgateway (1.5.0, 1.7.0) nor Go's otlploghttp 0.21.0 retries a refused
+       connection: those records are lost. Two copies behind one Service, replaced one at a time, keep
+       an endpoint up through a roll, a drain or a pod deletion. NOT through a crash: a killed copy
+       drops what it holds and refuses connections until its endpoint is removed.
+
+       ONE COPY OF THE RULES: the config below is cut out of the agents' own rendered config, so the
+       audit pipelines cannot drift from theirs. Nothing here reads node files, scrapes or runs as root.
+
+       Senders move by pointing their OTLP logs endpoint at this Service. The agents keep their audit
+       pipelines, so a sender that has not moved is unaffected. */}}
+{{- $sub := index .Subcharts "opentelemetry-collector" }}
+{{- $full := include "otel-collector-daemonset.collectorConfig" $sub | fromYaml }}
+{{- if hasKey $full "Error" }}{{ fail (printf "auditCollector: the agents' config does not parse: %s" $full.Error) }}{{ end }}
+{{- $names := list "logs/audit" "logs/gateway" "logs/gateway-audit" "logs/gateway-audit-excluded" "metrics/gateway-audit-excluded" }}
+{{- $pipelines := dict }}
+{{- $used := dict "receivers" dict "processors" dict "exporters" dict "connectors" dict }}
+{{- range $n := $names }}
+  {{- $p := index $full.service.pipelines $n }}
+  {{- if not $p }}{{ fail (printf "auditCollector: the agents' config has no pipeline %q" $n) }}{{ end }}
+  {{- $_ := set $pipelines $n $p }}
+  {{- range $kind := list "receivers" "processors" "exporters" }}
+    {{- range $id := (index $p $kind | default list) }}
+      {{- if hasKey ($full.connectors | default dict) $id }}
+        {{- $_ := set $used.connectors $id (index $full.connectors $id) }}
+      {{- else if hasKey (index $full $kind) $id }}
+        {{- $_ := set (index $used $kind) $id (index $full $kind $id) }}
+      {{- else }}
+        {{- fail (printf "auditCollector: pipeline %q names %s %q, which is not declared" $n $kind $id) }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- /* The agents' k8sattributes watches its own node's pods only; a Deployment serves every node. */}}
+{{- if hasKey $used.processors "k8sattributes" }}
+  {{- $_ := set $used.processors "k8sattributes" (omit (index $used.processors "k8sattributes") "filter") }}
+{{- end }}
+{{- $config := dict "receivers" $used.receivers "processors" $used.processors "exporters" $used.exporters "connectors" $used.connectors
+      "extensions" (pick $full.extensions "health_check")
+      "service" (dict "extensions" (list "health_check") "pipelines" $pipelines "telemetry" ($full.service.telemetry | default dict)) }}
+{{- $relay := toYaml $config }}
+{{- $name := printf "%s-audit" .Release.Name }}
+{{- $ac := .Values.auditCollector }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "otel-collector-daemonset.auditLabels" . | nindent 4 }}
+data:
+  relay: |
+    {{- $relay | nindent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "otel-collector-daemonset.auditLabels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "otel-collector-daemonset.auditSelector" . | nindent 4 }}
+  ports:
+    - {name: otlp, port: 4317, targetPort: otlp, protocol: TCP, appProtocol: grpc}
+    - {name: otlp-http, port: 4318, targetPort: otlp-http, protocol: TCP}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "otel-collector-daemonset.auditLabels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {{- include "otel-collector-daemonset.auditSelector" . | nindent 6 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "otel-collector-daemonset.auditLabels" . | nindent 4 }}
+spec:
+  replicas: {{ $ac.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels: {{- include "otel-collector-daemonset.auditSelector" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "otel-collector-daemonset.auditSelector" . | nindent 8 }}
+        app.kubernetes.io/part-of: krateo
+      annotations:
+        checksum/config: {{ $relay | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "opentelemetry-collector.serviceAccountName" $sub }}
+      # preStop, then the collector's own drain of its queues.
+      terminationGracePeriodSeconds: 60
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {{- include "otel-collector-daemonset.auditSelector" . | nindent 14 }}
+      {{- with $sub.Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: collector
+          image: "{{ $sub.Values.image.repository }}:{{ $sub.Values.image.tag | default $sub.Chart.AppVersion }}"
+          imagePullPolicy: {{ $sub.Values.image.pullPolicy }}
+          args: ["--config=/conf/relay.yaml"]
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          env:
+            - {name: MY_POD_IP, valueFrom: {fieldRef: {apiVersion: v1, fieldPath: status.podIP}}}
+            # The agents' config names these for its own telemetry's resource (upstream sets them there).
+            - {name: OTEL_K8S_NAMESPACE, valueFrom: {fieldRef: {apiVersion: v1, fieldPath: metadata.namespace}}}
+            - {name: OTEL_K8S_NODE_IP, valueFrom: {fieldRef: {apiVersion: v1, fieldPath: status.hostIP}}}
+            - {name: OTEL_K8S_NODE_NAME, valueFrom: {fieldRef: {apiVersion: v1, fieldPath: spec.nodeName}}}
+            - {name: OTEL_K8S_POD_IP, valueFrom: {fieldRef: {apiVersion: v1, fieldPath: status.podIP}}}
+            - {name: OTEL_K8S_POD_NAME, valueFrom: {fieldRef: {apiVersion: v1, fieldPath: metadata.name}}}
+            {{- with $sub.Values.extraEnvs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - {name: otlp, containerPort: 4317, protocol: TCP}
+            - {name: otlp-http, containerPort: 4318, protocol: TCP}
+          # Its endpoint leaves the Service before it stops listening.
+          lifecycle: {preStop: {sleep: {seconds: 10}}}
+          livenessProbe:
+            httpGet: {path: /, port: 13133}
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            httpGet: {path: /, port: 13133}
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 2
+          resources: {{- toYaml $ac.resources | nindent 12 }}
+          volumeMounts:
+            - {name: config, mountPath: /conf, readOnly: true}
+      volumes:
+        - name: config
+          configMap: {name: {{ $name }}, items: [{key: relay, path: relay.yaml}]}
+{{- end }}

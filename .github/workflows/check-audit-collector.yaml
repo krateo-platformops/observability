@@ -1,0 +1,45 @@
+# The replicated audit collector (0.1.38) keeps every record through a roll and a pod deletion, in kind
+# with a real ClickHouse; one copy must lose some.
+#
+# A separate workflow on purpose: lint.yaml is the org-wide canonical chart-repo lint.
+
+name: check-audit-collector
+
+on:
+  pull_request:
+    paths:
+      - "charts/otel-collector-daemonset/**"
+      - "tests/audit-collector-kind.py"
+      - ".github/workflows/check-audit-collector.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "charts/otel-collector-daemonset/**"
+      - "tests/audit-collector-kind.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v3.19.0
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Install kind
+        uses: helm/kind-action@v1
+        with:
+          install_only: true
+      - name: Add the dependency repository
+        run: helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+      - name: Roll and delete copies under load and count the records
+        run: python3 tests/audit-collector-kind.py .
