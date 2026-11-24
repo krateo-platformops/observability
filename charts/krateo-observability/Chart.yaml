@@ -278,7 +278,10 @@ type: application
 # days on krateo-057), and its limits become 4 threads, 15 s and 16 at a time. Nothing logs in with it
 # until the portal moves. Also: the note beside sre-kubernetes-events-missing counts the idle child's
 # events correctly (36 in 28 minutes, 4 without one looping composition).
-version: 0.1.57
+# 0.1.58: ClickHouse user exec_reader for reads inside the ClickHouse pod: no password, localhost only,
+# SELECT on default and system, 30 s, 4 threads, 4 GiB. It lets `kubectl exec ... clickhouse-client` go on
+# after `default` gets a password (a later release). Nothing else changes against 0.1.57.
+version: 0.1.58
 appVersion: "3.5.0"
 dependencies:
   - name: clickstack

@@ -887,6 +887,23 @@ clickstack:
                     max: 4
                   max_concurrent_queries_for_user:
                     const: true
+              # exec_reader: reads inside the ClickHouse pod (the user of that name below). readonly is
+              # 0 so that `clickhouse-client --readonly=1` is accepted; the grants are SELECT only.
+              exec_reader:
+                readonly: 0
+                max_execution_time: 30
+                max_threads: 4
+                max_concurrent_queries_for_user: 8
+                max_memory_usage: 4294967296
+                constraints:
+                  max_execution_time:
+                    max: 30
+                  max_threads:
+                    max: 4
+                  max_concurrent_queries_for_user:
+                    const: true
+                  max_memory_usage:
+                    max: 4294967296
               # analyst: people and agent sessions running ad-hoc queries (port-forward scripts,
               # in-cluster curl, `kubectl exec ... clickhouse-client --user analyst`). readonly=2 so
               # per-query settings (log_comment, max_block_size, ...) are accepted; a client that
@@ -1107,6 +1124,18 @@ clickstack:
                 profile: default
                 grants:
                   - query: "GRANT INSERT, CREATE TABLE ON cmp.health_records"
+              # exec_reader: people and sessions reading with `kubectl exec <pod> -- clickhouse-client
+              # --user exec_reader` (Diego, 2026-11-24). No password, and only from inside the pod: it
+              # takes the place of `default` there before `default` gets a password. Whoever may exec
+              # into the pod, or port-forward to it, reaches it. SELECT on `default` and `system`, and
+              # SHOW ACCESS for users, grants and profiles; nothing that writes.
+              exec_reader:
+                no_password: true
+                networks:
+                  ip: ["127.0.0.1", "::1"]
+                profile: exec_reader
+                grants:
+                  - query: "GRANT SELECT ON default.*, SELECT ON system.*, SHOW ACCESS ON *.*"
               # `default`, `app` and `otelcollector` are NOT changed here (0.1.42 switches no client).
           extraConfig:
             # SERVER LOG FILES — the other half of the retention incident below.

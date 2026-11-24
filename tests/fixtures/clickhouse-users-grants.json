@@ -20,6 +20,11 @@
         "query": "GRANT SELECT ON default.krateo_audit, SELECT ON default.krateo_audit_worm, SELECT ON default.krateo_audit_seal, SHOW TABLES ON default.krateo_audit_worm_mv"
       }
     ],
+    "exec_reader": [
+      {
+        "query": "GRANT SELECT ON default.*, SELECT ON system.*, SHOW ACCESS ON *.*"
+      }
+    ],
     "hyperdx": [
       {
         "query": "GRANT SELECT ON default.otel_logs, SELECT ON default.otel_traces, SELECT ON default.otel_metrics_gauge, SELECT ON default.otel_metrics_sum, SELECT ON default.otel_metrics_histogram, SELECT ON default.krateo_audit, SELECT ON system.data_skipping_indices"
