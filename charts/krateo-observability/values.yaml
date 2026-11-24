@@ -597,6 +597,18 @@ defaultAlerts:
       thresholdType: above
       interval: 15m
       description: Kubernetes is reporting far more warnings than usual.
+    # Extended because it depends on the cluster's own event rate: krateo-057's quietest half hour in 7
+    # days had 718 events, an idle child Krateo without CronJobs 4 in 28 minutes, so it would fire
+    # there with nothing wrong. A row count below 1 is an empty window, which HyperDX does fire on.
+    - name: sre-kubernetes-events-missing
+      tier: extended
+      displayName: Kubernetes events stopped arriving
+      where: ResourceAttributes['telemetry.source'] = 'k8s-events'
+      threshold: 1
+      thresholdType: below
+      interval: 30m
+      description: No Kubernetes event has been stored for 30 minutes. Alerts built on events are blind until they return.
+      runbook: "Look at the otel-collector-deployment pod's log. A line 'could not retrieve a resourceVersion' means the events watch lost the API server: with image 1.0.10 or later it is retried and the line repeats until the API server answers; with an older image it stopped for good, and replacing the pod resumes it. Without that line, check that rows reach ClickHouse at all: the same pod sends the cluster metrics."
 
 # ---------------------------------------------------------------------------
 # Upstream clickstack passthrough (verbatim from obs-stack/clickstack/values.yaml)

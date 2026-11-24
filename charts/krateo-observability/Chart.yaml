@@ -268,7 +268,11 @@ type: application
 # with Helm 3.20 and sees only the two empty keys.
 # 0.1.55: comments only: neutral wording (no internal work-item or plan ids);
 # no rendered object changes.
-version: 0.1.55
+# 0.1.56: extended alert sre-kubernetes-events-missing: no Kubernetes event row for 30 minutes
+# (otel-collector#42: one refused list ended event collection while the pod stayed Ready, and
+# nothing alerted). Extended, off by default: an idle cluster can have no events for that long.
+# The default render is unchanged; with defaultAlerts.extended it adds one Alert CR.
+version: 0.1.56
 appVersion: "3.5.0"
 dependencies:
   - name: clickstack
