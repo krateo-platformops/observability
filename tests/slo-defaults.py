@@ -18,7 +18,7 @@ from drifting apart:
 3. References. Every rendered metric Alert names a rendered Metric (alert-provider refuses one whose
    Metric is missing).
 4. Counts and gates. Default render: 31 Alerts (the core tier) and 4 Metrics; with defaultAlerts.extended,
-   36 Alerts; with defaultAlerts.enabled=false, none of either.
+   37 Alerts; with defaultAlerts.enabled=false, none of either.
 5. Threshold. The `threshold` of every rendered Alert is a YAML number, and only the ratio alert's is a
    fraction.
 
@@ -41,7 +41,7 @@ STANDARD_LABELS = {
 }
 COUNTS = {  # (Alerts, Metrics)
     "default": (31, 4),
-    "extended": (36, 4),
+    "extended": (37, 4),
     "disabled": (0, 0),
 }
 
