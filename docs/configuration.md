@@ -100,13 +100,17 @@ top-level `global` propagates into clickstack and all its subcharts
   ClickHouse `otelcollector` user** (clickstack provisions it with the same password).
   Created in the release namespace (the collectors' namespace), so no cross-namespace
   replication.
+- **Portal endpoint** (`0.1.57`): Secret `clickhouse-portal-endpoint` in the release namespace, with
+  `server-url`, `username` and `password` of `snowplow_reader`, the shape snowplow reads an `endpointRef`
+  in. The portal chart names it; nothing else reads it. The password is the user's own Secret's.
 - **Portal reader users** (`0.1.41`): `sse_proxy` (profile `portal_reader`, SELECT on
   `otel_logs` and `krateo_audit`) and `snowplow_reader` (profile `portal_reader_snowplow`, SELECT
   on `otel_logs`, `otel_traces`, `otel_metrics_gauge`, `otel_metrics_sum`,
-  `otel_metrics_histogram` and `krateo_audit`), under
-  `clickstack.clickhouse.cluster.spec.settings.extraUsersConfig`. Both profiles set `readonly: 2`,
-  cancel-on-close, `max_execution_time: 8` and `max_threads: 2`, with constraints so a query can't
-  raise them; `max_concurrent_queries_for_user` is 16 and 8. Each password hash comes from
+  `otel_metrics_histogram`, `krateo_audit` and, from `0.1.57`, `krateo_slo_daily`), under
+  `clickstack.clickhouse.cluster.spec.settings.extraUsersConfig`. Both profiles set `readonly: 2` and
+  cancel-on-close, with constraints so a query can't raise the limits: `portal_reader` 8 s, 2 threads,
+  16 at a time; `portal_reader_snowplow` 15 s, 4 threads, 16 at a time (8 s, 2 and 8 up to `0.1.56`).
+  Each password hash comes from
   `containerTemplate.env` (`@from_env`), so overriding `containerTemplate.env` through
   componentValues must repeat the chart's two entries, or the render fails. Grants stay ONE
   statement per user (see `clickhouse-disk-full.md`).

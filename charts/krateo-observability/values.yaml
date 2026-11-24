@@ -598,8 +598,8 @@ defaultAlerts:
       interval: 15m
       description: Kubernetes is reporting far more warnings than usual.
     # Extended because it depends on the cluster's own event rate: krateo-057's quietest half hour in 7
-    # days had 718 events, an idle child Krateo without CronJobs 4 in 28 minutes, so it would fire
-    # there with nothing wrong. A row count below 1 is an empty window, which HyperDX does fire on.
+    # days had 718 events; an idle child Krateo without CronJobs had 36 in 28 minutes, 32 of them from one
+    # looping composition, so without it an idle cluster would fire this with nothing wrong. A row count below 1 is an empty window, which HyperDX does fire on.
     - name: sre-kubernetes-events-missing
       tier: extended
       displayName: Kubernetes events stopped arriving
@@ -867,22 +867,24 @@ clickstack:
                     max: 2
                   max_concurrent_queries_for_user:
                     const: true
-              # snowplow's admin widgets: the same limits, at most 8 queries at a time. Written out
-              # in full on purpose. `profile: portal_reader` (inheritance) does not work here: the
+              # snowplow's admin widgets: 4 threads (the server's CPU limit), 15 s, 16 queries at a time
+              # (Diego, 2026-11-24). Measured on krateo-057 over 3 days, 10,650 queries: p99 up to 1.0 s,
+              # max 6.8 s, at most 6 at once; the slowest cost 9 to 13 CPU-seconds, which 2 threads and
+              # 8 s (up to 0.1.56) would have refused. Written out in full on purpose. `profile: portal_reader` (inheritance) does not work here: the
               # operator writes this map with its keys sorted, so `profile` lands after the
               # override and the inherited 16 wins (measured on kind: getSetting gave 16).
               # snowplow can't send settings per query, so this profile is all it gets.
               portal_reader_snowplow:
                 readonly: 2
                 cancel_http_readonly_queries_on_client_close: 1
-                max_execution_time: 8
-                max_threads: 2
-                max_concurrent_queries_for_user: 8
+                max_execution_time: 15
+                max_threads: 4
+                max_concurrent_queries_for_user: 16
                 constraints:
                   max_execution_time:
-                    max: 8
+                    max: 15
                   max_threads:
-                    max: 2
+                    max: 4
                   max_concurrent_queries_for_user:
                     const: true
               # analyst: people and agent sessions running ad-hoc queries (port-forward scripts,
@@ -968,7 +970,9 @@ clickstack:
                 grants:
                   - query: "GRANT SELECT ON default.otel_logs, SELECT ON default.krateo_audit"
               # snowplow_reader: the tables read by the RESTAction stages that use
-              # endpointRef clickhouse-endpoint (41 stages in 35 RESTActions on krateo-057).
+              # endpointRef clickhouse-endpoint (41 stages in 35 RESTActions on krateo-057), and
+              # krateo_slo_daily, which the SLO widgets read where krateo-slo-rollup is installed. The
+              # portal logs in with Secret clickhouse-portal-endpoint.
               snowplow_reader:
                 password_sha256_hex:
                   "@from_env": CLICKHOUSE_USER_SNOWPLOW_READER_SHA256
@@ -977,7 +981,8 @@ clickstack:
                   - query: >-
                       GRANT SELECT ON default.otel_logs, SELECT ON default.otel_traces,
                       SELECT ON default.otel_metrics_gauge, SELECT ON default.otel_metrics_sum,
-                      SELECT ON default.otel_metrics_histogram, SELECT ON default.krateo_audit
+                      SELECT ON default.otel_metrics_histogram, SELECT ON default.krateo_audit,
+                      SELECT ON default.krateo_slo_daily
               # analyst: every telemetry table, krateo_audit, and two CMP contract tables, for ops
               # reading per-tenant health and usage: cmp.health_records (cmp-usage-collector's health
               # rows) and showback.usage_records (showback's usage). Nothing else in cmp or showback,
