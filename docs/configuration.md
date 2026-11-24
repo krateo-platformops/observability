@@ -100,6 +100,10 @@ top-level `global` propagates into clickstack and all its subcharts
   ClickHouse `otelcollector` user** (clickstack provisions it with the same password).
   Created in the release namespace (the collectors' namespace), so no cross-namespace
   replication.
+- **In-pod reads** (`0.1.58`): `kubectl exec <clickhouse pod> -c clickhouse-server -- clickhouse-client --user exec_reader`.
+  No password, accepted only from inside the pod (a port-forward counts as inside). SELECT on `default` and
+  `system`, SHOW ACCESS, 30 s, 4 threads, 4 GiB, 8 at a time; `--readonly=1` is accepted. Use it instead of
+  `default`, which a later release closes.
 - **Portal endpoint** (`0.1.57`): Secret `clickhouse-portal-endpoint` in the release namespace, with
   `server-url`, `username` and `password` of `snowplow_reader`, the shape snowplow reads an `endpointRef`
   in. The portal chart names it; nothing else reads it. The password is the user's own Secret's.

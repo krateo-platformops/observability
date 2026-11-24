@@ -162,6 +162,7 @@ PROFILES = {
     "batch_reader": caps(60, 2, 2),
     "hyperdx": caps(60),
     "audit_readonly": {"readonly": 2},
+    "exec_reader": caps(30, 4, 8, 4 * GiB, ro=0, cancel=False),
 }
 
 # A componentValues-shaped overlay: an extra user the installer adds (057's chops), which must
@@ -280,6 +281,11 @@ def check_render(root, docs):
     check(all("CREATE DATABASE" not in (u.get("grants") or [{}])[0].get("query", "").upper()
               for u in users.values() if u.get("grants")),
           "no user is granted CREATE DATABASE")
+    # exec_reader has no password, so its network limit is its only door: pinned whole.
+    check(users.get("exec_reader") == {"no_password": True, "networks": {"ip": ["127.0.0.1", "::1"]}, "profile": "exec_reader",
+                                       "grants": [{"query": "GRANT SELECT ON default.*, SELECT ON system.*, SHOW ACCESS ON *.*"}]},
+          "exec_reader: no password, localhost only, SELECT and SHOW ACCESS")
+    check([u for u, v in users.items() if "no_password" in v] == ["exec_reader"], "no other user is passwordless in the chart")
     check("default" not in users, "users.default is not overridden (default stays as the operator makes it)")
     check("defaultUserPassword" not in spec["settings"], "no settings.defaultUserPassword")
     check({"app", "otelcollector"} <= set(users) and all("password" in users[u] for u in ("app", "otelcollector")),
@@ -521,6 +527,44 @@ def compare_fixture(root, part):
               + ("" if want is None or got.get(user) == want.get(user) else f" (got {got.get(user)}, fixture {want.get(user)})"))
 
 
+def check_exec_reader(port, name):
+    """Inside the container without a password; from outside never; reads and nothing else."""
+    def inside(sql, *flags):
+        p = subprocess.run(["docker", "exec", name, "clickhouse-client", "--user", "exec_reader", *flags, "-q", sql], capture_output=True, text=True)
+        m = re.search(r"Code: (\d+)", p.stderr)
+        return (True, p.stdout.strip()) if p.returncode == 0 else (False, m.group(1) if m else p.stderr[:120])
+    check(inside("SELECT currentUser()") == (True, "exec_reader"), "[ch] exec_reader: logs in inside the pod without a password")
+    for host in ("127.0.0.1", "::1"):
+        check(inside("SELECT 1", "--host", host) == (True, "1"), f"[ch] exec_reader: over {host}")
+    check(inside("SELECT 1", "--readonly=1", "--max_threads=2") == (True, "1"), "[ch] exec_reader: --readonly=1 and a lower thread limit are accepted")
+    # From the host, through the published port: the same request `default` answers is refused.
+    check(ch(port, "SELECT 1") == (True, "1"), "[ch] CONTROL default answers over the network (not closed in this chart version)")
+    check(ch(port, "SELECT 1", "exec_reader", "") == (False, "516"), "[ch] exec_reader: refused over the network")
+    ip = subprocess.run(["docker", "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", name], capture_output=True, text=True).stdout.strip()
+    # ClickHouse counts the machine's own address as local, so the pod may use it. Another pod may not.
+    check(bool(ip) and inside("SELECT 1", "--host", ip) == (True, "1"), "[ch] exec_reader: from the pod to its own address counts as inside")
+    for user, want in (("exec_reader", "516"), ("default", "")):
+        p = subprocess.run(["docker", "run", "--rm", "--entrypoint", "clickhouse-client", IMAGE, "--host", ip, "--user", user, "-q", "SELECT 1"], capture_output=True, text=True)
+        got = (re.search(r"Code: (\d+)", p.stderr) or [None, p.stderr[:80]])[1] if p.returncode else ""
+        check(got == want, f"[ch] {'exec_reader: refused' if want else 'CONTROL default is answered'} from another container ({got or 'answered'})")
+    for sql in ("SELECT count() FROM system.query_log", "SELECT count() > 5 FROM system.users", "SHOW GRANTS FOR mcp_reader",
+                "SELECT count() FROM system.settings_profile_elements", "SELECT count() FROM system.columns WHERE database = 'default'"):
+        check(inside(sql)[0], f"[ch] exec_reader: {sql}")
+    check(ch(port, "CREATE TABLE IF NOT EXISTS default.er (x UInt8) ENGINE = MergeTree ORDER BY x")[0] and ch(port, "INSERT INTO default.er VALUES (1)")[0], "[ch] (setup) a table in default")
+    check(inside("SELECT count() FROM default.er") == (True, "1"), "[ch] exec_reader: reads a table in default")
+    for sql in ("INSERT INTO default.er VALUES (2)", "ALTER TABLE default.er DELETE WHERE 1", "TRUNCATE TABLE default.er", "DROP TABLE default.er",
+                "CREATE TABLE default.er2 (x UInt8) ENGINE = Memory", "CREATE USER u2 IDENTIFIED BY 'x'", "GRANT SELECT ON default.* TO mcp_reader",
+                "SYSTEM FLUSH LOGS", "SELECT * FROM url('http://127.0.0.1:8123/', 'TSV', 'x String')", "SELECT * FROM file('x.tsv', 'TSV', 'x String')",
+                "SELECT * FROM remote('127.0.0.1', 'system', 'one')", "SELECT count() FROM cmp.health_records"):
+        got = inside(sql)
+        check(got[0] is False and got[1] in ("497", "164"), f"[ch] exec_reader: refused: {sql[:60]} ({got[1]})")
+    for g in ("READ ON FILE", "WRITE ON FILE", "READ ON URL", "READ ON S3", "READ ON REMOTE", "CREATE TEMPORARY TABLE ON *.*", "KILL QUERY ON *.*",
+              "SYSTEM ON *.*", "SELECT ON *.*", "INSERT ON default.*", "INSERT ON system.*"):
+        check(inside(f"CHECK GRANT {g}") == (True, "0"), f"[ch] exec_reader: CHECK GRANT {g} = 0")
+    check(inside("SELECT 1 SETTINGS max_execution_time=31")[0] is False, "[ch] exec_reader: cannot raise its time limit")
+    ch(port, "DROP TABLE default.er")
+
+
 def check_clickhouse(euc, startup_scripts):
     pws = {u: secrets.token_urlsafe(24) for u in USERS}
     work = tempfile.mkdtemp(prefix="ch-users-")
@@ -572,6 +616,7 @@ def check_clickhouse(euc, startup_scripts):
                                ("SELECT ON system.query_log", False)):
                 check(ch(port, f"CHECK GRANT {g}", user, k) == (True, "1" if allowed else "0"),
                       f"[ch] {user}: CHECK GRANT {g} = {int(allowed)}")
+        check_exec_reader(port, name)
         # The per-query settings each client sends, under its profile.
         probes = [
             ("sse_proxy", "SELECT 1 SETTINGS readonly=2, cancel_http_readonly_queries_on_client_close=1, max_execution_time=8", True),
