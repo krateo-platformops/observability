@@ -326,11 +326,12 @@ Wraps the same upstream chart in `daemonset` mode, stock
 - `securityContext` (0.1.37): root, because kubelet creates the hostPath as `root:root 0755`, with every
   capability dropped, a read-only root filesystem and no privilege escalation. `/var/lib/otelcol` is the
   only writable hostPath. **To refuse root**, set `storeCheckpoints: false` and your own
-  `securityContext`; lines are lost on restart again. This works when the chart's values are set
-  directly. It does NOT work yet through installer's `componentValues`: installer declares neither key
-  for this chart, so a Helm write is refused, and a direct edit of the Installer CR **succeeds while
-  both keys are dropped**, leaving the agent as root. Check the DaemonSet, not the CR.
-- **`auditCollector`** (0.1.38, off by default): two copies of the agents' audit and gateway access-log
+  `securityContext`; lines are lost on restart again. Through installer, both keys
+  (and `podSecurityContext`) are declared from **installer 0.3.704**, under
+  `componentValues.otel-collector-daemonset.opentelemetry-collector`. With an older installer a Helm write
+  is refused, and a direct edit of the Installer CR **succeeds while both keys are dropped**, leaving the
+  agent as root. Check the DaemonSet, not the CR: at the time of writing no cluster ran 0.3.704.
+- **`auditCollector`** (0.1.38, off by default; settable through installer from 0.3.704): two copies of the agents' audit and gateway access-log
   pipelines behind `<release>-audit` (4317 gRPC, 4318 HTTP), so a collector roll, a drain or a pod
   deletion drops no record. Its config is cut out of the agents' rendered config; only the k8sattributes
   node filter is left out. It runs as a non-root user, and `replicas` is at least 2. Enabling it changes
