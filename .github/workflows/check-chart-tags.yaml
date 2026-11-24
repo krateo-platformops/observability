@@ -1,0 +1,33 @@
+name: check-chart-tags
+
+# A release creates one tag per chart version (release-oci.yaml, chart-tags). The test runs the script
+# against a throwaway repository: it must create, keep and never move, and must not change the tag
+# release-notes starts from. The last step prints what it would create here, and creates nothing.
+on:
+  pull_request:
+    paths:
+      - hack/chart-tags.py
+      - tests/chart-tags.py
+      - charts/*/Chart.yaml
+      - .github/workflows/check-chart-tags.yaml
+      - .github/workflows/release-oci.yaml
+  push:
+    branches: [main]
+    paths:
+      - hack/chart-tags.py
+      - tests/chart-tags.py
+      - .github/workflows/check-chart-tags.yaml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  chart-tags:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test against a throwaway repository
+        run: python3 tests/chart-tags.py
+      - name: What a release of this commit would tag
+        run: python3 hack/chart-tags.py --sha HEAD

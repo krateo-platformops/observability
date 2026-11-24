@@ -41,3 +41,17 @@ jobs:
       # components published to krateo-platformops' registry and installed by installer, not blueprints, pages
       # or operators, so they are deliberately not indexed.
       index_channel: none
+
+  # `<chart>-<version>` for every chart just released, so a deployed chart version resolves to a ref here
+  # (repo-mcp-server reads the corpus by it). Only after a real publish: a dry run or a failed release tags
+  # nothing. hack/chart-tags.py never moves a tag; these names do not match the triggers above.
+  chart-tags:
+    needs: release-oci
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Tag each chart version at the released commit
+        run: python3 hack/chart-tags.py --sha "$GITHUB_SHA" --apply
