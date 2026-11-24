@@ -25,6 +25,29 @@ The deployed chart version is cluster-observable from
 `CompositionDefinition.spec.chart.version` — that tag is the version of THIS repo's docs an
 agent should read (see [llms.txt](./llms.txt)).
 
+### Upgrading from krateo-observability before 0.1.44
+
+**Stop at 0.1.44 or 0.1.45 first.** From 0.1.46 the chart refuses an upgrade on a cluster that never
+ran one of them, with `Secret .../mongodb-hyperdx-credentials has no uri ... Roll 0.1.44 or 0.1.45 first`.
+Those versions move HyperDX's MongoDB user onto a generated credential; 0.1.46 then empties the old one,
+which is unsafe in the same upgrade (see [log.md](./log.md), 2026-11-11). A fresh install is not affected.
+
+| Installer | Pins krateo-observability |
+|---|---|
+| before 0.3.585 | before 0.1.44 |
+| 0.3.585 to 0.3.588 | 0.1.44 |
+| 0.3.589 to 0.3.671 | 0.1.45 |
+| 0.3.672 and later | past the guard (0.1.51, then 0.1.55 from 0.3.679) |
+
+So an installer before 0.3.585 goes through one in 0.3.589 to 0.3.671 before a later one. A cluster whose
+Installer CR overrides krateo-observability to a version before 0.1.44 needs the same step in the override.
+
+A skipped step is easy to miss: the installer upgrade succeeds and the CompositionDefinition reads Ready at
+the new version. The refusal is in the **composition's** `Ready` condition, and the Helm release stays at the
+old version. Another sign is a new `krateo-sse-proxy` pod in `CreateContainerConfigError`: it needs a Secret
+this chart creates from 0.1.41, which the refused release never made. Before leaving the middle step, check
+that Secret `mongodb-hyperdx-credentials` has a `uri` key.
+
 ## Standalone: register the wrapper as a composition
 
 Outside the installer you need `core-provider` plus the ClickHouse and MongoDB operators
