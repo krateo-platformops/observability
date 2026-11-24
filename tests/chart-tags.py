@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """hack/chart-tags.py against a throwaway repository and remote; nothing here leaves the machine."""
+import os
 import pathlib
 import subprocess
 import sys
@@ -9,9 +10,11 @@ SCRIPT = pathlib.Path(__file__).resolve().parent.parent / "hack" / "chart-tags.p
 fails = 0
 
 
-def git(cwd, *args, ok=True):
+def git(cwd, *args, ok=True, date=None):
+    # Between annotated tags on one commit `git describe` takes the newer, by the second.
+    env = {**os.environ, **({"GIT_COMMITTER_DATE": date} if date else {})}
     r = subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false",
-                        "-c", "tag.gpgsign=false", *args], cwd=cwd, capture_output=True, text=True)
+                        "-c", "tag.gpgsign=false", *args], cwd=cwd, capture_output=True, text=True, env=env)
     if ok and r.returncode:
         sys.exit(f"git {args}: {r.stderr}")
     return r.stdout.strip()
@@ -42,7 +45,7 @@ with tempfile.TemporaryDirectory() as tmp:
         (w / "n").write_text(tag)
         git(w, "add", "-A")
         git(w, "commit", "-q", "-m", tag)
-        git(w, "tag", "-a", tag, "-m", tag)
+        git(w, "tag", "-a", tag, "-m", tag, date="2026-01-01T00:00:00Z")
         git(w, "push", "-q", "origin", "HEAD:refs/heads/main", tag)
         return git(w, "rev-parse", "HEAD")
 
@@ -63,7 +66,7 @@ with tempfile.TemporaryDirectory() as tmp:
     c = release("3.1.3", two="0.3.0")
     got = git(w, "describe", "--tags", "--abbrev=0", "--exclude=3.1.3", "3.1.3^")
     check("release-notes' base is still the previous 3.1.N tag", got == "3.1.2", got)
-    git(w, "tag", "-a", "-f", "zz-annotated", "-m", "x", b)
+    git(w, "tag", "-a", "zz-annotated", "-m", "x", b, date="2026-01-02T00:00:00Z")
     d = git(w, "describe", "--tags", "--abbrev=0", "--exclude=3.1.3", "3.1.3^")
     check("CONTROL an annotated chart tag could take its place", d == "zz-annotated", d)
     bad = release("3.1.4", one="CHART_VERSION")
