@@ -52,7 +52,7 @@
     ],
     "snowplow_reader": [
       {
-        "query": "GRANT SELECT ON default.otel_logs, SELECT ON default.otel_traces, SELECT ON default.otel_metrics_gauge, SELECT ON default.otel_metrics_sum, SELECT ON default.otel_metrics_histogram, SELECT ON default.krateo_audit"
+        "query": "GRANT SELECT ON default.otel_logs, SELECT ON default.otel_traces, SELECT ON default.otel_metrics_gauge, SELECT ON default.otel_metrics_sum, SELECT ON default.otel_metrics_histogram, SELECT ON default.krateo_audit, SELECT ON default.krateo_slo_daily"
       }
     ],
     "sse_proxy": [
@@ -139,6 +139,7 @@
     ],
     "snowplow_reader": [
       "GRANT SELECT ON default.krateo_audit TO snowplow_reader",
+      "GRANT SELECT ON default.krateo_slo_daily TO snowplow_reader",
       "GRANT SELECT ON default.otel_logs TO snowplow_reader",
       "GRANT SELECT ON default.otel_metrics_gauge TO snowplow_reader",
       "GRANT SELECT ON default.otel_metrics_histogram TO snowplow_reader",

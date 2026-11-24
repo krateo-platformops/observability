@@ -77,7 +77,7 @@ USERS = {
     "sse_proxy": ("CLICKHOUSE_USER_SSE_PROXY_SHA256", "clickhouse-sse-proxy-credentials",
                   "portal_reader", d("otel_logs", "krateo_audit")),
     "snowplow_reader": ("CLICKHOUSE_USER_SNOWPLOW_READER_SHA256", "clickhouse-snowplow-reader-credentials",
-                        "portal_reader_snowplow", d(*TELEMETRY6)),
+                        "portal_reader_snowplow", d(*TELEMETRY6, "krateo_slo_daily")),
     "analyst": ("CLICKHOUSE_USER_ANALYST_SHA256", "clickhouse-analyst-credentials", "analyst",
                 {**d("otel_logs", "otel_traces", "otel_metrics_gauge", "otel_metrics_sum", "otel_metrics_histogram",
                      "otel_metrics_exponential_histogram", "otel_metrics_summary", "krateo_audit"),
@@ -156,7 +156,7 @@ def caps(met, threads=None, conc=None, mem=None, ro=2, cancel=True):
 
 PROFILES = {
     "portal_reader": caps(8, 2, 16),
-    "portal_reader_snowplow": caps(8, 2, 8),
+    "portal_reader_snowplow": caps(15, 4, 16),
     "analyst": caps(30, 4, 4, 4 * GiB),
     "mcp_reader": caps(30, 2, 4, 2 * GiB, ro=0, cancel=False),
     "batch_reader": caps(60, 2, 2),
@@ -215,6 +215,13 @@ def check_render(root, docs):
     users, profiles = euc["users"], euc.get("profiles", {})
     env = {e["name"]: e for e in spec["containerTemplate"].get("env", [])}
     secrets_ = {x["metadata"]["name"]: x for x in docs if x["kind"] == "Secret"}
+    # The portal's login: snowplow reads an endpointRef Secret with exactly these keys, and refuses more
+    # than one kind of credential in it.
+    ep, own = secrets_.get("clickhouse-portal-endpoint", {}).get("data", {}), secrets_["clickhouse-snowplow-reader-credentials"]["data"]
+    check(set(ep) == {"server-url", "username", "password"}, "clickhouse-portal-endpoint has server-url, username, password and nothing else")
+    check((ep.get("username"), ep.get("password")) == (own["username"], own["password"]), "clickhouse-portal-endpoint carries snowplow_reader's own login")
+    check(base64.b64decode(ep.get("server-url", "")).decode() == "http://krateo-clickstack-clickhouse-clickhouse-headless.krateo-system.svc:8123",
+          "clickhouse-portal-endpoint points at the ClickHouse headless Service")
     chc_text = json.dumps(chc)
 
     for prof, want in PROFILES.items():

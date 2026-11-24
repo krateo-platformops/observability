@@ -272,7 +272,13 @@ type: application
 # (otel-collector#42: one refused list ended event collection while the pod stayed Ready, and
 # nothing alerted). Extended, off by default: an idle cluster can have no events for that long.
 # The default render is unchanged; with defaultAlerts.extended it adds one Alert CR.
-version: 0.1.56
+# 0.1.57: the portal's ClickHouse login, for the `default` lockdown. New Secret
+# clickhouse-portal-endpoint (server-url, username, password of snowplow_reader), which the portal
+# chart points its endpointRefs at. snowplow_reader also reads krateo_slo_daily (88 portal queries in 3
+# days on krateo-057), and its limits become 4 threads, 15 s and 16 at a time. Nothing logs in with it
+# until the portal moves. Also: the note beside sre-kubernetes-events-missing counts the idle child's
+# events correctly (36 in 28 minutes, 4 without one looping composition).
+version: 0.1.57
 appVersion: "3.5.0"
 dependencies:
   - name: clickstack
