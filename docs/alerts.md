@@ -1,7 +1,7 @@
 ---
 type: Configuration
 title: observability — the default alert set
-description: The 36 Alert CRs (31 core, 5 extended) and 4 Metric CRs the chart seeds, among them the SLO objects adopted from krateo-057 (0.1.52), the measured evidence behind every filter and threshold, and the three rules that decide whether an Alert can fire at all — `where` is ClickHouse SQL and not the Lucene the CRD advertises, severity needs `otel-collector-daemonset` ≥ 0.1.17 and JSON logs, and log alerts must exclude the observability stack or they diagnose themselves. Event alerts skip the DELETED copy of an expired Event.
+description: The 37 Alert CRs (31 core, 6 extended) and 4 Metric CRs the chart seeds, among them the SLO objects adopted from krateo-057 (0.1.52), the measured evidence behind every filter and threshold, and the three rules that decide whether an Alert can fire at all — `where` is ClickHouse SQL and not the Lucene the CRD advertises, severity needs `otel-collector-daemonset` ≥ 0.1.17 and JSON logs, and log alerts must exclude the observability stack or they diagnose themselves. Event alerts skip the DELETED copy of an expired Event.
 resource: oci://ghcr.io/krateo-platformops/charts/krateo-observability
 tags: [alerting, alerts, observability, clickhouse, hyperdx, sre, runbook]
 timestamp: 2026-09-18T00:00:00Z
@@ -139,6 +139,7 @@ about whether your cluster has that problem.
 | `sre-volume-resize-issue` | extended | events | above 0 | 1h | 4 |
 | `sre-krateo-external-resource-failure` | extended | events | above 200 | 15m | 57,567 |
 | `sre-kubernetes-warning-burst` | extended | events | above 100 | 15m | 71,291 |
+| `sre-kubernetes-events-missing` | extended | events, any | below 1 | 30m | quietest 30 minutes: 718 (2026-11-24) |
 
 ### `sre-jwt-in-telemetry`: a zero that is not vacuous
 
