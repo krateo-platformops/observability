@@ -15,6 +15,8 @@ on:
   pull_request:
     paths:
       - "charts/krateo-audit-worm/**"
+      # Its users' grants are tested as the jobs' own logins.
+      - "charts/krateo-observability/values.yaml"
       - ".github/workflows/check-audit-verify.yaml"
   push:
     branches: [main]
@@ -46,3 +48,6 @@ jobs:
         run: charts/krateo-audit-worm/tests/verify-docker.sh
         env:
           SERVER_TZ: Europe/Rome
+      # Both scripts as the users they log in as, against the server version krateo-observability pins.
+      - name: Run both scripts as audit_sealer and audit_verifier
+        run: python3 charts/krateo-audit-worm/tests/users-docker.py

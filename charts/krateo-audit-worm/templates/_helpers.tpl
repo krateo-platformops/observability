@@ -19,24 +19,24 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version }}
 {{- end -}}
 
-{{/* ClickHouse connection env, shared by every job. Credentials from the Secret. */}}
+{{/* ClickHouse connection env of one job: (dict "root" $ "secret" <the job's Secret>). */}}
 {{- define "krateo-audit-worm.chEnv" -}}
 - name: CH_HOST
-  value: {{ .Values.clickhouse.host | quote }}
+  value: {{ .root.Values.clickhouse.host | quote }}
 - name: CH_PORT
-  value: {{ .Values.clickhouse.port | quote }}
+  value: {{ .root.Values.clickhouse.port | quote }}
 - name: CH_DB
-  value: {{ .Values.clickhouse.database | quote }}
+  value: {{ .root.Values.clickhouse.database | quote }}
 - name: CH_USER
   valueFrom:
     secretKeyRef:
-      name: {{ .Values.clickhouse.credentialsSecret.name | quote }}
-      key: {{ .Values.clickhouse.credentialsSecret.usernameKey | quote }}
+      name: {{ .root.Values.clickhouse.credentialsSecret.name | default .secret | quote }}
+      key: {{ .root.Values.clickhouse.credentialsSecret.usernameKey | quote }}
 - name: CH_PASSWORD
   valueFrom:
     secretKeyRef:
-      name: {{ .Values.clickhouse.credentialsSecret.name | quote }}
-      key: {{ .Values.clickhouse.credentialsSecret.passwordKey | quote }}
+      name: {{ .root.Values.clickhouse.credentialsSecret.name | default .secret | quote }}
+      key: {{ .root.Values.clickhouse.credentialsSecret.passwordKey | quote }}
 {{- end -}}
 
 {{/*
