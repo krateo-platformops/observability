@@ -37,6 +37,11 @@ krateo-* package repos). One tag publishes **all six charts**, each at its own v
    dependencies (`clickstack`, `opentelemetry-collector`, the vendored `clickhouse-operator-helm`
    / `community-operator` `.tgz` under each operator chart's `charts/`) are
    `helm dependency build`-vendored at package time and skipped by discovery.
+   Then the `chart-tags` job creates a lightweight tag `<chart>-<version>` at the released commit for every
+   chart version that has none (`otel-collector-daemonset-0.1.38`), so a deployed chart version is a ref of
+   this repository. It never moves a tag, and these names trigger no workflow. A chart whose version did not
+   change is tagged by the first release after the job exists; that commit holds the same chart, because an
+   unchanged version is published again only if its contents are identical.
 5. **Wire the consumers**: bump the version pin in the installer's component pins (and, for
    standalone installs, [`compositiondefinition.yaml`](../compositiondefinition.yaml)).
    A wrapper-version bump changes the composition CR apiVersion
