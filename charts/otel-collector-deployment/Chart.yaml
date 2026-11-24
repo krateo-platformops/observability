@@ -112,8 +112,11 @@ type: application
 # service.extensions does not name it). Upstream's default traces pipeline is left out first, so
 # its receivers do not count. The default render is the same byte for byte, checksum/config
 # included, so the pod does not restart.
-version: 0.3.23
-appVersion: "1.0.9"
+# 0.3.24: image 1.0.10: a failed list no longer ends event collection (otel-collector#42). On a test
+# cluster one refused list during an API server restart cost 20 minutes of events, until the pod was
+# replaced; reproduced with images 1.0.6 and 1.0.9. No config change; the pod rolls for the image.
+version: 0.3.24
+appVersion: "1.0.10"
 dependencies:
   - name: opentelemetry-collector
     version: 0.170.0
