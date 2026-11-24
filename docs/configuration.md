@@ -243,7 +243,7 @@ All under `opentelemetry-collector:` (the upstream dep):
 
 - `mode: deployment`, `replicaCount: 1`, image
   `ghcr.io/krateo-platformops/otel-collector:1.0.6` (`1.0.6` = 1.0.5 with its tests run in CI; `1.0.5` = adds `transform`; `1.0.2` =
-  clickhouse-exporter schema-recreate-on-reconnect; `1.0.1` = patched k8sobjects receiver), `command.name:
+  clickhouse-exporter schema-recreate-on-reconnect; `1.0.1` = patched k8sobjects receiver; `1.0.10` = it survives a failed list), `command.name:
   otelcol-krateo` (the binary kept its name when the image repo was renamed).
 - `clusterRole.create: true` with read rules on core/apps/batch/autoscaling resources plus
   `get` on the Krateo CR groups (`composition.krateo.io`, `templates.krateo.io`,
