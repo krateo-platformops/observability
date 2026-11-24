@@ -25,7 +25,7 @@
           "additionalProperties": false,
           "required": ["name", "usernameKey", "passwordKey"],
           "properties": {
-            "name": { "type": "string", "minLength": 1 },
+            "name": { "type": "string" },
             "usernameKey": { "type": "string", "minLength": 1 },
             "passwordKey": { "type": "string", "minLength": 1 }
           }
@@ -51,6 +51,7 @@
       "required": ["schedule", "lagSeconds"],
       "properties": {
         "schedule": { "type": "string", "minLength": 1 },
+        "credentialsSecret": { "type": "string", "minLength": 1 },
         "lagSeconds": { "type": "integer", "minimum": 0 }
       }
     },
@@ -60,6 +61,7 @@
       "required": ["schedule", "staleAfterSeconds"],
       "properties": {
         "schedule": { "type": "string", "minLength": 1 },
+        "credentialsSecret": { "type": "string", "minLength": 1 },
         "staleAfterSeconds": { "type": "integer", "minimum": 1 }
       }
     },

@@ -5,16 +5,17 @@
 # row into an append-only WORM table stamped with its ingestion time, and
 # hash-chains sealed windows so any later edit or delete is detectable.
 
-# ClickHouse connection (native protocol). Credentials are read from a Secret —
-# the same one the OTel collectors use — never inlined.
+# ClickHouse connection (native protocol). Credentials are read from Secrets, never inlined.
 clickhouse:
   host: krateo-clickstack-clickhouse-clickhouse-headless.krateo-system.svc
   port: 9000
   # Database that holds krateo_audit (the collector's clickhouse/audit exporter
   # writes database `default`). The WORM + seal tables are created here too.
   database: default
+  # Empty name: each job logs in as its own user (seal.credentialsSecret, verify.credentialsSecret).
+  # A name makes both jobs use that one Secret instead, for another ClickHouse.
   credentialsSecret:
-    name: otel-clickhouse-credentials
+    name: ""
     usernameKey: username
     passwordKey: password
 
@@ -38,6 +39,10 @@ image:
 seal:
   schedule: "*/15 * * * *"
   lagSeconds: 300
+  # ClickHouse user audit_sealer, created by krateo-observability 0.1.42 and later in its namespace:
+  # SELECT on krateo_audit; SELECT, INSERT and CREATE on the two WORM tables and the view. It cannot
+  # ALTER, DELETE, DROP or TRUNCATE anything.
+  credentialsSecret: clickhouse-audit-sealer-credentials
 
 # Verification: recompute the chain and emit an OTel-shaped JSON line to stdout
 # every run (status ok|tampered|unprotected|unsealed|stale). The line is collected
@@ -47,6 +52,8 @@ verify:
   # Flag the chain stale if the newest seal is older than this (a stopped or
   # erroring sealer leaves rows unsealed — invisible without this check).
   staleAfterSeconds: 5400
+  # ClickHouse user audit_verifier (krateo-observability 0.1.42 and later): reads the three audit tables.
+  credentialsSecret: clickhouse-audit-verifier-credentials
 
 # One Alert on a status other than ok, and one on an hour with no ok, which covers a verifier that
 # stopped or timed out. Needs the Alert CRD from alert-provider-crd, so install this chart after it.

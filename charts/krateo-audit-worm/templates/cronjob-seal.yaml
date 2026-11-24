@@ -33,7 +33,7 @@ spec:
               env:
                 - name: LAG_SECONDS
                   value: {{ .Values.seal.lagSeconds | quote }}
-                {{- include "krateo-audit-worm.chEnv" . | nindent 16 }}
+                {{- include "krateo-audit-worm.chEnv" (dict "root" . "secret" .Values.seal.credentialsSecret) | nindent 16 }}
               volumeMounts:
                 - name: scripts
                   mountPath: /scripts

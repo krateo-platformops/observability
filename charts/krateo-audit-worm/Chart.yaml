@@ -23,7 +23,11 @@ type: application
 # from a reset genesis. Every answer is now assigned before it's tested, and has() refuses anything
 # but 0 or 1. tests/verify-docker.sh checks an unreachable ClickHouse for both scripts, a really
 # absent table as a control, and that no query runs inside a test.
-version: 0.1.8
+# 0.1.9: each job logs in as its own ClickHouse user: the sealer as audit_sealer, the verifier as
+# audit_verifier, both created by krateo-observability 0.1.42 and later, which must be live first. They
+# used the collectors' user, which may also write every other table. clickhouse.credentialsSecret.name
+# is empty by default and still overrides both. tests/users-docker.py runs both scripts as these users.
+version: 0.1.9
 keywords:
   - audit
   - worm

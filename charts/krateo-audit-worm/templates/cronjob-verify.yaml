@@ -33,7 +33,7 @@ spec:
               imagePullPolicy: {{ .Values.image.pullPolicy }}
               command: [sh, /scripts/verify.sh]
               env:
-                {{- include "krateo-audit-worm.chEnv" . | nindent 16 }}
+                {{- include "krateo-audit-worm.chEnv" (dict "root" . "secret" .Values.verify.credentialsSecret) | nindent 16 }}
               volumeMounts:
                 - name: scripts
                   mountPath: /scripts
