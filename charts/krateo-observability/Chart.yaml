@@ -281,7 +281,16 @@ type: application
 # 0.1.58: ClickHouse user exec_reader for reads inside the ClickHouse pod: no password, localhost only,
 # SELECT on default and system, 30 s, 4 threads, 4 GiB. It lets `kubectl exec ... clickhouse-client` go on
 # after `default` gets a password (a later release). Nothing else changes against 0.1.57.
-version: 0.1.58
+# 0.1.59: ClickHouse user chops (docs/clickhouse-disk-full.md's operator) is the chart's own, like every
+# other user: Secret clickhouse-chops-credentials holds its password, and the hash reaches ClickHouse
+# through @from_env. Until now the installer added chops through componentValues with an inline hash,
+# which kept the hash in the Installer CR and stopped installer's values file going into git
+# (Diego, 2026-11-25). The grants are the runbook's, unchanged. chops gets a NEW password: whoever runs
+# the runbook reads it from the Secret. A new env variable, so 0.1.59 ROLLS ClickHouse once; it
+# supersedes 0.1.58 before that rolls (one restart, not two). The render now fails if componentValues
+# puts any chart user's hash inline, so the installer must drop users.chops.password_sha256_hex in the
+# same change that pins 0.1.59.
+version: 0.1.59
 appVersion: "3.5.0"
 dependencies:
   - name: clickstack

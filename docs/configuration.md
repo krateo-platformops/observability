@@ -100,6 +100,10 @@ top-level `global` propagates into clickstack and all its subcharts
   ClickHouse `otelcollector` user** (clickstack provisions it with the same password).
   Created in the release namespace (the collectors' namespace), so no cross-namespace
   replication.
+- **Disk-full operator** (`0.1.59`): ClickHouse user `chops`, for
+  [clickhouse-disk-full.md](clickhouse-disk-full.md). Its password is in Secret `clickhouse-chops-credentials`
+  (`username`, `password`), generated once and kept. Do not set `users.chops.password_sha256_hex` in
+  componentValues: the render fails on an inline hash for any chart user.
 - **In-pod reads** (`0.1.58`): `kubectl exec <clickhouse pod> -c clickhouse-server -- clickhouse-client --user exec_reader`.
   No password, accepted only from inside the pod (a port-forward counts as inside). SELECT on `default` and
   `system`, SHOW ACCESS, 30 s, 4 threads, 4 GiB, 8 at a time; `--readonly=1` is accepted. Use it instead of

@@ -20,6 +20,11 @@
         "query": "GRANT SELECT ON default.krateo_audit, SELECT ON default.krateo_audit_worm, SELECT ON default.krateo_audit_seal, SHOW TABLES ON default.krateo_audit_worm_mv"
       }
     ],
+    "chops": [
+      {
+        "query": "GRANT SELECT ON system.disks, SELECT ON system.parts, SELECT ON system.tables, ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_logs, ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_traces, ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_metrics_gauge, ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_metrics_sum, ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_metrics_histogram"
+      }
+    ],
     "exec_reader": [
       {
         "query": "GRANT SELECT ON default.*, SELECT ON system.*, SHOW ACCESS ON *.*"
@@ -100,6 +105,16 @@
       "GRANT SELECT ON default.krateo_audit_seal TO audit_verifier",
       "GRANT SELECT ON default.krateo_audit_worm TO audit_verifier",
       "GRANT SHOW TABLES ON default.krateo_audit_worm_mv TO audit_verifier"
+    ],
+    "chops": [
+      "GRANT ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_logs TO chops",
+      "GRANT ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_metrics_gauge TO chops",
+      "GRANT ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_metrics_histogram TO chops",
+      "GRANT ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_metrics_sum TO chops",
+      "GRANT ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_traces TO chops",
+      "GRANT SELECT ON system.disks TO chops",
+      "GRANT SELECT ON system.parts TO chops",
+      "GRANT SELECT ON system.tables TO chops"
     ],
     "hyperdx": [
       "GRANT SELECT ON default.krateo_audit TO hyperdx",

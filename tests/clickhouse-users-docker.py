@@ -106,6 +106,11 @@ USERS = {
                     "default.krateo_slo_daily_mv": "CREATE VIEW"}),
     "usage_collector": ("CLICKHOUSE_USER_USAGE_COLLECTOR_SHA256", "clickhouse-usage-collector-credentials",
                         "default", {"cmp.health_records": "INSERT, CREATE TABLE"}),
+    # docs/clickhouse-disk-full.md's operator: frees space in the five telemetry tables, nothing else.
+    "chops": ("CLICKHOUSE_USER_CHOPS_SHA256", "clickhouse-chops-credentials", "default",
+              {"system.disks": "SELECT", "system.parts": "SELECT", "system.tables": "SELECT",
+               **d("otel_logs", "otel_traces", "otel_metrics_gauge", "otel_metrics_sum", "otel_metrics_histogram",
+                   privs="ALTER DELETE, ALTER MATERIALIZE TTL")}),
 }
 # The platform creates `cmp` (extraConfig.startup_scripts); usage_collector never can.
 STARTUP_SCRIPTS = {"throw_on_error": False,
@@ -130,7 +135,9 @@ SHOWBACK_DDL = ("CREATE TABLE IF NOT EXISTS showback.usage_records ( record_id S
 GRANTS_FIXTURE = "tests/fixtures/clickhouse-users-grants.json"
 # `default`'s future hash: a Secret and an env variable, no users.default entry yet.
 DEFAULT_PW = ("CLICKHOUSE_USER_DEFAULT_SHA256", "clickhouse-default-password")
-SYSTEM_GRANTS_ALLOWED = {"system.data_skipping_indices"}
+# Single system tables a user may read, per user; never system.* wholesale.
+SYSTEM_GRANTS_ALLOWED = {"hyperdx": {"system.data_skipping_indices"},
+                         "chops": {"system.disks", "system.parts", "system.tables"}}
 
 GiB = 1024 ** 3
 
@@ -165,10 +172,10 @@ PROFILES = {
     "exec_reader": caps(30, 4, 8, 4 * GiB, ro=0, cancel=False),
 }
 
-# A componentValues-shaped overlay: an extra user the installer adds (057's chops), which must
-# deep-merge with the chart's users and leave them alone. No credential in it.
+# A componentValues-shaped overlay: an extra user an installer adds, which must deep-merge with
+# the chart's users and leave them alone. No credential in it.
 OVERLAY = {"clickstack": {"clickhouse": {"cluster": {"spec": {"settings": {"extraUsersConfig": {"users": {
-    "chops": {"profile": "default", "grants": [{"query": "GRANT SELECT ON system.disks"}]}}}}}}}}}
+    "extra_user": {"profile": "default", "grants": [{"query": "GRANT SELECT ON system.disks"}]}}}}}}}}}
 
 failures = []
 # What this run saw, per user: the rendered `grants` list and SHOW GRANTS' lines, as returned.
@@ -241,7 +248,7 @@ def check_render(root, docs):
         got = parse_grant(stmt) or {}
         check(got == {o: {x.strip() for x in p.split(",")} for o, p in objects.items()},
               f"{user}: grants exactly {sorted(objects)}")
-        bad = [o for o in got if o.endswith(".*") or o == "*" or (o.startswith("system.") and o not in SYSTEM_GRANTS_ALLOWED)]
+        bad = [o for o in got if o.endswith(".*") or o == "*" or (o.startswith("system.") and o not in SYSTEM_GRANTS_ALLOWED.get(user, set()))]
         check(not bad, f"{user}: nothing on *.*, default.* or system.* wholesale ({bad or 'none'})")
         check("GRANT OPTION" not in stmt.upper(), f"{user}: no WITH GRANT OPTION")
         audit_bad = [(o, p) for o, ps in got.items() if o.startswith("default.krateo_audit")
@@ -323,6 +330,16 @@ def check_guard(root):
     check(r.returncode != 0 and "CLICKHOUSE_USER_USAGE_COLLECTOR_SHA256 reads Secret clickhouse-otel-writer-credentials" in r.stderr,
           "usage_collector's variable reading another user's Secret fails the render")
     # A second variable reading usage_collector's Secret.
+    inline = {"clickstack": {"clickhouse": {"cluster": {"spec": {"settings": {"extraUsersConfig": {"users": {
+        "chops": {"password_sha256_hex": "0" * 64, "profile": "default"}}}}}}}}}
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+        yaml.safe_dump(inline, f)
+    try:
+        r = render(root, "-f", f.name, expect_fail=True)
+    finally:
+        os.unlink(f.name)
+    check(r.returncode != 0 and 'users.chops.password_sha256_hex must be {"@from_env": CLICKHOUSE_USER_CHOPS_SHA256}' in r.stderr,
+          "an inline password hash for a chart user (chops before 0.1.59) fails the render")
     r = render_env(root, full + [env_entry("CLICKHOUSE_USER_OTHER_SHA256", "clickhouse-usage-collector-credentials")])
     check(r.returncode != 0 and "entry CLICKHOUSE_USER_OTHER_SHA256 reads Secret clickhouse-usage-collector-credentials" in r.stderr,
           "another variable reading usage_collector's Secret fails the render")
@@ -616,6 +633,12 @@ def check_clickhouse(euc, startup_scripts):
                                ("SELECT ON system.query_log", False)):
                 check(ch(port, f"CHECK GRANT {g}", user, k) == (True, "1" if allowed else "0"),
                       f"[ch] {user}: CHECK GRANT {g} = {int(allowed)}")
+        k = pws["chops"]
+        for g, allowed in (("ALTER DELETE ON default.otel_logs", True), ("ALTER MATERIALIZE TTL ON default.otel_metrics_sum", True),
+                           ("SELECT ON default.otel_logs", False), ("INSERT ON default.otel_logs", False),
+                           ("ALTER DELETE ON default.krateo_slo_daily", False)):
+            check(ch(port, f"CHECK GRANT {g}", "chops", k) == (True, "1" if allowed else "0"),
+                  f"[ch] chops: CHECK GRANT {g} = {int(allowed)} (docs/clickhouse-disk-full.md)")
         check_exec_reader(port, name)
         # The per-query settings each client sends, under its profile.
         probes = [
@@ -654,7 +677,7 @@ def main():
     finally:
         os.unlink(f.name)
     users = next(x for x in docs if x["kind"] == "ClickHouseCluster")["spec"]["settings"]["extraUsersConfig"]["users"]
-    check("chops" in users and set(USERS) <= set(users), "a componentValues user deep-merges beside the chart's users")
+    check("extra_user" in users and set(USERS) <= set(users), "a componentValues user deep-merges beside the chart's users")
     check_guard(root)
     if "--render-only" not in sys.argv:
         check_clickhouse(euc, chc["spec"]["settings"]["extraConfig"]["startup_scripts"])
