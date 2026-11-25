@@ -53,44 +53,42 @@ two tables that matter. **Do not infer system-table access from a successful `sy
 disk is nor choose a partition to drop.** Section A (expand the volume) works without any new
 principal. Sections B and C **require an ops principal** and are not actionable until one exists.
 
-Creating that principal is a prerequisite, not a step. Since installer **0.3.482** it is
-expressible through the installer rather than by hand:
+Since krateo-observability **0.1.59** that principal exists wherever the chart is installed: the
+chart's own ClickHouse user `chops`, with the grants below. Its password is in Secret
+`clickhouse-chops-credentials` in the release namespace (keys `username` and `password`; the hash
+reaches ClickHouse through `@from_env`, never through values or the ClickHouseCluster CR):
 
-```yaml
-componentValues:
-  krateo-observability:
-    clickstack:
-      clickhouse:
-        cluster:
-          spec:
-            settings:
-              extraUsersConfig:
-                users:
-                  chops:
-                    password_sha256_hex: <sha256 of the password, 64 lowercase hex>
-                    profile: default
-                    grants:
-                      - query: >-
-                          GRANT SELECT ON system.disks, SELECT ON system.parts, SELECT ON system.tables,
-                          ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_logs,
-                          ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_traces,
-                          ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_metrics_gauge,
-                          ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_metrics_sum,
-                          ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_metrics_histogram
+```sh
+kubectl -n krateo-system get secret clickhouse-chops-credentials -o jsonpath='{.data.password}' | base64 -d
 ```
 
-**Put every grant in ONE `query`. ClickHouse applies only the first `grants` list item.** Each
+Before 0.1.59 the installer added `chops` through componentValues with an inline
+`password_sha256_hex`, which kept the hash in the Installer CR. The chart now refuses that: an inline
+hash for any chart user fails the render. Its grants, in `values.yaml` beside the other users, are:
+
+```yaml
+chops:
+  password_sha256_hex:
+    "@from_env": CLICKHOUSE_USER_CHOPS_SHA256
+  profile: default
+  grants:
+    - query: >-
+        GRANT SELECT ON system.disks, SELECT ON system.parts, SELECT ON system.tables,
+        ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_logs,
+        ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_traces,
+        ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_metrics_gauge,
+        ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_metrics_sum,
+        ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_metrics_histogram
+```
+
+**Every grant is in ONE `query`. ClickHouse applies only the first `grants` list item.** Each
 `- query:` item becomes its own `<grants>` element in the preprocessed `users.xml`, and ClickHouse
 reads only the first. So eight items give the user one privilege, with no error and no log line.
 This is what happened on krateo-057 on 2026-11-08 (installer 0.3.532): `chops` could log in, but
-`SHOW GRANTS FOR chops` listed only `SELECT ON system.disks`. The chart's own `app` and
-`otelcollector` users never hit this, because each already has a single combined statement. One
-`GRANT` with several `privilege ON target` pairs is standard syntax, and every pair lands. After any
-change, check with `SHOW GRANTS FOR chops` (as `default`), never by reading the values or the
+`SHOW GRANTS FOR chops` listed only `SELECT ON system.disks`. One `GRANT` with several
+`privilege ON target` pairs is standard syntax, and every pair lands. After any change, check with
+`SHOW GRANTS FOR chops` (as `exec_reader` or `default`), never by reading the values or the
 ClickHouseCluster CR, which both look correct when only the first item was applied.
-
-`password_sha256_hex` only — a plaintext `password` is rejected by the installer's schema by name,
-because the Installer CR, etcd and the helm release Secret would all carry it in cleartext.
 
 **Grant per table, never `ON system.*` or `ON default.*` for a human principal.** `INSERT ON
 default.*` reaches `default.krateo_audit`, whose `krateo_audit_worm_mv` hashes and seals rows as

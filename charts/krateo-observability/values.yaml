@@ -735,6 +735,13 @@ clickstack:
                 secretKeyRef:
                   name: clickhouse-usage-collector-credentials
                   key: password_sha256_hex
+            # chops, the disk-full runbook's operator (0.1.59). A new variable, so 0.1.59 ROLLS
+            # ClickHouse once.
+            - name: CLICKHOUSE_USER_CHOPS_SHA256
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-chops-credentials
+                  key: password_sha256_hex
             # `default`'s future hash. NOTHING reads it yet: `default` keeps the operator's
             # no_password until the lockdown's last step, which then only edits users.default in
             # extraUsersConfig (a hot reload, no restart) to read this variable. Shipping the
@@ -844,7 +851,7 @@ clickstack:
           # DDL with ClickHouse 26.8.36.3 and operator 0.0.7 (2026-11-10).
           #
           # Helm deep-merges this map with upstream clickstack's (app, otelcollector) and with any
-          # componentValues users (chops). Keys are ClickHouse users.d YAML, written by the operator
+          # any componentValues users. Keys are ClickHouse users.d YAML, written by the operator
           # to users.d/99-extra-users-config.yaml.
           #
           # readonly is 2, NOT 1: readonly=1 refuses every query that sets a setting, and sse-proxy
@@ -1124,6 +1131,27 @@ clickstack:
                 profile: default
                 grants:
                   - query: "GRANT INSERT, CREATE TABLE ON cmp.health_records"
+              # chops: the person running docs/clickhouse-disk-full.md, which frees space by deleting
+              # telemetry rows and partitions (0.1.59, Diego 2026-11-25). Until 0.1.58 the installer
+              # added it through componentValues with an inline password hash, which kept that hash
+              # in the Installer CR and stopped installer's values file going into git. Now the
+              # chart owns it like every other user: the password is in Secret
+              # clickhouse-chops-credentials, and nothing in values carries it. The grants are the
+              # runbook's, unchanged: what section B needs and no more. ALTER DELETE covers DROP
+              # PARTITION, there is no INSERT and no SELECT in `default`, and nothing on the audit
+              # tables, whose rows must never be removed.
+              chops:
+                password_sha256_hex:
+                  "@from_env": CLICKHOUSE_USER_CHOPS_SHA256
+                profile: default
+                grants:
+                  - query: >-
+                      GRANT SELECT ON system.disks, SELECT ON system.parts, SELECT ON system.tables,
+                      ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_logs,
+                      ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_traces,
+                      ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_metrics_gauge,
+                      ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_metrics_sum,
+                      ALTER DELETE, ALTER MATERIALIZE TTL ON default.otel_metrics_histogram
               # exec_reader: people and sessions reading with `kubectl exec <pod> -- clickhouse-client
               # --user exec_reader` (Diego, 2026-11-24). No password, and only from inside the pod: it
               # takes the place of `default` there before `default` gets a password. Whoever may exec
