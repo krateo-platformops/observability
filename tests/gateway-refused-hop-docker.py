@@ -270,7 +270,7 @@ def verify(cases, logs, pts, audit, work):
             for sl in rl["scopeLogs"]:
                 for lr in sl["logRecords"]:
                     outcomes.append({a["key"]: next(iter(a["value"].values())) for a in lr["attributes"]}.get("krateo.audit.outcome"))
-    check(sorted(outcomes) == ["denied", "denied", "failure"], f"a refusal after verification is a denied audit row, an unverified one is not ({outcomes})")
+    check(sorted(outcomes) == ["denied", "denied", "denied", "failure"], f"a refusal after verification is a denied audit row, an unverified one is not ({outcomes})")
 
 
 def validate(image, relay, label):
