@@ -690,6 +690,35 @@ opentelemetry-collector:
                 set(attributes["krateo.gateway_audit.class"], "excluded")
                 where instrumentation_scope.name == "request" and attributes["gateway"] != nil
                 and attributes["krateo.gateway_audit.class"] == nil
+              # A THIRD CLASS, `refused`: a hop (excluded OR otherwise projected) the gateway itself
+              # refused BEFORE it verified who was calling. Rule: `user` (the verified subject) is absent or empty, AND the gateway
+              # named a refusal reason that is not the backend's own (`Upstream`) -- either one of the
+              # reasons the projection maps to outcome denied (JwtAuth, Oidc, BasicAuth, APIKeyAuth,
+              # ExtAuth, Authorization, RateLimit, Guardrail, Overload), or ANY reason on a 401, 403 or 429,
+              # so a refusal reason the gateway adds later is still counted (as reason `other`) rather
+              # than lost between this count and the excluded one.
+              # Measured on krateo-057 2026-11-28 over 7 days: all 141 `reason: Authorization` hops
+              # (403, error "authorization failed", protocol `http`) have an empty user, and the 25 rows
+              # with a user carry no refusal reason (only reason `MCP`, protocol errors), so `user` is the
+              # discriminator. No hop on 057 was refused with a user present, so the "refused after
+              # verification" side is the rule, not an observation. snowplow's ruling
+              # (krateo-platformops/audit docs/schema.md#writers, gateway writer, audit#49): such a hop
+              # "is outside the gateway's rows; the collector counts it as a bounded metric with no
+              # identity, path or source address, by route class and reason". A refusal AFTER the
+              # gateway verified the caller has a user, stays in its class, and is a denied row when
+              # projected. Taken out of BOTH other classes so the three are disjoint by construction:
+              # a hop that would have been projected (an LLM, MCP or A2A route refusing a caller with no
+              # identity) is no longer written to krateo_audit as a denied row with no actor, which the
+              # ruling puts outside the gateway's rows; count/gateway-audit-excluded no longer counts the
+              # excluded ones; count/gateway-refused-hop counts them all. This is the ONE change to what
+              # krateo_audit receives: an unverified refusal on an acting protocol.
+              - >-
+                set(attributes["krateo.gateway_audit.class"], "refused")
+                where (attributes["krateo.gateway_audit.class"] == "excluded" or attributes["krateo.gateway_audit.class"] == "projected")
+                and (attributes["user"] == nil or attributes["user"] == "")
+                and attributes["reason"] != nil and attributes["reason"] != "" and attributes["reason"] != "Upstream"
+                and (IsMatch(attributes["reason"], "^(JwtAuth|Oidc|BasicAuth|APIKeyAuth|ExtAuth|Authorization|RateLimit|Guardrail|Overload)$")
+                or (attributes["http.status"] != nil and (Int(attributes["http.status"]) == 401 or Int(attributes["http.status"]) == 403 or Int(attributes["http.status"]) == 429)))
       filter/gateway-audit-projected:
         error_mode: ignore
         logs:
@@ -701,6 +730,50 @@ opentelemetry-collector:
         logs:
           log_record:
             - 'attributes["krateo.gateway_audit.class"] != "excluded"'
+      filter/gateway-refused-hop:
+        error_mode: ignore
+        logs:
+          log_record:
+            - 'attributes["krateo.gateway_audit.class"] != "refused"'
+      # GATEWAY REFUSED HOP: the bounded counter of hops the gateway refused before it verified the
+      # caller (see the `refused` class in transform/gateway-audit-classify for the rule and the
+      # ruling). It keeps THREE values and throws the rest away, so nothing that identifies a caller
+      # can reach a metric point, whatever the gateway adds to its access log later:
+      #   route.class  mcp | a2a | llm | other, from the route NAME by a fixed pattern (the name itself is
+      #                not kept): `agentgateway-policies-mcp-*` -> mcp; `agentgateway-policies-a2a` and
+      #                `agentgateway-policies-subagent-*` -> a2a; `agentgateway-policies-llm` -> llm
+      #   reason       authorization_failed (Authorization) | authentication_failed (JwtAuth, Oidc,
+      #                BasicAuth, APIKeyAuth, ExtAuth) | rate_limited (RateLimit) | other (Guardrail,
+      #                Overload, and any reason the gateway adds). The raw text is never passed through.
+      #   http.status  401 | 403 | 429 | other
+      # Every other log attribute is deleted, and the resource is cut to service.name (the pod, node,
+      # host and image attributes the gateway's resource carries are of no use on a count).
+      # error_mode:ignore: a record whose statement errors keeps going; the defaults are `other`, so
+      # an unexpected value is counted as `other`, not dropped.
+      transform/gateway-refused-hop:
+        error_mode: ignore
+        log_statements:
+          - context: log
+            statements:
+              - 'set(cache["route"], attributes["route"]) where attributes["route"] != nil'
+              - 'set(cache["reason"], attributes["reason"]) where attributes["reason"] != nil'
+              - 'set(cache["status"], Int(attributes["http.status"])) where attributes["http.status"] != nil'
+              - 'delete_matching_keys(attributes, "^.*$")'
+              - 'set(attributes["route.class"], "other")'
+              - 'set(attributes["route.class"], "mcp") where cache["route"] != nil and IsMatch(cache["route"], "^([^/]+/)?agentgateway-policies-mcp-")'
+              - 'set(attributes["route.class"], "a2a") where cache["route"] != nil and IsMatch(cache["route"], "^([^/]+/)?agentgateway-policies-(a2a$|subagent-)")'
+              - 'set(attributes["route.class"], "llm") where cache["route"] != nil and IsMatch(cache["route"], "^([^/]+/)?agentgateway-policies-llm$")'
+              - 'set(attributes["reason"], "other")'
+              - 'set(attributes["reason"], "authorization_failed") where cache["reason"] == "Authorization"'
+              - 'set(attributes["reason"], "authentication_failed") where cache["reason"] != nil and IsMatch(cache["reason"], "^(JwtAuth|Oidc|BasicAuth|APIKeyAuth|ExtAuth)$")'
+              - 'set(attributes["reason"], "rate_limited") where cache["reason"] == "RateLimit"'
+              - 'set(attributes["http.status"], "other")'
+              - 'set(attributes["http.status"], "401") where cache["status"] == 401'
+              - 'set(attributes["http.status"], "403") where cache["status"] == 403'
+              - 'set(attributes["http.status"], "429") where cache["status"] == 429'
+          - context: resource
+            statements:
+              - 'keep_keys(resource.attributes, ["service.name"])'
       # THE PROJECTION: access-log facts -> schema v1 keys for writer `gateway`, then keep_keys to
       # the closed set. Statement order matters: `cache` holds intermediate values and every
       # output key is derived before keep_keys removes the inputs. Each mapping, with the schema's
@@ -940,7 +1013,8 @@ opentelemetry-collector:
 
     connectors:
       # The gateway records logs/gateway-audit does NOT project (transform/gateway-audit-classify's
-      # explicit exclude list, and every non-candidate protocol), counted per protocol, route and
+      # explicit exclude list, and every non-candidate protocol), less the hops the gateway refused
+      # before verifying the caller (class `refused`, counted by count/gateway-refused-hop), counted per protocol, route and
       # method so "not projected" is measurable, and an
       # acting method that lands on the exclude list by mistake shows up as a count, not as silence.
       # Lands as krateo.gateway_audit.excluded in otel_metrics_sum through metrics/gateway-audit-excluded.
@@ -959,6 +1033,22 @@ opentelemetry-collector:
                 default_value: ""
               - key: http.method
                 default_value: ""
+      # GATEWAY REFUSED HOP (2026-11-28, the audit ruling in transform/gateway-audit-classify): hops the
+      # gateway refused before it verified the caller. Not in krateo_audit and not in
+      # krateo.gateway_audit.excluded: the classes are disjoint, so a hop is in exactly one count.
+      # Dimensions, all from fixed lists (transform/gateway-refused-hop): route.class, reason, http.status.
+      # Lands as krateo.gateway.refused_hops in otel_metrics_sum through metrics/gateway-refused-hop.
+      count/gateway-refused-hop:
+        logs:
+          krateo.gateway.refused_hops:
+            description: Gateway refused hop - requests the agent gateway refused before it verified the caller, by route class and reason.
+            attributes:
+              - key: route.class
+                default_value: other
+              - key: reason
+                default_value: other
+              - key: http.status
+                default_value: other
       # SLO SPAN METRICS. Turns the spans kept by filter/slo-spans into a call counter and a
       # duration histogram, written by the SAME `clickhouse` exporter as every other metric, so they
       # land in otel_metrics_sum / otel_metrics_histogram. `span_metrics` is the name otelcol-contrib
@@ -1095,6 +1185,18 @@ opentelemetry-collector:
           exporters: [count/gateway-audit-excluded]
         metrics/gateway-audit-excluded:
           receivers: [count/gateway-audit-excluded]
+          processors: [memory_limiter, batch]
+          exporters: [clickhouse]
+        # The hops the gateway refused before verifying the caller, counted (count/gateway-refused-hop)
+        # and otherwise discarded here, like the excluded ones: the record is in otel_logs through
+        # logs/gateway. No k8sattributes, no identity: transform/gateway-refused-hop keeps three bounded
+        # values. A child with no gateway simply sees no such record.
+        logs/gateway-refused-hop:
+          receivers: [otlp]
+          processors: [memory_limiter, transform/gateway-audit-classify, filter/gateway-refused-hop, transform/gateway-refused-hop]
+          exporters: [count/gateway-refused-hop]
+        metrics/gateway-refused-hop:
+          receivers: [count/gateway-refused-hop]
           processors: [memory_limiter, batch]
           exporters: [clickhouse]
         # Issue #112, bug #2: wire OTLP metrics -> ClickHouse. The reconcile RED suite

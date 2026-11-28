@@ -469,12 +469,45 @@ Wraps the same upstream chart in `daemonset` mode, stock
 
 ### The gateway audit copy (`logs/gateway-audit`, 0.1.27)
 
-The agent gateway's access log feeds three pipelines on the same `otlp` receiver:
+The agent gateway's access log feeds four consumers of the same `otlp` receiver:
 - `logs/gateway`: every record to `otel_logs` (7 days), unchanged;
 - `logs/gateway-audit`: the acting hops to `krateo_audit` (365 days), projected to writer `gateway`
   of krateo-platformops/audit schema v1, scope `github.com/krateo-platformops/observability/gateway-audit`;
 - `logs/gateway-audit-excluded`: the rest, counted (`krateo.gateway_audit.excluded` in `otel_metrics_sum`,
-  attributes `protocol`, `mcp.method.name`, `a2a.method`, `http.method`).
+  attributes `protocol`, `mcp.method.name`, `a2a.method`, `http.method`), except the refused hops below;
+- `logs/gateway-refused-hop` (0.1.40): the hops the gateway refused before it verified the caller,
+  counted (`krateo.gateway.refused_hops` in `otel_metrics_sum`, "gateway refused hop").
+
+**Gateway refused hop (0.1.40).** snowplow's ruling for the gateway writer (krateo-platformops/audit
+`docs/schema.md#writers`, audit#49): a hop refused before a verified identity is outside the gateway's
+`krateo_audit` rows; the collector counts it as a bounded metric with no identity, path or source
+address, by route class and reason. A refusal after the gateway verified the caller is still a denied row.
+`transform/gateway-audit-classify` gives such a hop the class `refused`: it was excluded (so it is never
+projected), `user` is absent or empty, and the gateway named a reason that is not `Upstream`, either one
+of the denial reasons (JwtAuth, Oidc, BasicAuth, APIKeyAuth, ExtAuth, Authorization, RateLimit, Guardrail,
+Overload) or any reason on a 401, 403 or 429. The classes are disjoint, so a hop is in exactly one of
+`krateo_audit`, `krateo.gateway_audit.excluded` and `krateo.gateway.refused_hops`; the excluded count no
+longer includes the refused ones. Measured on krateo-057 2026-11-28: 141 hops in 7 days, all 403 reason
+`Authorization`, protocol `http`, empty user.
+
+`krateo.gateway.refused_hops` (sum, one per hop), the only attributes, from fixed lists:
+
+| `route.class` | from the route name |
+|---|---|
+| `mcp` | `agentgateway-policies-mcp-*` |
+| `a2a` | `agentgateway-policies-a2a`, `agentgateway-policies-subagent-*` |
+| `llm` | `agentgateway-policies-llm` |
+| `other` | any other name, or no route |
+
+| `reason` | from the gateway's `reason` |
+|---|---|
+| `authorization_failed` | `Authorization` |
+| `authentication_failed` | `JwtAuth`, `Oidc`, `BasicAuth`, `APIKeyAuth`, `ExtAuth` |
+| `rate_limited` | `RateLimit` |
+| `other` | `Guardrail`, `Overload`, any other text |
+
+`http.status` is `401`, `403`, `429` or `other`. The resource is cut to `service.name`. The audit
+collector (`auditCollector.enabled`) runs the same two pipelines; a child with no gateway sees nothing.
 
 `transform/gateway-audit-classify` is the one place that decides which records are projected:
 

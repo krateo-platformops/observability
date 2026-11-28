@@ -239,7 +239,23 @@ type: application
 # minute. The ONLY change to a daemonset render is those two entries and the config checksum, so
 # every agent rolls once. Added value paths: opentelemetry-collector.config.receivers.prometheus/clickhouse
 # and config.service.pipelines.metrics/clickhouse; none renamed or removed.
-version: 0.1.39
+# 0.1.40: a bounded counter of the hops the agent gateway refused before it verified the caller:
+# krateo.gateway.refused_hops in otel_metrics_sum, by route.class (mcp | a2a | llm | other), reason
+# (authorization_failed | authentication_failed | rate_limited | other) and http.status (401 | 403 | 429
+# | other), and nothing else: no identity, path, route name, source address, user agent or session.
+# This is snowplow's ruling for the gateway writer (krateo-platformops/audit docs/schema.md#writers,
+# audit#49): such a hop is outside the gateway's krateo_audit rows. transform/gateway-audit-classify
+# gets a third class, `refused` (a hop with a refusal reason and no verified `user`), taken out of
+# both `excluded` and `projected`, so a hop is in exactly one of krateo_audit, krateo.gateway_audit.excluded
+# and krateo.gateway.refused_hops. TWO CHANGES for readers: krateo.gateway_audit.excluded no longer
+# includes these hops (on krateo-057, the 403 `Authorization` ones), and krateo_audit no longer receives
+# a `denied` row for a refusal on an a2a, mcp or llm hop with no verified user (none seen on 057 in 7
+# days; they would have carried no actor). Added pipelines logs/gateway-refused-hop and metrics/gateway-refused-hop,
+# processors filter/gateway-refused-hop and transform/gateway-refused-hop, connector
+# count/gateway-refused-hop; the audit collector (auditCollector.enabled) carries them too. The same
+# in a child: no gateway there, the pipeline sees nothing. The render changes by those entries and the
+# config checksum, so every agent rolls once. No value path added or renamed.
+version: 0.1.40
 appVersion: "0.158.0"
 dependencies:
   - name: opentelemetry-collector
