@@ -74,8 +74,58 @@ with tempfile.TemporaryDirectory() as d:
     write(d, "charts/x/tests/values.yaml", VALUES)
     check("tests/ fixture ignored", not pf.scan(d)[1])
 
-# 5. The measured floor holds on this repository itself.
+# 5. Split keys in values.yaml: counted wherever the tag sits, and what cannot be resolved is listed.
+SPLIT = """app:
+  image:
+    repository: clickhouse/clickhouse-server
+    # a long comment block between the keys,
+    # as in this repository's charts,
+    # pushes the tag out of any short line window,
+    # and a digest pin is part of the tag
+    # (five lines)
+    tag: "26.8-alpine@sha256:abc"
+other:
+  image:
+    registry: ghcr.io
+    repository: acme/gadget
+    version: 2.0.0
+digested:
+  repository: quay.io/acme/pinned
+  digest: sha256:def
+templated:
+  image:
+    repository: ghcr.io/acme/templated
+    tag: "{{ .Chart.AppVersion }}"
+untagged:
+  image:
+    repository: otel/collector
+dependency:
+  repository: oci://ghcr.io/acme
+"""
+with tempfile.TemporaryDirectory() as d:
+    write(d, "charts/x/values.yaml", SPLIT)
+    unchecked = []
+    _, images = pf.scan(d, None, unchecked)
+    got = {i[:3] for i in images}
+    check("split keys with a comment gap and a digest counted",
+          ("docker.io", "clickhouse/clickhouse-server", "26.8-alpine@sha256:abc") in got, repr(got))
+    check("registry + repository + version counted", ("ghcr.io", "acme/gadget", "2.0.0") in got, repr(got))
+    check("repository + digest counted", ("quay.io", "acme/pinned", "sha256:def") in got, repr(got))
+    check("exactly the three resolvable mappings counted", len(images) == 3, repr(got))
+    reasons = {(u[0], u[1]): u[3] for u in unchecked}
+    check("templated tag listed as skipped with file and path",
+          "templated tag" in reasons.get(("charts/x/values.yaml", "templated.image"), ""), repr(unchecked))
+    check("absent tag listed as skipped with file and path",
+          "no tag" in reasons.get(("charts/x/values.yaml", "untagged.image"), ""), repr(unchecked))
+    check("oci:// repository is a chart dependency, not listed", len(unchecked) == 2, repr(unchecked))
+    rc, out = cli(d)
+    check("--list prints each skipped mapping",
+          "charts/x/values.yaml:" in out and "templated.image" in out and "untagged.image" in out, out[:300])
+
+# 6. The measured floor holds on this repository itself.
 charts, images = pf.scan(str(ROOT))
 check("this repo meets the floor", not pf.floor_errors(charts, images), "%d chart refs, %d image refs" % (len(charts), len(images)))
+check("this repo: krateo-slo-rollup's split-key image is counted",
+      any(i[3] == "charts/krateo-slo-rollup/values.yaml" and i[1] == "clickhouse/clickhouse-server" for i in images))
 
 sys.exit(1 if failures else 0)
