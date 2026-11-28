@@ -57,6 +57,8 @@ import urllib.request
 
 import yaml
 
+from clickhouse_users_expected import GRANTS_FIXTURE, parse_grant, privset  # noqa: E402
+
 CHART = "charts/krateo-observability"
 IMAGE = "clickhouse/clickhouse-server:26.10.3.7"  # SELECT version() on krateo-057 (since 2026-11-11)
 
@@ -131,8 +133,6 @@ SHOWBACK_DDL = ("CREATE TABLE IF NOT EXISTS showback.usage_records ( record_id S
                 " ingested_at DateTime64(3, 'UTC') DEFAULT now64(3)) ENGINE = ReplacingMergeTree(ingested_at)"
                 " PARTITION BY toYYYYMM(window_start)"
                 " ORDER BY (org, tenant, service, metric, resource_id, window_start, record_id)")
-# Every user's grants, byte for byte: the rendered `grants` list and the database's SHOW GRANTS.
-GRANTS_FIXTURE = "tests/fixtures/clickhouse-users-grants.json"
 # `default`'s future hash: a Secret and an env variable, no users.default entry yet.
 DEFAULT_PW = ("CLICKHOUSE_USER_DEFAULT_SHA256", "clickhouse-default-password")
 # Single system tables a user may read, per user; never system.* wholesale.
@@ -187,22 +187,6 @@ def check(ok, msg):
     if not ok:
         failures.append(msg)
     return ok
-
-
-def parse_grant(stmt):
-    """'GRANT a, b ON x, c ON y' -> {x: {a, b}, y: {c}}. Privilege lists never contain ' ON '."""
-    body = re.sub(r"\s+", " ", stmt).strip()
-    if not body.startswith("GRANT "):
-        return None
-    body = body[len("GRANT "):]
-    out = {}
-    for m in re.finditer(r"\s*(.+?)\s+ON\s+([\w.*]+)\s*(?:,|$)", body):
-        out.setdefault(m.group(2), set()).update(p.strip() for p in m.group(1).split(","))
-    return out
-
-
-def privset(s):
-    return {p.strip().replace("ALTER MODIFY TTL", "ALTER TTL") for p in s.split(",")}
 
 
 def render(root, *extra, expect_fail=False):

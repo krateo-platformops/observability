@@ -29,8 +29,13 @@ After the upgrade it checks:
      dashboards with their tile ids, the alert with its fields, the sources unchanged;
   5. alert-provider's calls still work: PUT of the alert and of the dashboard (same tile id, the
      alert survives), a new dashboard + alert, POST /api/v2/charts/series;
-  6. ClickHouse: SHOW GRANTS byte-identical for every user, `cmp` present, the otel_* and
-     krateo_audit row counts and content hashes identical, no logger in the ClickHouseCluster spec;
+  6. ClickHouse: the users are exactly the ones THIS checkout declares and each one's SHOW GRANTS is
+     what the checkout declares (tests/fixtures/clickhouse-users-grants.json, which
+     tests/clickhouse-users-docker.py holds to the rendered chart and a real ClickHouse), not what
+     the old release had: the chart has added users and narrowed grants since 0.1.48, and the log
+     prints that drift. A user present before and still declared logs in after, with the password
+     its Secret held before the upgrade. `cmp` present, the otel_* and krateo_audit row counts and
+     content hashes identical, no logger in the ClickHouseCluster spec;
      whether the ClickHouse, Keeper and MongoDB pods restarted is reported (pod UIDs).
 Credentials are generated here or read from the cluster and never printed (hashes only).
 
@@ -54,6 +59,8 @@ import tempfile
 import time
 import urllib.parse
 
+import clickhouse_users_expected as expected
+
 NS = "krateo-system"
 REL = "krateo-observability"
 CLUSTER = "clickstack-upgrade"
@@ -62,6 +69,7 @@ SA = "krateo-clickstack"
 USERS = ["default", "app", "otelcollector", "sse_proxy", "snowplow_reader", "analyst", "mcp_reader",
          "nightly_reader", "audit_sealer", "audit_verifier", "otel_writer", "hyperdx", "slo_rollup",
          "usage_collector"]
+OPERATOR_USERS = {"operator"}  # created by the ClickHouse operator, not by this chart
 OTEL_LOGS_DDL = """CREATE TABLE IF NOT EXISTS default.otel_logs (
     Timestamp DateTime64(9) CODEC(Delta(8), ZSTD(1)),
     TimestampTime DateTime DEFAULT toDateTime(Timestamp),
@@ -266,13 +274,33 @@ ALERT_FIELDS = ["name", "source", "dashboardId", "tileId", "interval", "threshol
 
 def ch_snapshot(kube):
     snap = {"grants": {}, "data": {}}
-    for u in USERS:
+    snap["users"] = ch(kube, "SELECT name FROM system.users ORDER BY name").split()
+    for u in sorted(set(USERS) | set(snap["users"])):
         snap["grants"][u] = ch(kube, f"SHOW GRANTS FOR `{u}`")
-    snap["users"] = ch(kube, "SELECT name FROM system.users ORDER BY name")
     snap["cmp"] = ch(kube, "SELECT name, engine FROM system.databases WHERE name = 'cmp'").strip()
     for t in ("otel_logs", "otel_traces", "krateo_audit"):
         snap["data"][t] = ch(kube, f"SELECT count(), sum(cityHash64(*)) FROM default.{t}").strip()
     return snap
+
+
+def user_secret(kube, user):
+    """The password in the user's chart-generated Secret (clickhouse-<user>-credentials), or None."""
+    r = kube.kn("get", "secret", f"clickhouse-{user.replace('_', '-')}-credentials", "-o", "json", check_=False)
+    if r.returncode != 0:
+        return None
+    return base64.b64decode(json.loads(r.stdout)["data"]["password"]).decode()
+
+
+def login_as(kube, user, password):
+    """`SELECT currentUser()` as the user, over the pod's own clickhouse-client; password via env, not argv."""
+    r = kube.kn("exec", CH_POD, "-c", "clickhouse-server", "--", "sh", "-c",
+                f'clickhouse-client --user {user} --password "$0" -q "SELECT currentUser()"', password, check_=False)
+    return r.returncode == 0 and r.stdout.strip() == user
+
+
+def grant_diff(old, new):
+    o, n = old.splitlines(), new.splitlines()
+    return [f"-{l}" for l in o if l not in n] + [f"+{l}" for l in n if l not in o]
 
 
 def can_i(kube, sa):
@@ -356,6 +384,7 @@ def main():
         ch(kube, "INSERT INTO default.krateo_audit (Timestamp, ServiceName, Body) "
                  "SELECT now64(9) - toIntervalSecond(number), 'audit', 'event ' || toString(number) FROM numbers(1000)")
         before = ch_snapshot(kube)
+        pw_before = {u: user_secret(kube, u) for u in before["users"]}
         check(before["cmp"] == "cmp\tAtomic", f"before: database cmp exists ({before['cmp'] or 'missing'})")
         check(all(before["grants"][u] for u in USERS), f"before: SHOW GRANTS answers for all {len(USERS)} users")
         uids_before = pod_uids(kube)
@@ -494,9 +523,45 @@ def main():
 
         step("6. ClickHouse")
         after = ch_snapshot(kube)
-        for u in USERS:
-            check(after["grants"][u] == before["grants"][u], f"SHOW GRANTS FOR {u}: byte-identical")
-        check(after["users"] == before["users"], "the same ClickHouse users")
+        # The users and grants are the checkout's, not the old release's: the chart added users
+        # (portal login 0.1.57, exec_reader 0.1.58, chops 0.1.59) and narrowed grants (the lockdown
+        # releases) since 0.1.48. Say what moved, then hold the cluster to what the checkout declares.
+        # `operator` is the ClickHouse operator's own management user: not the chart's, present before
+        # and after (run 46135794572), so it is named here and held to "unchanged", not left unexplained.
+        want_users = sorted(set(expected.declared_users(root)) | OPERATOR_USERS)
+        added, removed = sorted(set(after["users"]) - set(before["users"])), sorted(set(before["users"]) - set(after["users"]))
+        print(f"     drift since the old release: users added {added or 'none'}, removed {removed or 'none'}")
+        for u in sorted(set(before["grants"]) & set(after["grants"])):
+            if before["grants"][u] != after["grants"][u]:
+                print(f"     drift: SHOW GRANTS FOR {u} changed")
+                for l in grant_diff(before["grants"][u], after["grants"][u]):
+                    print(f"       {l}")
+        for u in added:
+            print(f"     drift: new user {u}: " + "; ".join(after["grants"][u].splitlines()))
+        check(after["users"] == want_users,
+              f"the ClickHouse users are exactly the {len(want_users)} the checkout declares"
+              + ("" if after["users"] == want_users else
+                 f" (extra {sorted(set(after['users']) - set(want_users))}, missing {sorted(set(want_users) - set(after['users']))})"))
+        want_grants = expected.declared_grants(root)
+        for u in want_users:
+            got = after["grants"].get(u, "").splitlines()
+            if u in want_grants:
+                ok = sorted(got) == sorted(want_grants[u])
+                check(ok, f"SHOW GRANTS FOR {u}: equals the checkout's fixture ({len(want_grants[u])} lines)"
+                      + ("" if ok else f" (got {got}, want {want_grants[u]})"))
+            elif u == "default" or u in OPERATOR_USERS:
+                # Not declared by the chart (the built-in, and the operator's own): they must not have moved.
+                check(u in before["grants"] and after["grants"][u] == before["grants"][u],
+                      f"SHOW GRANTS FOR {u}: unchanged (the chart declares no grants for it)")
+            else:
+                # exec_reader: passwordless, so the fixture has no SHOW GRANTS for it; its rendered statement decides.
+                want_p, got_p = expected.declared_privileges(root, u), expected.lines_to_privileges(got)
+                check(want_p is not None and got_p == want_p, f"SHOW GRANTS FOR {u}: its privileges equal the rendered grants"
+                      + ("" if got_p == want_p else f" (got {got_p}, want {want_p})"))
+        kept = [u for u in before["users"] if u in want_users and pw_before.get(u)]
+        check(len(kept) >= 10, f"{len(kept)} users with a Secret before the upgrade are still declared")
+        for u in kept:
+            check(login_as(kube, u, pw_before[u]), f"{u}: logs in after the upgrade with the password it had before")
         check(after["cmp"] == "cmp\tAtomic", "database cmp present")
         for t in ("otel_logs", "otel_traces", "krateo_audit"):
             check(after["data"][t] == before["data"][t], f"{t}: count and content hash unchanged ({after['data'][t]})")
