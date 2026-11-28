@@ -10,9 +10,16 @@ Deliberately regex-driven, not YAML-parsed: most of these files are Helm templat
 are not valid YAML, and the references live in printf blocks and doc comments as often as in
 values. Matching text finds them all.
 
+values*.yaml files are additionally parsed as YAML: a mapping with a `repository` key (plus
+optional `registry`, `tag` or `version`, `digest`) is an image, whatever the lines between its
+keys. That is how this repository's charts declare images. A mapping whose tag is a template
+expression or absent cannot be resolved: it is skipped and printed with its file and key path.
+
 Exit 1 if any reference is unresolvable.
 """
 import base64, json, os, re, sys, urllib.error, urllib.request
+
+import yaml
 
 TIMEOUT = 25
 
@@ -60,6 +67,10 @@ def registry_get(host, repo, ref):
     at the point where it matters. A private package fails provisioning exactly like a
     missing one.
     """
+    # `tag@sha256:...` pins by digest: the registry resolves the digest, so ask for that.
+    tag_only = ref.split("@", 1)[0]
+    if "@" in ref:
+        ref = ref.split("@", 1)[1]
     if host == "ghcr.io":
         tok = ghcr_token(repo)
         auth = {"Authorization": "Bearer " + tok} if tok else {}
@@ -86,7 +97,7 @@ def registry_get(host, repo, ref):
         # indistinguishable from "needs auth". Its tag API is authoritative and anonymous, so
         # ask it directly: a tag either is in the active-tag list or it is not.
         try:
-            u = "https://quay.io/api/v1/repository/%s/tag/?specificTag=%s&onlyActiveTags=true" % (repo, ref)
+            u = "https://quay.io/api/v1/repository/%s/tag/?specificTag=%s&onlyActiveTags=true" % (repo, tag_only or ref)
             with urllib.request.urlopen(u, timeout=TIMEOUT) as r:
                 return 200 if json.load(r).get("tags") else 404
         except urllib.error.HTTPError as e:
@@ -198,14 +209,75 @@ def split_image(lines, idx):
     return host, path, tag
 
 
+def _scalar(node):
+    return node.value if isinstance(node, yaml.ScalarNode) else None
+
+
+def yaml_images(text):
+    """Images declared as YAML mappings with `repository` (+ registry, tag/version, digest).
+
+    Returns (refs, unchecked): refs are (host, path, tag, line); unchecked are
+    (key path, line, reason) for mappings that name a repository but cannot be resolved
+    (templated or absent tag). A `repository` that is an oci:// URL is a chart dependency,
+    not an image, and is left to the OCI matcher.
+    """
+    refs, unchecked = [], []
+
+    def walk(node, trail):
+        if isinstance(node, yaml.MappingNode):
+            keys = {_scalar(k): (k, v) for k, v in node.value if _scalar(k) is not None}
+            if "repository" in keys:
+                repo_node = keys["repository"][1]
+                repo = _scalar(repo_node)
+                where = ".".join(trail) or "<root>"
+                line = repo_node.start_mark.line + 1
+                if repo and "://" not in repo:
+                    registry = _scalar(keys["registry"][1]) if "registry" in keys else None
+                    tag = _scalar(keys["tag"][1]) if "tag" in keys else None
+                    if not tag and "version" in keys:
+                        tag = _scalar(keys["version"][1])
+                    digest = _scalar(keys["digest"][1]) if "digest" in keys else None
+                    if tag and digest and "@" not in tag:
+                        tag = tag + "@" + digest
+                    elif not tag and digest:
+                        tag = digest
+                    if any(SKIP.search(t) for t in (repo, registry or "")) or not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9._/-]*$", repo):
+                        unchecked.append((where, line, "templated or non-literal repository"))
+                    elif not tag:
+                        unchecked.append((where, line, "no tag (the chart's default applies)"))
+                    elif SKIP.search(tag):
+                        unchecked.append((where, line, "templated tag %r" % tag))
+                    else:
+                        if registry:
+                            host, path = registry, repo
+                        elif "/" in repo and "." in repo.split("/")[0]:
+                            host, path = repo.split("/", 1)
+                        else:
+                            host, path = "docker.io", repo
+                        refs.append((host, path, tag, line))
+            for k, v in node.value:
+                walk(v, trail + [_scalar(k) or "?"])
+        elif isinstance(node, yaml.SequenceNode):
+            for i, v in enumerate(node.value):
+                walk(v, trail + [str(i)])
+
+    for doc in yaml.compose_all(text):
+        if doc is not None:
+            walk(doc, [])
+    return refs, unchecked
+
+
 # The denominator. A run that examines almost nothing must not print "all references
 # resolve": this script once did exactly that, pruning charts/ and seeing 3 chart refs and 0
 # image refs while the real image pins live in charts/*/values.yaml.
-# Measured 2026-11-28 (python3 hack/preflight-refs.py --list .): 4 chart refs, 4 image refs.
+# Measured 2026-11-28 (python3 hack/preflight-refs.py --list .): 4 chart refs, 4 image refs
+# counting `host/path:tag` strings and neighbouring-line `repository:`/`tag:` pairs; 4 chart refs
+# and 6 image refs once values.yaml mappings are parsed as YAML (it adds the digest-pinned
+# krateo-slo-rollup image and otel-collector-deployment's, whose tag sits under a comment block).
 # Floor = measured minus ~20%, rounded down. Raise it when the count grows; lower it only
 # with a reason.
 MIN_CHARTS = 3
-MIN_IMAGES = 3
+MIN_IMAGES = 4
 
 # Directories the scan skips, each with the reason. Everything else is scanned, charts/ included.
 #   .git, node_modules      not ours: VCS metadata and installed JS dependencies.
@@ -232,9 +304,10 @@ def is_fixture_dir(rel_dir):
     return any(("/" + rel_dir).find("/" + seg) != -1 for seg in FIXTURE_SEGS)
 
 
-def scan(root, skipped=None):
+def scan(root, skipped=None, unchecked=None):
     charts, images = set(), set()
     skipped = skipped if skipped is not None else set()
+    unchecked = unchecked if unchecked is not None else []
     for dirpath, dirnames, filenames in os.walk(root):
         keep = []
         for d in dirnames:
@@ -257,6 +330,18 @@ def scan(root, skipped=None):
             except Exception:
                 continue
             rel = os.path.relpath(p, root)
+            yaml_done = False
+            if fn.startswith("values") and fn.endswith((".yaml", ".yml")):
+                try:
+                    refs, skips = yaml_images("\n".join(lines))
+                    yaml_done = True
+                    for host, path, tag, ln in refs:
+                        if not is_placeholder_ref(host, path):
+                            images.add((host, path, tag, rel, ln))
+                    for where, ln, why in skips:
+                        unchecked.append((rel, where, ln, why))
+                except yaml.YAMLError as e:
+                    unchecked.append((rel, "<file>", 0, "not parseable as YAML (%s); line matcher used" % str(e).splitlines()[0]))
             for i, line in enumerate(lines):
                 for m in OCI.finditer(line):
                     host, path = m.group(1), m.group(2).rstrip('"\'/,')
@@ -281,7 +366,7 @@ def scan(root, skipped=None):
                         path = path + "/" + nm
                     if ver and not is_placeholder_ref(host, path):
                         charts.add((host, path, ver, rel, i + 1))
-                sp = split_image(lines, i)
+                sp = None if yaml_done else split_image(lines, i)
                 if sp and not is_placeholder_ref(sp[0], sp[1]):
                     images.add((sp[0], sp[1], sp[2], rel, i + 1))
                 for m in IMG.finditer(line):
@@ -317,9 +402,12 @@ def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     list_only = "--list" in sys.argv[1:]   # no network; used by tests/preflight-refs.py only
     root = args[0] if args else "."
-    skipped = set()
-    charts, images = scan(root, skipped)
+    skipped, unchecked = set(), []
+    charts, images = scan(root, skipped, unchecked)
     print("skipped directories (%d): %s" % (len(skipped), ", ".join(sorted(skipped)) or "none"))
+    print("image mappings not checked (%d):" % len(unchecked))
+    for rel, where, ln, why in sorted(unchecked):
+        print("  %s:%d  %s  -- %s" % (rel, ln, where, why))
     errs = floor_errors(charts, images)
     if errs:
         for e in errs:
