@@ -241,13 +241,23 @@ opentelemetry-collector:
                   span.name == "reconcile" and span.attributes["provider_runtime.acted"] == true
                   and IsMatch(resource.attributes["service.name"], "^(krateo-alert-provider|core-provider|git-provider|incident-provider)$")
           # A credential-use Acquire that DEGRADED (Diego, 2026-11-22, provider-runtime#125): an
-          # established holder connected although some of its credentials were not held (Missing,
-          # Deleting, NotConsented, ConsentWithdrawn, ConsentUnreadable, Disowned). provider-runtime
-          # puts one `credentialuse.acquire` event on the `reconcile` root per pass that runs Acquire
-          # (pkg/reconciler/credentialuse.go), and a degraded pass ends OK, so without this rule it
-          # would be stored at 5% like a routine pass. The other outcomes need no rule here:
-          # must_not_connect fails the pass (status Error, kept above), conflict is a write race that
-          # requeues like k8s.conflict at every other step (sampled), and ok is routine (sampled).
+          # established holder's Acquire ended outcome=degraded, from `fail` (provider-runtime
+          # v1.22.0 pkg/credentialuse/acquire.go:438-446; mapped at pkg/reconciler/credentialuse.go:942-943)
+          # in one of four cases. Deleting: the named Secret is Terminating without this holder's
+          # finalizer, so the finalizer patch gets the 422 (acquire.go:850-856; classify.go:26-30,
+          # :150-151). Refused: that finalizer patch is refused by RBAC 403, an admission webhook or
+          # a VAP, or fails another way (acquire.go:857-860, reason = the class name). Announce: the
+          # write of the holder record fails other than with a conflict, including the write that
+          # drops withdrawn refs, or the context ends while withdrawals are pending (acquire.go:476-477,
+          # :735-739; kept.go:131-135, :152-161). Disown: the live read of the Disown switch fails
+          # (acquire.go:807-809). Not degraded, outcome ok with an unheld reason: Missing,
+          # NotConsented, ConsentWithdrawn, ConsentUnreadable (acquire.go:845-847, :703-714).
+          # provider-runtime puts one `credentialuse.acquire` event on the `reconcile` root per pass
+          # that runs Acquire (pkg/reconciler/credentialuse.go), and a degraded pass still ends OK,
+          # so without this rule it would be stored at 5% like a routine pass. The other outcomes
+          # need no rule here: must_not_connect ends the root with status Error (kept above;
+          # provider-runtime#150), conflict is a write race that requeues like k8s.conflict at every
+          # other step (sampled), and ok is routine (sampled).
           # Not scoped by service: only provider-runtime emits this event, and a provider outside the
           # sampled list is kept whole anyway. Matches nothing until a provider enables credential-use.
           - name: credentialuse-degraded
