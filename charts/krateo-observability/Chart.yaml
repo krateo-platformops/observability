@@ -305,7 +305,22 @@ type: application
 # provider that had stopped, so liveness is read from the logs instead. Measured on krateo-057 over 7 days:
 # 495 rows per 15m healthy (33 Alerts), lowest window 462, no empty window. Default render: one more Alert CR
 # (32 core, 38 with defaultAlerts.extended).
-version: 0.1.61
+# 0.1.62: three alerts on the CompositionDefinition's own status, read by pull (otel-collector-deployment
+# 0.3.25, ROLLED FIRST: on an older collector no row has telemetry.source = 'k8s-objects', the
+# alerts count 0 and stay quiet, and nothing says they are blind).
+# sre-krateo-definition-not-ready fires on any row with a Ready whose status is not True and whose
+# (status, reason) pair is not a converging or unevaluated one in core-provider's reason table, so the
+# six failed reasons of 2.13.136 and any False or Unknown pair a later release adds; one pull is enough. sre-krateo-definition-stuck-converging fires on a definition whose
+# metadata.generation has differed from status.observedGeneration at every pull for 30 minutes.
+# hack/check-cd-ready-reasons.py holds the first alert's list to the table at the tag pinned in
+# hack/core-provider-pin.yaml. tests/definition-alerts-docker.py runs both where clauses in
+# ClickHouse. sre-krateo-definition-converging-too-long covers what neither does: a definition that
+# sits in Ready=False Creating or Deleting, or Ready=Unknown NotObserved, for longer than a bound
+# (defaultAlerts.definitionConvergenceBounds, by reason: 30, 120 and 15 minutes), by the condition's
+# own lastTransitionTime. The bounds are one map the alert's where is built from, and the gate fails
+# on a converging or next-pass reason in the table with no bound. On krateo-057 on 2026-11-28 all 79 definitions are Ready=True with the two generations
+# equal, so no alert has a row to fire on.
+version: 0.1.62
 appVersion: "3.5.0"
 dependencies:
   - name: clickstack

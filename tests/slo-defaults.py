@@ -17,8 +17,8 @@ from drifting apart:
    ownership metadata when it applies them).
 3. References. Every rendered metric Alert names a rendered Metric (alert-provider refuses one whose
    Metric is missing).
-4. Counts and gates. Default render: 32 Alerts (the core tier) and 4 Metrics; with defaultAlerts.extended,
-   38 Alerts; with defaultAlerts.enabled=false, none of either.
+4. Counts and gates. Default render: 35 Alerts (the core tier) and 4 Metrics; with defaultAlerts.extended,
+   41 Alerts; with defaultAlerts.enabled=false, none of either.
 5. Threshold. The `threshold` of every rendered Alert is a YAML number, and only the ratio alert's is a
    fraction.
 
@@ -40,8 +40,8 @@ STANDARD_LABELS = {
     "app.kubernetes.io/part-of": "krateo-observability",
 }
 COUNTS = {  # (Alerts, Metrics)
-    "default": (32, 4),
-    "extended": (38, 4),
+    "default": (35, 4),
+    "extended": (41, 4),
     "disabled": (0, 0),
 }
 
