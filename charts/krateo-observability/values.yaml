@@ -90,14 +90,19 @@ defaultAlerts:
   # alert's where is built from this map (templates/default-alerts.yaml), and
   # hack/check-cd-ready-reasons.py fails when core-provider's table has a converging reason, or one
   # whose clearance is `next pass`, with no entry. The age is the condition's own lastTransitionTime.
-  #   Creating: the CRD Established and the controller Deployment rolled out; core-provider sets no
-  #     deadline of its own. 30 minutes is twice core-provider's 15-minute bound on each helm wait
-  #     (COMPOSITION_CONTROLLER_HELM_TIMEOUT, default 15m) and above any image pull and rollout.
-  #   Deleting: the definition waits for its compositions to be deleted, each of which can take its
-  #     15-minute helm wait plus the 5-minute child teardown grace (core-provider composition.go).
-  #     No figure in this repository grounds a better one, so 2 hours: about six such teardowns in
-  #     a row. A wedged finalizer is the case it is for.
-  #   NotObserved (Unknown, clearance `next pass`): it clears on the next reconcile, which is
+  #   Creating (30 min, a backstop): core-provider holds Creating until the CRD is Established and the
+  #     controller Deployment has rolled out. The anchor is that Deployment's progressDeadlineSeconds
+  #     (Kubernetes default 600 s): when the rollout misses it core-provider writes Unavailable, a
+  #     failed reason that sre-krateo-definition-not-ready catches on its own. So a definition still
+  #     Creating after 30 minutes is one where that has not happened, which is the case this bound is
+  #     for. It is not derived from COMPOSITION_CONTROLLER_HELM_TIMEOUT: that is a composition
+  #     controller's helm bound and does not apply to a definition.
+  #   Deleting (120 min, PROVISIONAL): derived, not measured. A definition waits for its compositions
+  #     to be deleted; each can take a 15-minute helm wait plus the 5-minute child teardown grace
+  #     (core-provider composition.go). That the teardowns run one after another is unverified, and the
+  #     controller runs 10 workers, so they may overlap. Nothing in this repository bounds it. A wedged
+  #     finalizer is the case it is for. Revisit when a real deletion has been timed.
+  #   NotObserved (15 min; Unknown, clearance `next pass`): it clears on the next reconcile, which is
   #     seconds, so 15 minutes is three pulls of the same condition.
   definitionConvergenceBounds:
     Creating: {status: "False", minutes: 30}
@@ -373,32 +378,36 @@ defaultAlerts:
     # telemetry.source = 'k8s-objects', so this and the stuck alert below read nothing else, and the
     # event alerts, which read 'k8s-events', read none of them.
     #
-    # NOT IN the six reasons that are not failures: Ready=True healthy (Available, ScaledToZero,
-    # UpdateWithheldByPolicy), converging (Creating, Deleting) and unevaluated (NotObserved), as
-    # docs/cd-ready-reasons.json lists them at core-provider 2.13.136. That table is open: a release can
-    # add a reason, so the alert names what is NOT a failure and an unrecognised Ready=False fires as
-    # one. At 2.13.136 the failures are Unavailable, RemoteChartUnreachable, SchemaDefaultContradiction,
-    # ValuesSchemaMissing, DerivedNameTooLong and CreateWithheldByPolicy, every one of clearance
-    # `indefinite`. tests/cd-ready-reasons-gate.py holds the three lists below to the table at the tag
-    # pinned in hack/core-provider-pin.yaml, so a reason added to the table as healthy, converging or
-    # unevaluated fails CI here until this list gains it.
+    # THE REASON SETS ARE (status, reason) PAIRS, as docs/cd-ready-reasons.json at core-provider
+    # 2.13.136 gives them: healthy True/{Available, ScaledToZero, UpdateWithheldByPolicy}, converging
+    # False/{Creating, Deleting} and unevaluated Unknown/NotObserved. The alert fires on a Ready whose
+    # status is not True and whose (status, reason) is NOT one of the converging or unevaluated pairs:
+    # the six failed reasons (Unavailable, RemoteChartUnreachable, SchemaDefaultContradiction,
+    # ValuesSchemaMissing, DerivedNameTooLong, CreateWithheldByPolicy, all clearance `indefinite`) and
+    # any False or Unknown pair the table does not list, which is how a reason a later release adds
+    # fires. A Ready=True never fires, whatever its reason: an unknown True reason is not a failure.
+    # The converging and unevaluated pairs are the other alerts' (converging-too-long, below).
+    # hack/check-cd-ready-reasons.py holds the pairs to the table at the tag pinned in
+    # hack/core-provider-pin.yaml, so a pair added to the table as converging or unevaluated fails CI
+    # until it is here.
     #
-    # threshold 2, not 1: `above 2` is count >= 2, and a window of 15 minutes holds 3 pulls of one
-    # definition, so one definition fires when it failed in 2 pulls, 5 to 10 minutes. A definition's
-    # controller Deployment rolls for under a minute and shows Unavailable once in 5 at most; 79
-    # definitions roll together on a core-provider upgrade, so a single pull is a blip and 2 are not.
-    # Two definitions failing in the same pull also count 2. A log alert cannot be grouped
+    # threshold 1: any row in the window. A normal rollout of a definition's controller is not
+    # Unavailable (core-provider writes that only for a chart it cannot read, 0 replicas without
+    # scale-to-zero, a rollout that gave up at its progressDeadlineSeconds, availability lost after a
+    # completed rollout, or a pool member without its Lease), so one pull showing it is a failure, and
+    # one seen mid-roll would be core-provider misclassifying that state: report it to core-provider,
+    # do not raise the threshold. A log alert cannot be grouped
     # (CRD rule `!has(self.groupBy) || has(self.metricRef)`), so this is one series and its rows name
     # the definition (the runbook's query lists them). On krateo-057 on 2026-11-28 all 79 are Ready=True.
     - name: sre-krateo-definition-not-ready
       tier: core
       displayName: Krateo — CompositionDefinition not Ready
-      where: ResourceAttributes['telemetry.source'] = 'k8s-objects' AND LogAttributes['k8s.resource.name'] = 'compositiondefinitions' AND arrayExists(c -> JSONExtractString(c, 'type') = 'Ready' AND JSONExtractString(c, 'status') = 'False' AND JSONExtractString(c, 'reason') NOT IN ('Available', 'Creating', 'Deleting', 'NotObserved', 'ScaledToZero', 'UpdateWithheldByPolicy'), JSONExtractArrayRaw(Body, 'status', 'conditions'))
-      threshold: 2
+      where: ResourceAttributes['telemetry.source'] = 'k8s-objects' AND LogAttributes['k8s.resource.name'] = 'compositiondefinitions' AND arrayExists(c -> JSONExtractString(c, 'type') = 'Ready' AND JSONExtractString(c, 'status') != 'True' AND (JSONExtractString(c, 'status'), JSONExtractString(c, 'reason')) NOT IN (('False', 'Creating'), ('False', 'Deleting'), ('Unknown', 'NotObserved')), JSONExtractArrayRaw(Body, 'status', 'conditions'))
+      threshold: 1
       thresholdType: above
       interval: 15m
-      description: A CompositionDefinition has stayed not Ready for a reason that is not part of starting up or shutting down; its row in the incident names it.
-      runbook: "1. Name the definition and the reason, without the message: SELECT JSONExtractString(Body, 'metadata', 'namespace') AS namespace, JSONExtractString(Body, 'metadata', 'name') AS definition, JSONExtractString(c, 'reason') AS reason, count() AS pulls FROM otel_logs ARRAY JOIN JSONExtractArrayRaw(Body, 'status', 'conditions') AS c WHERE ResourceAttributes['telemetry.source'] = 'k8s-objects' AND Timestamp > now() - INTERVAL 30 MINUTE AND JSONExtractString(c, 'type') = 'Ready' AND JSONExtractString(c, 'status') = 'False' GROUP BY namespace, definition, reason. Creating and Deleting are not failures and do not fire this alert. 2. Read the live definition: kubectl get compositiondefinition NAME -n NAMESPACE -o yaml, and take status.conditions, the one with type Ready, its reason and message. 3. The action for the reason is in core-provider's reason table, docs/cd-ready-reasons.json in krateo-platformops/core-provider, at the tag in status.writtenBy.version. A reason the table at that tag does not list is a newer one: the message is then the only guide. 4. The owner of the chart is in status.chart.maintainers. A failed Ready of these reasons does not clear on its own."
+      description: A CompositionDefinition is not Ready for a reason that is not part of starting up or shutting down; its row in the incident names it.
+      runbook: "1. Name the definition and the reason, without the message: SELECT JSONExtractString(Body, 'metadata', 'namespace') AS namespace, JSONExtractString(Body, 'metadata', 'name') AS definition, JSONExtractString(c, 'reason') AS reason, count() AS pulls FROM otel_logs ARRAY JOIN JSONExtractArrayRaw(Body, 'status', 'conditions') AS c WHERE ResourceAttributes['telemetry.source'] = 'k8s-objects' AND Timestamp > now() - INTERVAL 30 MINUTE AND JSONExtractString(c, 'type') = 'Ready' AND JSONExtractString(c, 'status') = 'False' GROUP BY namespace, definition, reason. Creating and Deleting are not failures and do not fire this alert. 2. Read the live definition: kubectl get compositiondefinition NAME -n NAMESPACE -o yaml, and take status.conditions, the one with type Ready, its reason and message. 3. The action for a reason is in core-provider's reason table, docs/cd-ready-reasons.json in krateo-platformops/core-provider. Read status.writtenBy: when status.writtenBy.name is core-provider, take the file at the tag status.writtenBy.version; when that version is not a tag, or writtenBy is absent, read the file at HEAD and say so. A (status, reason) pair the table at that tag does not list is a newer one: the message is then the only guide. 4. The owner is status.chart.maintainers (name and url); when it is absent the owner is unknown, so say that and do not guess."
     # A definition that never finishes converging: core-provider writes status.observedGeneration
     # when it has acted on metadata.generation, so the two differ while it has not, which is brief on
     # a healthy cluster (a spec change, then a reconcile). No failed-reason rule catches it, since
@@ -410,19 +419,19 @@ defaultAlerts:
     # pulls are 25 minutes apart first to last, so the definition has been unobserved for at least 25
     # minutes and for 30 when no pull was missed (tests/definition-alerts-docker.py: 25 minutes fires,
     # 20 does not). The subquery reads now(), the time the alert is evaluated.
-    # A definition with no observedGeneration yet (a provider that does not write it, or one not yet
-    # observed) is not counted: the unevaluated NotObserved Ready has no rule of its own. The
+    # A definition with no observedGeneration (a provider that does not write it, or one not yet
+    # observed) is not assessable: its rows count neither as unequal nor as equal, so it never fires (a NotObserved Ready held for long is the converging-too-long alert's). The
     # subquery needs the table unqualified, as `otel_logs`, which the default database resolves.
     # threshold 1: the rows that count are already the held ones, 3 per 15 minutes each.
     - name: sre-krateo-definition-stuck-converging
       tier: core
       displayName: Krateo — CompositionDefinition not converging
-      where: ResourceAttributes['telemetry.source'] = 'k8s-objects' AND LogAttributes['k8s.resource.name'] = 'compositiondefinitions' AND JSONHas(Body, 'status', 'observedGeneration') AND JSONExtractInt(Body, 'metadata', 'generation') != JSONExtractInt(Body, 'status', 'observedGeneration') AND (JSONExtractString(Body, 'metadata', 'namespace'), JSONExtractString(Body, 'metadata', 'name')) IN (SELECT JSONExtractString(Body, 'metadata', 'namespace'), JSONExtractString(Body, 'metadata', 'name') FROM otel_logs WHERE ResourceAttributes['telemetry.source'] = 'k8s-objects' AND LogAttributes['k8s.resource.name'] = 'compositiondefinitions' AND Timestamp >= now() - INTERVAL 35 MINUTE GROUP BY JSONExtractString(Body, 'metadata', 'namespace'), JSONExtractString(Body, 'metadata', 'name') HAVING countIf(JSONExtractInt(Body, 'metadata', 'generation') != JSONExtractInt(Body, 'status', 'observedGeneration')) >= 6 AND countIf(JSONExtractInt(Body, 'metadata', 'generation') = JSONExtractInt(Body, 'status', 'observedGeneration')) = 0)
+      where: ResourceAttributes['telemetry.source'] = 'k8s-objects' AND LogAttributes['k8s.resource.name'] = 'compositiondefinitions' AND JSONHas(Body, 'status', 'observedGeneration') AND JSONExtractInt(Body, 'metadata', 'generation') != JSONExtractInt(Body, 'status', 'observedGeneration') AND (JSONExtractString(Body, 'metadata', 'namespace'), JSONExtractString(Body, 'metadata', 'name')) IN (SELECT JSONExtractString(Body, 'metadata', 'namespace'), JSONExtractString(Body, 'metadata', 'name') FROM otel_logs WHERE ResourceAttributes['telemetry.source'] = 'k8s-objects' AND LogAttributes['k8s.resource.name'] = 'compositiondefinitions' AND Timestamp >= now() - INTERVAL 35 MINUTE GROUP BY JSONExtractString(Body, 'metadata', 'namespace'), JSONExtractString(Body, 'metadata', 'name') HAVING countIf(JSONHas(Body, 'status', 'observedGeneration') AND JSONExtractInt(Body, 'metadata', 'generation') != JSONExtractInt(Body, 'status', 'observedGeneration')) >= 6 AND countIf(JSONHas(Body, 'status', 'observedGeneration') AND JSONExtractInt(Body, 'metadata', 'generation') = JSONExtractInt(Body, 'status', 'observedGeneration')) = 0)
       threshold: 1
       thresholdType: above
       interval: 15m
       description: A CompositionDefinition's spec was changed more than 30 minutes ago and core-provider has still not acted on it; its row in the incident names it.
-      runbook: "1. Name the definitions that have not been observed for 30 minutes: SELECT JSONExtractString(Body, 'metadata', 'namespace') AS namespace, JSONExtractString(Body, 'metadata', 'name') AS definition, max(JSONExtractInt(Body, 'metadata', 'generation')) AS generation, max(JSONExtractInt(Body, 'status', 'observedGeneration')) AS observed, count() AS pulls FROM otel_logs WHERE ResourceAttributes['telemetry.source'] = 'k8s-objects' AND Timestamp > now() - INTERVAL 35 MINUTE GROUP BY namespace, definition HAVING generation != observed. 2. Read the live definition: kubectl get compositiondefinition NAME -n NAMESPACE -o yaml. metadata.generation is the spec core-provider was asked for, status.observedGeneration the last one it finished. 3. Look at the Ready condition: a failed reason has its own alert and its action is in core-provider's docs/cd-ready-reasons.json at the tag in status.writtenBy.version. A definition whose Ready is True and whose observedGeneration still lags is a controller that stopped: read core-provider's log for it. 4. The owner of the chart is in status.chart.maintainers."
+      runbook: "1. Name the definitions that have not been observed for 30 minutes: SELECT JSONExtractString(Body, 'metadata', 'namespace') AS namespace, JSONExtractString(Body, 'metadata', 'name') AS definition, max(JSONExtractInt(Body, 'metadata', 'generation')) AS generation, max(JSONExtractInt(Body, 'status', 'observedGeneration')) AS observed, count() AS pulls FROM otel_logs WHERE ResourceAttributes['telemetry.source'] = 'k8s-objects' AND Timestamp > now() - INTERVAL 35 MINUTE GROUP BY namespace, definition HAVING generation != observed. 2. Read the live definition: kubectl get compositiondefinition NAME -n NAMESPACE -o yaml. metadata.generation is the spec core-provider was asked for, status.observedGeneration the last one it finished. 3. Look at the Ready condition: a failed reason has its own alert. The action for a reason is in core-provider's reason table, docs/cd-ready-reasons.json in krateo-platformops/core-provider. Read status.writtenBy: when status.writtenBy.name is core-provider, take the file at the tag status.writtenBy.version; when that version is not a tag, or writtenBy is absent, read the file at HEAD and say so. A definition whose Ready is True and whose observedGeneration still lags is a controller that stopped: read core-provider's log for it. 4. The owner is status.chart.maintainers (name and url); when it is absent the owner is unknown, so say that and do not guess."
     # A definition that sits in a reason that should pass. A controller that never rolls out stays at
     # Ready=False Creating with generation equal to observedGeneration, and a deletion held by a
     # finalizer stays Deleting: neither is a failed reason and neither moves a generation, so the two
@@ -445,7 +454,7 @@ defaultAlerts:
       thresholdType: above
       interval: 15m
       description: A CompositionDefinition has been creating, deleting or waiting to be observed for longer than it should; its row in the incident names it.
-      runbook: "1. Name the definition, its reason and how long it has been in it, without the message: SELECT JSONExtractString(Body, 'metadata', 'namespace') AS namespace, JSONExtractString(Body, 'metadata', 'name') AS definition, JSONExtractString(c, 'reason') AS reason, min(parseDateTimeBestEffortOrNull(JSONExtractString(c, 'lastTransitionTime'))) AS since FROM otel_logs ARRAY JOIN JSONExtractArrayRaw(Body, 'status', 'conditions') AS c WHERE ResourceAttributes['telemetry.source'] = 'k8s-objects' AND Timestamp > now() - INTERVAL 30 MINUTE AND JSONExtractString(c, 'type') = 'Ready' AND JSONExtractString(c, 'reason') IN ('Creating', 'Deleting', 'NotObserved') GROUP BY namespace, definition, reason. 2. Read the live definition: kubectl get compositiondefinition NAME -n NAMESPACE -o yaml. Creating: the controller Deployment has not rolled out or the CRD is not Established, so look at the controller Deployment and its pods in the definition's namespace. Deleting: the definition waits for its compositions to be deleted, so list them and look for a finalizer that is not clearing. NotObserved: core-provider is not reconciling the definition, so read its log. 3. The action for each reason is in core-provider's docs/cd-ready-reasons.json at the tag in status.writtenBy.version. 4. The owner of the chart is in status.chart.maintainers. The bounds are defaultAlerts.definitionConvergenceBounds in this chart's values."
+      runbook: "1. Name the definition, its reason and how long it has been in it, without the message: SELECT JSONExtractString(Body, 'metadata', 'namespace') AS namespace, JSONExtractString(Body, 'metadata', 'name') AS definition, JSONExtractString(c, 'reason') AS reason, min(parseDateTimeBestEffortOrNull(JSONExtractString(c, 'lastTransitionTime'))) AS since FROM otel_logs ARRAY JOIN JSONExtractArrayRaw(Body, 'status', 'conditions') AS c WHERE ResourceAttributes['telemetry.source'] = 'k8s-objects' AND Timestamp > now() - INTERVAL 30 MINUTE AND JSONExtractString(c, 'type') = 'Ready' AND JSONExtractString(c, 'reason') IN ('Creating', 'Deleting', 'NotObserved') GROUP BY namespace, definition, reason. 2. Read the live definition: kubectl get compositiondefinition NAME -n NAMESPACE -o yaml. Creating: the controller Deployment has not rolled out or the CRD is not Established, so look at the controller Deployment and its pods in the definition's namespace. Deleting: the definition waits for its compositions to be deleted, so list them and look for a finalizer that is not clearing. NotObserved: core-provider is not reconciling the definition, so read its log. 3. The action for a reason is in core-provider's reason table, docs/cd-ready-reasons.json in krateo-platformops/core-provider. Read status.writtenBy: when status.writtenBy.name is core-provider, take the file at the tag status.writtenBy.version; when that version is not a tag, or writtenBy is absent, read the file at HEAD and say so. 4. The owner is status.chart.maintainers (name and url); when it is absent the owner is unknown, so say that and do not guess. The bounds are defaultAlerts.definitionConvergenceBounds in this chart's values; a Creating past its bound means the controller Deployment has not reported failure, so look at it."
     # A vendor's API answering 5xx to the generated REST controllers (rest-dynamic-controller, 34
     # Deployments on krateo-057), seen as the controllers' own "Cannot observe external resource"
     # line, whose err carries the status (format "unexpected status: %d: invalid status code: %d").

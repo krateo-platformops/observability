@@ -8,11 +8,13 @@ and against variants of it, offline:
   the saved table, as is                              -> exit 0
   a converging or next-pass reason with no bound, a
   bound removed, stale or with the wrong status       -> exit 1, naming it
-  an extra HEALTHY Ready reason                       -> exit 1, naming it (the alert would fire on it)
-  an extra CONVERGING reason, an extra UNEVALUATED    -> exit 1 each
-  a healthy reason the table dropped                  -> exit 1 (the alert lists one that is gone)
-  a FAILED reason that is now healthy                 -> exit 1 (the alert would stay silent on it)
-  an extra FAILED reason                              -> exit 0 (the alert fires on it already)
+  an extra HEALTHY pair (status True)                 -> exit 0 (the alert never fires on a True)
+  a "healthy" pair whose status is False              -> exit 1 (the alert would fire on it)
+  an extra CONVERGING pair, an extra UNEVALUATED pair -> exit 1 each, naming it
+  a converging pair the table dropped                 -> exit 1 (the alert lists one that is gone)
+  a FAILED pair that is True, or now converging       -> exit 1
+  an extra FAILED pair                                -> exit 0 (the alert fires on it already)
+  the same reason under another status               -> told apart (the pairs, not the reasons)
   fewer Ready rows than the floor, and none           -> exit 1 (a comparison over nothing)
   a verdict the gate does not know                    -> exit 1
   a table that is not JSON                            -> exit 1
@@ -80,36 +82,53 @@ assert sum(r["condition"] == "Ready" for r in BASE["reasons"]) == 12, "the fixtu
 
 rc, out = with_table(BASE)
 check("the saved 2.13.136 table passes", rc == 0, out)
-for verdict, reason in (("healthy", "AdoptedByPolicy"), ("converging", "Upgrading"), ("unevaluated", "Pending")):
-    rc, out = with_table(variant(add(verdict, reason)))
-    check(f"an extra {verdict} reason is refused and named", rc == 1 and reason in out, out)
+rc, out = with_table(variant(add("healthy", "AdoptedByPolicy")))
+check("an extra healthy pair (True) passes: the alert never fires on a True", rc == 0, out)
+rc, out = with_table(variant(add("healthy", "AdoptedByPolicy", status="False")))
+check("a healthy pair whose status is False is refused and named", rc == 1 and "AdoptedByPolicy" in out, out)
+for verdict, reason, status in (("converging", "Upgrading", "False"), ("unevaluated", "Pending", "Unknown")):
+    rc, out = with_table(variant(add(verdict, reason, status=status)))
+    check(f"an extra {verdict} pair is refused and named", rc == 1 and reason in out, out)
 
 
-def drop_healthy(rows):
-    # One healthy row replaced by a failed one, so the count stays at the floor.
-    rows.remove(next(r for r in rows if r["reason"] == "ScaledToZero" and r["condition"] == "Ready"))
+def drop_converging(rows):
+    # One converging row replaced by a failed one, so the count stays at the floor.
+    rows.remove(next(r for r in rows if r["reason"] == "Deleting" and r["condition"] == "Ready"))
     add("failed", "SomethingNewBroke", status="False")(rows)
 
 
-rc, out = with_table(variant(drop_healthy))
-check("a healthy reason the table dropped is refused and named", rc == 1 and "ScaledToZero" in out, out)
+rc, out = with_table(variant(drop_converging))
+check("a converging pair the table dropped is refused and named", rc == 1 and "Deleting" in out, out)
 
 
-def heal(rows):
+def failed_true(rows):
     for r in rows:
         if r["reason"] == "ValuesSchemaMissing":
-            r["verdict"], r["status"] = "healthy", "True"
+            r["status"] = "True"
 
 
-rc, out = with_table(variant(heal))
-check("a failed reason that became healthy is refused and named", rc == 1 and "ValuesSchemaMissing" in out, out)
+rc, out = with_table(variant(failed_true))
+check("a failed pair with status True is refused and named", rc == 1 and "ValuesSchemaMissing" in out, out)
+
+
+def now_converging(rows):
+    for r in rows:
+        if r["reason"] == "ValuesSchemaMissing":
+            r["verdict"] = "converging"
+
+
+rc, out = with_table(variant(now_converging))
+check("a failed reason that became converging is refused and named", rc == 1 and "ValuesSchemaMissing" in out, out)
+# Same reason, another status: the pair is what counts. Creating under Unknown is not Creating under False.
+rc, out = with_table(variant(add("converging", "Creating", status="Unknown")))
+check("Creating under another status is a different pair, refused", rc == 1 and "Unknown" in out and "Creating" in out, out)
 rc, out = with_table(variant(add("failed", "SomethingNewBroke", status="False")))
 check("an extra failed reason passes (the alert fires on it already)", rc == 0, out)
-rc, out = with_table(variant(lambda rows: rows.remove(next(r for r in rows if r["reason"] == "Deleting"))))
+rc, out = with_table(variant(lambda rows: rows.remove(next(r for r in rows if r["reason"] == "ScaledToZero"))))
 check("one Ready row fewer than the floor is refused", rc == 1 and "fewer than" in out, out)
 # The bounds of sre-krateo-definition-converging-too-long.
 rc, out = with_table(variant(add("converging", "Upgrading", status="False")))
-check("a new converging reason with no bound is refused and named (by the bound check as well)", rc == 1 and "Upgrading" in out, out)
+check("a new converging reason with no bound is refused and named", rc == 1 and "Upgrading" in out and "no bound" in out, out)
 rc, out = with_table(variant(lambda rows: rows.append({"condition": "Ready", "status": "Unknown", "reason": "Waiting",
                                                        "verdict": "unevaluated", "clearance": {"kind": "next pass"}})))
 check("a new next-pass reason with no bound is refused and named", rc == 1 and "Waiting" in out and "no bound" in out, out)
@@ -121,6 +140,13 @@ rc, out = with_values(lambda v: v["defaultAlerts"]["definitionConvergenceBounds"
 check("a bound with the wrong status is refused", rc == 1 and "status" in out, out)
 rc, out = with_values(lambda v: v["defaultAlerts"].pop("definitionConvergenceBounds"))
 check("no bounds at all is refused", rc == 1, out)
+def drop_status_clause(v):
+    a = next(a for a in v["defaultAlerts"]["alerts"] if a["name"] == "sre-krateo-definition-not-ready")
+    a["where"] = a["where"].replace("JSONExtractString(c, 'status') != 'True' AND ", "")
+
+
+rc, out = with_values(drop_status_clause)
+check("a where without the status != 'True' clause is refused", rc == 1 and "status" in out, out)
 rc, out = with_table({"reasons": []})
 check("an empty table is refused", rc == 1 and "0 Ready rows" in out, out)
 rc, out = with_table(variant(add("mystery", "Odd", status="False")))

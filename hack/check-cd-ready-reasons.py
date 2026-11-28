@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
-"""Gate: the reasons sre-krateo-definition-not-ready does NOT fire on are the table's.
+"""Gate: the (status, reason) pairs sre-krateo-definition-not-ready does NOT fire on are the table's.
 
 core-provider writes a failed Ready on a CompositionDefinition as a successful reconcile that only
-sets status.conditions[type=Ready]. Its table, docs/cd-ready-reasons.json, gives every Ready reason a
-verdict: healthy, converging, unevaluated or failed. The alert fires on a Ready=False whose reason is
-NOT IN a list, so a reason that is not failing must be on that list, or the alert fires on it; and a
-failing reason must not be, or the alert is silent on it. The table is open, a release can add a row,
-so this gate holds the list to the table at the tag pinned in hack/core-provider-pin.yaml:
+sets status.conditions[type=Ready]. Its table, docs/cd-ready-reasons.json, gives every Ready
+(status, reason) pair a verdict: healthy, converging, unevaluated or failed. The alert fires on a
+Ready whose status is not True and whose (status, reason) is NOT IN a list of pairs, so:
 
-  list == the reasons of every Ready row whose verdict is healthy, converging or unevaluated
+  - the list is the pairs of every Ready row whose verdict is converging or unevaluated;
+  - every healthy row has status True (the alert never fires on True), and every failed row has a
+    status that is not True (or the alert would be silent on it);
+  - the where holds the `status != 'True'` clause.
 
 It also holds defaultAlerts.definitionConvergenceBounds, the bounds of sre-krateo-definition-converging-too-long,
 to the table: every Ready reason whose verdict is converging, or whose clearance kind is `next pass`,
 has a bound with the table's status, and a bound names no other reason. A new converging or next-pass
 reason with no bound fails here.
 
-It fails closed: a table that cannot be fetched or parsed, fewer Ready rows than MIN_READY_ROWS, a
-verdict it does not know, a reason that is both failed and not, or a list it cannot find, all exit 1.
+The table is open, a release can add a row, so this gate holds all of it to the table at the tag
+pinned in hack/core-provider-pin.yaml. It fails closed: a table that cannot be fetched or parsed,
+fewer Ready rows than MIN_READY_ROWS, a verdict it does not know, a (status, reason) pair that is both
+failed and not, or a list it cannot find, all exit 1.
 
 Run: python3 hack/check-cd-ready-reasons.py [--root DIR] [--table FILE | --url URL] [--values FILE]
   --table FILE  read the table from a file (the self-test, tests/check-cd-ready-reasons.py)
@@ -39,8 +42,7 @@ URL = "https://raw.githubusercontent.com/krateo-platformops/core-provider/{tag}/
 # 2026-11-28: core-provider 2.13.136 has 12 Ready rows. A table with fewer has lost rows, or this
 # read the wrong thing, and a comparison over nothing passes.
 MIN_READY_ROWS = 12
-NOT_FAILING = {"healthy", "converging", "unevaluated"}
-KNOWN = NOT_FAILING | {"failed"}
+KNOWN = {"healthy", "converging", "unevaluated", "failed"}
 
 
 def fetch(url):
@@ -56,7 +58,8 @@ def fetch(url):
 
 
 def table_reasons(text):
-    """(not failing reasons, failing reasons, Ready rows examined) of a table's text."""
+    """(pairs the alert lists, failed pairs, Ready rows examined) of a table's text. A pair is
+    (status, reason). Raises when a healthy row is not True or a failed row is True."""
     try:
         rows = json.loads(text)["reasons"]
     except Exception as e:
@@ -64,18 +67,24 @@ def table_reasons(text):
     ready = [r for r in rows if r.get("condition") == "Ready"]
     if len(ready) < MIN_READY_ROWS:
         raise SystemExit(f"FAIL {len(ready)} Ready rows examined, fewer than {MIN_READY_ROWS} (2026-11-28)")
-    good, bad = set(), set()
+    listed, failed = set(), set()
     for r in ready:
-        v = r.get("verdict")
+        v, pair = r.get("verdict"), (r.get("status"), r.get("reason"))
         if v not in KNOWN:
-            raise SystemExit(f"FAIL Ready reason {r.get('reason')!r} has verdict {v!r}, not one of {sorted(KNOWN)}: "
+            raise SystemExit(f"FAIL Ready pair {pair} has verdict {v!r}, not one of {sorted(KNOWN)}: "
                              "decide what the alert does with it, then teach this gate")
-        (good if v in NOT_FAILING else bad).add(r["reason"])
-    both = good & bad
+        if v == "healthy" and pair[0] != "True":
+            raise SystemExit(f"FAIL healthy Ready pair {pair} has a status that is not True: the alert would fire on it")
+        if v == "failed" and pair[0] == "True":
+            raise SystemExit(f"FAIL failed Ready pair {pair} has status True: the alert never fires on a True")
+        if v in ("converging", "unevaluated"):
+            listed.add(pair)
+        elif v == "failed":
+            failed.add(pair)
+    both = listed & failed
     if both:
-        raise SystemExit(f"FAIL reason(s) {sorted(both)} are failed in one Ready row and not in another: "
-                         "the alert reads the reason alone")
-    return good, bad, len(ready)
+        raise SystemExit(f"FAIL pair(s) {sorted(both)} are failed in one Ready row and not in another")
+    return listed, failed, len(ready)
 
 
 def needs_bound(text):
@@ -104,12 +113,15 @@ def alert_list(root, values=None):
     alerts = [a for a in values["defaultAlerts"]["alerts"] if a["name"] == ALERT]
     if len(alerts) != 1:
         raise SystemExit(f"FAIL {len(alerts)} alerts named {ALERT} in {VALUES}")
-    found = re.findall(r"'reason'\) NOT IN \(([^)]*)\)", alerts[0]["where"])
+    where = alerts[0]["where"]
+    if "JSONExtractString(c, 'status') != 'True'" not in where:
+        raise SystemExit(f"FAIL the where of {ALERT} has no `JSONExtractString(c, 'status') != 'True'`: it would fire on a healthy Ready")
+    found = re.findall(r"\(JSONExtractString\(c, 'status'\), JSONExtractString\(c, 'reason'\)\) NOT IN \(((?:\('[^']*', '[^']*'\)(?:, )?)+)\)", where)
     if len(found) != 1:
-        raise SystemExit(f"FAIL {len(found)} `'reason') NOT IN (...)` lists in the where of {ALERT}")
-    items = re.findall(r"'([^']*)'", found[0])
+        raise SystemExit(f"FAIL {len(found)} `(status, reason) NOT IN ((...))` lists in the where of {ALERT}")
+    items = re.findall(r"\('([^']*)', '([^']*)'\)", found[0])
     if len(items) != len(set(items)) or not items:
-        raise SystemExit(f"FAIL the list {items} is empty or repeats a reason")
+        raise SystemExit(f"FAIL the list {items} is empty or repeats a pair")
     return set(items)
 
 
@@ -128,12 +140,12 @@ def main():
     text = pathlib.Path(a.table).read_text() if a.table else fetch(a.url or URL.format(tag=tag))
     good, bad, n = table_reasons(text)
     have = alert_list(root, a.values)
-    print(f"core-provider {tag}: {n} Ready rows, {len(good)} not failing, {len(bad)} failing; alert lists {len(have)}")
+    print(f"core-provider {tag}: {n} Ready rows, {len(good)} converging or unevaluated pairs, {len(bad)} failed; alert lists {len(have)}")
     missing, extra = sorted(good - have), sorted(have - good)
     if missing:
-        print(f"FAIL not failing in the table, missing from the alert's list (it would fire on them): {missing}")
+        print(f"FAIL converging or unevaluated in the table, missing from the alert's list (it would fire on them): {missing}")
     if extra:
-        print(f"FAIL on the alert's list, not a not-failing Ready reason in the table (it would stay silent on them): {extra}")
+        print(f"FAIL on the alert's list, not a converging or unevaluated Ready pair in the table (it would stay silent on them): {extra}")
     need, have_b = needs_bound(text), bounds(root, a.values)
     print(f"{len(need)} converging or next-pass Ready reasons need a bound; {len(have_b)} have one")
     nob = sorted(set(need) - set(have_b))
@@ -148,7 +160,7 @@ def main():
     if missing or extra or nob or stale or wrong:
         sys.exit(1)
     print("ok   every converging and next-pass reason has a bound, with the table's status")
-    print("ok   the alert's list is the table's healthy, converging and unevaluated Ready reasons")
+    print("ok   the alert's (status, reason) list is the table's converging and unevaluated Ready pairs; healthy rows are True, failed rows are not")
 
 
 if __name__ == "__main__":

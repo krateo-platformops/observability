@@ -676,30 +676,39 @@ object trimmed to `metadata.name`, `namespace`, `generation` and `status.observe
 `tests/definition-alerts-docker.py` runs every other default log Alert over 553 rows of definitions and
 asserts 0. Roll the collector first: on an older one no row carries the tag and both alerts are silent.
 
-**`sre-krateo-definition-not-ready`** (above 2, 15m). Fires on a `Ready=False` whose reason is **not**
-in core-provider's healthy, converging or unevaluated set: `Available`, `ScaledToZero`,
-`UpdateWithheldByPolicy`, `Creating`, `Deleting`, `NotObserved`. At core-provider 2.13.136 the failed
-reasons are `Unavailable`, `RemoteChartUnreachable`, `SchemaDefaultContradiction`,
-`ValuesSchemaMissing`, `DerivedNameTooLong` and `CreateWithheldByPolicy`, all with clearance
-`indefinite`. The table is open, so the alert names what is not a failure and a reason it has never
-seen fires as one.
+**`sre-krateo-definition-not-ready`** (above 0, 15m: any row). The reason sets are (status, reason)
+pairs, as core-provider's table gives them at 2.13.136: healthy `True`/{`Available`, `ScaledToZero`,
+`UpdateWithheldByPolicy`}, converging `False`/{`Creating`, `Deleting`}, unevaluated
+`Unknown`/`NotObserved`. The alert fires on a Ready whose status is not `True` and whose pair is not a
+converging or unevaluated one: the six failed reasons (`Unavailable`, `RemoteChartUnreachable`,
+`SchemaDefaultContradiction`, `ValuesSchemaMissing`, `DerivedNameTooLong`, `CreateWithheldByPolicy`,
+all with clearance `indefinite`) and any `False` or `Unknown` pair the table does not list, so a reason
+a later release adds fires. A `True` never fires, whatever its reason. The converging and unevaluated
+pairs belong to `-converging-too-long`, below.
 
-- **Threshold 2, not 1.** `above` is count >= threshold, and a 15-minute window holds 3 pulls of one
-  definition, so one definition fires when it failed in 2 pulls (5 to 10 minutes). A definition's
-  controller Deployment is Unavailable for under a minute in a roll; one pull catching that is a blip.
+- **Threshold 1.** One pull is enough. By core-provider's table a normal rollout is not `Unavailable`:
+  it writes that for a chart it cannot read, 0 replicas without scale-to-zero, a rollout that gave up
+  at its `progressDeadlineSeconds`, availability lost after a completed rollout, or a pool member
+  without its Lease. An `Unavailable` seen mid-roll would be core-provider misclassifying that state:
+  report it to core-provider, do not raise the threshold. (An earlier version of this alert held for 2
+  pulls on the unmeasured belief that a roll shows `Unavailable`; that belief is withdrawn.)
 - **One series.** A log alert cannot be grouped (the CRD refuses `groupBy` without `metricRef`), so
   the incident is a count and the definition is in its rows. The runbook's first query lists them
   (namespace, definition, reason, never the message). It resolves when the rows stop arriving.
-- **The runbook** says: read the Ready reason and message on the live definition; the action is in
-  core-provider's `docs/cd-ready-reasons.json` at the tag in `status.writtenBy.version`; the owner is
-  `status.chart.maintainers`.
+- **The runbooks** (all three) say: read the Ready reason and message on the live definition; take the
+  action from core-provider's `docs/cd-ready-reasons.json` at the tag in `status.writtenBy.version`
+  only when `status.writtenBy.name` is `core-provider`, and when that version is not a tag or
+  `writtenBy` is absent, read the file at HEAD and say so; the owner is `status.chart.maintainers`
+  (name and url), and when it is absent the owner is unknown and is not guessed.
 - **CI.** `hack/core-provider-pin.yaml` pins the tag (the one place core-provider's version is named
   here). `hack/check-cd-ready-reasons.py` fetches the table at it and fails unless the alert's list is
-  exactly the table's healthy, converging and unevaluated Ready reasons, fail-closed on a fetch error,
-  fewer than 12 Ready rows (2026-11-28), an unknown verdict, or a reason both failed and not.
-  `tests/check-cd-ready-reasons.py` shows it refusing an extra healthy, converging and unevaluated
-  reason, a dropped one, a healed failed one, an empty table and an unreachable URL, and passing an
-  extra failed reason. Both run on a change to any of them or to the chart's values.
+  exactly the table's converging and unevaluated Ready (status, reason) pairs, that every healthy row is
+  `True` and no failed row is, and that the `where` keeps its `status != 'True'` clause; fail-closed on a
+  fetch error, fewer than 12 Ready rows (2026-11-28), an unknown verdict, or a pair both failed and not.
+  `tests/check-cd-ready-reasons.py` shows it refusing an extra converging or unevaluated pair, a
+  converging pair the table dropped, a healthy pair that is not `True`, a failed pair that is `True`,
+  a reason under another status, an empty table and an unreachable URL, and passing an extra healthy
+  `True` pair and an extra failed one. Both run on a change to any of them or to the chart's values.
 
 **`sre-krateo-definition-stuck-converging`** (above 0, 15m). `metadata.generation` is the spec
 core-provider was asked for and `status.observedGeneration` the last it finished; they differ briefly
@@ -708,13 +717,15 @@ sees it. A count in one window cannot say "the same definition for 30 minutes" (
 definitions, each unequal for one pull, would look the same), so the `where` holds a subquery: a row
 counts only when its definition has, in the last 35 minutes, at least 6 rows with the two unequal and
 none with them equal. 6 of 7 pulls tolerates one missed; the 6 span 25 minutes, 30 when none was
-missed. It reads `now()` in the subquery and needs the table written `otel_logs`. A definition with no
-`observedGeneration` is not counted. Not exercised against a running HyperDX: the test runs the
+missed. It reads `now()` in the subquery and needs the table written `otel_logs`. A row with no
+`status.observedGeneration` is not assessable: it counts as neither unequal nor equal, so a definition
+without one never fires, and one absent pull is tolerated like a missed one. Not exercised against a running HyperDX: the test runs the
 rendered `where` in ClickHouse 26.10.3.7.
 
 Run in `tests/definition-alerts-docker.py` (synthetic rows dated from now): ValuesSchemaMissing and
-each of the six failed reasons fire at 3 pulls and at 2, not at 1; an unrecognised reason fires;
-Creating, Deleting, NotObserved and the three healthy reasons do not; a failed Ready under `k8s-events`,
+each of the six failed reasons fire at 3 pulls, at 2 and at 1; an unrecognised `False` or `Unknown` pair
+fires, and so does a listed reason under another status; a `True` with an unrecognised reason does not;
+the pairs Creating, Deleting, NotObserved and the three healthy ones do not; a failed Ready under `k8s-events`,
 `''`, no source or another resource does not; unequal generations for 30 minutes fire, for 10 and 20
 do not, one missed pull still fires, two do not, recovery at the latest pull does not. On krateo-057 on
 2026-11-28 all 79 definitions are Ready=True with equal generations: no row would count.
@@ -730,13 +741,15 @@ values change and nothing else:
 
 | reason | status | bound | why |
 |---|---|---|---|
-| `Creating` | False | 30 min | twice core-provider's 15-minute helm wait (`COMPOSITION_CONTROLLER_HELM_TIMEOUT`), above an image pull and a rollout |
-| `Deleting` | False | 120 min | the definition waits for its compositions to delete, each up to a 15-minute helm wait plus the 5-minute child teardown grace (core-provider's `composition.go`): about six in a row |
+| `Creating` | False | 30 min | a backstop. Creating lasts until the CRD is Established and the controller Deployment has rolled out; core-provider writes `Unavailable` (a failed reason, caught by the not-Ready alert) when that Deployment misses its `progressDeadlineSeconds` (Kubernetes default 600 s). A definition still Creating after 30 minutes is one where that has not happened |
+| `Deleting` | False | 120 min, **provisional** | derived, not measured: the definition waits for its compositions to delete, each up to a 15-minute helm wait plus the 5-minute child teardown grace (core-provider's `composition.go`). That teardowns run one after another is unverified, and the controller runs 10 workers, so they may overlap |
 | `NotObserved` | Unknown | 15 min | clears on the next reconcile; 15 minutes is three pulls of the same condition |
 
 No file in this repository bounds a definition's deletion (there is no helm uninstall hook timeout
-here), so 120 minutes is derived from core-provider's figures above, not measured. Move it with the
-values when a real deletion takes longer. `hack/check-cd-ready-reasons.py` fails when the table has a
+here), so the 120 minutes of `Deleting` is **provisional**: derived from core-provider's figures above,
+not measured. Move it with the values once a real deletion has been timed. The Creating bound is not
+`COMPOSITION_CONTROLLER_HELM_TIMEOUT`, which bounds a composition controller's helm operations and does
+not apply to a definition. `hack/check-cd-ready-reasons.py` fails when the table has a
 converging reason, or one whose clearance is `next pass`, with no bound, a bound for a reason that is
 neither, or a bound whose status is not the table's.
 

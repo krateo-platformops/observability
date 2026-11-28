@@ -308,9 +308,9 @@ type: application
 # 0.1.62: three alerts on the CompositionDefinition's own status, read by pull (otel-collector-deployment
 # 0.3.25, ROLLED FIRST: on an older collector no row has telemetry.source = 'k8s-objects', the
 # alerts count 0 and stay quiet, and nothing says they are blind).
-# sre-krateo-definition-not-ready fires on a Ready=False whose reason is not healthy, converging or
-# unevaluated in core-provider's reason table, so the six failed reasons of 2.13.136 and any reason a
-# later release adds. sre-krateo-definition-stuck-converging fires on a definition whose
+# sre-krateo-definition-not-ready fires on any row with a Ready whose status is not True and whose
+# (status, reason) pair is not a converging or unevaluated one in core-provider's reason table, so the
+# six failed reasons of 2.13.136 and any False or Unknown pair a later release adds; one pull is enough. sre-krateo-definition-stuck-converging fires on a definition whose
 # metadata.generation has differed from status.observedGeneration at every pull for 30 minutes.
 # hack/check-cd-ready-reasons.py holds the first alert's list to the table at the tag pinned in
 # hack/core-provider-pin.yaml. tests/definition-alerts-docker.py runs both where clauses in
