@@ -4,3 +4,7 @@ chart/Chart.lock
 dist/
 *.tgz
 .DS_Store
+
+# Compiled Python from running tests/ and hack/ locally; main carried three of them until now.
+__pycache__/
+*.pyc
