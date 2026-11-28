@@ -35,5 +35,9 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      # The gate's own test: it must count what it should and refuse an empty or
+      # vendored-only tree. Without it a scan that examines nothing prints "all references resolve".
+      - name: Self-test the scan
+        run: python3 tests/preflight-refs.py
       - name: Resolve every chart and image reference
         run: python3 hack/preflight-refs.py .
