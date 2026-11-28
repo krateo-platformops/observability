@@ -1,0 +1,10 @@
+# The core-provider release whose reason table the alerts read (docs/cd-ready-reasons.json at this
+# tag). hack/check-cd-ready-reasons.py holds the reason list of sre-krateo-definition-not-ready in
+# charts/krateo-observability/values.yaml to that table, and nothing else in this repository names a
+# core-provider version, so this is the one place to move it.
+#
+# Set 2026-11-28 to 2.13.136, the release live on krateo-057 that day: 12 Ready rows, 6 failed, 2
+# converging, 3 healthy, 1 unevaluated. To move it: change the tag, run the check, and if it names a
+# reason, add that reason to the alert's list in the same pull request (or, for a failed one, leave it
+# out of the list: the check says which).
+tag: 2.13.136

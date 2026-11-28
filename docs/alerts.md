@@ -637,3 +637,57 @@ relative to the window boundaries.
 
 When both alerts fire, they open two incidents for one outage. The persistent alert's runbook says to
 work the outage under the fast alert.
+
+## `sre-krateo-definition-not-ready` and `sre-krateo-definition-stuck-converging` (0.1.61)
+
+A CompositionDefinition that cannot become Ready is not an error in core-provider: the reconcile
+succeeds and writes `status.conditions[type=Ready]` False. No Kubernetes Event says so and none says
+it cleared, so the source is the condition itself. otel-collector-deployment 0.3.25 reads every
+definition every 5 minutes and writes one `otel_logs` row each, `telemetry.source = 'k8s-objects'`, the
+object trimmed to `metadata.name`, `namespace`, `generation` and `status.observedGeneration`,
+`conditions`. The event alerts select `k8s-events` and the log alerts `''`, so neither counts them;
+`tests/definition-alerts-docker.py` runs every other default log Alert over 553 rows of definitions and
+asserts 0. Roll the collector first: on an older one no row carries the tag and both alerts are silent.
+
+**`sre-krateo-definition-not-ready`** (above 2, 15m). Fires on a `Ready=False` whose reason is **not**
+in core-provider's healthy, converging or unevaluated set: `Available`, `ScaledToZero`,
+`UpdateWithheldByPolicy`, `Creating`, `Deleting`, `NotObserved`. At core-provider 2.13.136 the failed
+reasons are `Unavailable`, `RemoteChartUnreachable`, `SchemaDefaultContradiction`,
+`ValuesSchemaMissing`, `DerivedNameTooLong` and `CreateWithheldByPolicy`, all with clearance
+`indefinite`. The table is open, so the alert names what is not a failure and a reason it has never
+seen fires as one.
+
+- **Threshold 2, not 1.** `above` is count >= threshold, and a 15-minute window holds 3 pulls of one
+  definition, so one definition fires when it failed in 2 pulls (5 to 10 minutes). A definition's
+  controller Deployment is Unavailable for under a minute in a roll; one pull catching that is a blip.
+- **One series.** A log alert cannot be grouped (the CRD refuses `groupBy` without `metricRef`), so
+  the incident is a count and the definition is in its rows. The runbook's first query lists them
+  (namespace, definition, reason, never the message). It resolves when the rows stop arriving.
+- **The runbook** says: read the Ready reason and message on the live definition; the action is in
+  core-provider's `docs/cd-ready-reasons.json` at the tag in `status.writtenBy.version`; the owner is
+  `status.chart.maintainers`.
+- **CI.** `hack/core-provider-pin.yaml` pins the tag (the one place core-provider's version is named
+  here). `hack/check-cd-ready-reasons.py` fetches the table at it and fails unless the alert's list is
+  exactly the table's healthy, converging and unevaluated Ready reasons, fail-closed on a fetch error,
+  fewer than 12 Ready rows (2026-11-28), an unknown verdict, or a reason both failed and not.
+  `tests/check-cd-ready-reasons.py` shows it refusing an extra healthy, converging and unevaluated
+  reason, a dropped one, a healed failed one, an empty table and an unreachable URL, and passing an
+  extra failed reason. Both run on a change to any of them or to the chart's values.
+
+**`sre-krateo-definition-stuck-converging`** (above 0, 15m). `metadata.generation` is the spec
+core-provider was asked for and `status.observedGeneration` the last it finished; they differ briefly
+after any change. A definition stuck there can stay Ready or sit in Creating, so no failed-reason rule
+sees it. A count in one window cannot say "the same definition for 30 minutes" (a roll of many
+definitions, each unequal for one pull, would look the same), so the `where` holds a subquery: a row
+counts only when its definition has, in the last 35 minutes, at least 6 rows with the two unequal and
+none with them equal. 6 of 7 pulls tolerates one missed; the 6 span 25 minutes, 30 when none was
+missed. It reads `now()` in the subquery and needs the table written `otel_logs`. A definition with no
+`observedGeneration` is not counted. Not exercised against a running HyperDX: the test runs the
+rendered `where` in ClickHouse 26.10.3.7.
+
+Run in `tests/definition-alerts-docker.py` (synthetic rows dated from now): ValuesSchemaMissing and
+each of the six failed reasons fire at 3 pulls and at 2, not at 1; an unrecognised reason fires;
+Creating, Deleting, NotObserved and the three healthy reasons do not; a failed Ready under `k8s-events`,
+`''`, no source or another resource does not; unequal generations for 30 minutes fire, for 10 and 20
+do not, one missed pull still fires, two do not, recovery at the latest pull does not. On krateo-057 on
+2026-11-28 all 79 definitions are Ready=True with equal generations: no row would count.

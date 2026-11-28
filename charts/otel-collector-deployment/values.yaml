@@ -108,6 +108,11 @@ opentelemetry-collector:
       - apiGroups: ["core.krateo.io"]
         resources: ["*"]
         verbs: [get]
+      # The k8sobjects/definitions receiver below lists CompositionDefinitions (pull mode, all
+      # namespaces); watch is granted with it so the same receiver can move to watch mode.
+      - apiGroups: ["core.krateo.io"]
+        resources: [compositiondefinitions]
+        verbs: [list, watch]
 
   presets:
     kubernetesAttributes:
@@ -224,6 +229,25 @@ opentelemetry-collector:
           - name: events
             mode: watch
             group: ""
+            namespaces: []
+      # CompositionDefinitions, read by pull. A failed Ready on one is a successful reconcile that
+      # only writes status.conditions[type=Ready]: core-provider emits no Kubernetes Event for it and
+      # none when it clears, so the condition itself is the source. Every 5 minutes the receiver lists
+      # all of them and writes one log row each (the object, trimmed below) to otel_logs, tagged
+      # telemetry.source = 'k8s-objects' so the alerts select these rows by that tag and the event
+      # alerts, which select 'k8s-events', never see them. Its own pipeline (logs/definitions) keeps
+      # the 'k8s-events' tag of the events pipeline off these rows.
+      #
+      # THE RESOURCE MUST EXIST AT STARTUP. The receiver checks every object's resource against API
+      # discovery when the collector starts and refuses to start on one it does not find, so a cluster
+      # without core-provider's CRD (compositiondefinitions.core.krateo.io) crash-loops this collector,
+      # and the events pipeline with it, until the CRD is served.
+      k8sobjects/definitions:
+        objects:
+          - name: compositiondefinitions
+            group: core.krateo.io
+            mode: pull
+            interval: 5m
             namespaces: []
       k8s_cluster:
         # 30s, not 60s (Diego, 2026-11-08). The per-pod "not Ready for 5 minutes" alert evaluates
@@ -361,6 +385,28 @@ opentelemetry-collector:
           - key: telemetry.source
             value: "k8s-events"
             action: insert
+      resource/definitions:
+        attributes:
+          - key: telemetry.source
+            value: "k8s-objects"
+            action: insert
+      # What a CompositionDefinition row keeps: metadata.name, namespace and generation, and
+      # status.observedGeneration and status.conditions. The two alerts read only those (Ready's
+      # reason and status; generation against observedGeneration). The rest of the object is the
+      # bulk: on krateo-057 (79 definitions, 2026-11-28) the object is 4.3 KB without managedFields
+      # (kubectl hides them; the list the receiver makes carries them) and these keys are 1.2 KB.
+      # keep_keys on the body map, then on metadata and status, tested on the v0.118.0 processor.
+      # The JWT sweep follows, as on the events pipeline: a condition message is free text.
+      transform/definitions:
+        error_mode: ignore
+        log_statements:
+          - context: log
+            statements:
+              - 'keep_keys(body, ["metadata", "status"])'
+              - 'keep_keys(body["metadata"], ["name", "namespace", "generation"])'
+              - 'keep_keys(body["status"], ["observedGeneration", "conditions"])'
+              - 'replace_pattern(body.string, "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>")'
+              - 'replace_all_patterns(attributes, "value", "eyJ[A-Za-z0-9._-]{20,}", "<REDACTED-JWT>")'
       compositionresolver:
         cache_ttl: 5m
         negative_cache_ttl: 30s
@@ -413,6 +459,14 @@ opentelemetry-collector:
           # This collector needs an image with transform, 1.0.5 or later. Older images crash-loop
           # at startup with: unknown type: "transform".
           processors: [memory_limiter, k8sattributes, resource, compositionresolver, transform, batch]
+          exporters: [clickhouse]
+        # CompositionDefinitions by pull: a row per definition every 5 minutes, telemetry.source =
+        # 'k8s-objects' (receivers.k8sobjects/definitions above). A separate pipeline so the
+        # 'k8s-events' tag of the events pipeline is not put on them; sre-kubernetes-events-missing
+        # would otherwise be satisfied by these rows while the events watch is dead.
+        logs/definitions:
+          receivers: [k8sobjects/definitions]
+          processors: [memory_limiter, resource/definitions, transform/definitions, batch]
           exporters: [clickhouse]
         # To enable the Prometheus -> OTLP bridge: restore the prometheus receiver (left out by
         # default under config.receivers — requires a prometheus-capable collector image) and

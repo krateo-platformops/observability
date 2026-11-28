@@ -299,7 +299,18 @@ type: application
 # source for it. A `below` alert also fires when the metric stops, which now includes ClickHouse not
 # answering. NEEDS otel-collector-daemonset 0.1.39, ROLLED FIRST: on an older collector the new
 # metric does not exist and the alert fires on the empty window.
-version: 0.1.60
+# 0.1.61: two alerts on the CompositionDefinition's own status, read by pull (otel-collector-deployment
+# 0.3.25, ROLLED FIRST: on an older collector no row has telemetry.source = 'k8s-objects', both
+# alerts count 0 and stay quiet, and nothing says they are blind).
+# sre-krateo-definition-not-ready fires on a Ready=False whose reason is not healthy, converging or
+# unevaluated in core-provider's reason table, so the six failed reasons of 2.13.136 and any reason a
+# later release adds. sre-krateo-definition-stuck-converging fires on a definition whose
+# metadata.generation has differed from status.observedGeneration at every pull for 30 minutes.
+# hack/check-cd-ready-reasons.py holds the first alert's list to the table at the tag pinned in
+# hack/core-provider-pin.yaml. tests/definition-alerts-docker.py runs both where clauses in
+# ClickHouse. On krateo-057 on 2026-11-28 all 79 definitions are Ready=True with the two generations
+# equal, so neither alert has a row to fire on.
+version: 0.1.61
 appVersion: "3.5.0"
 dependencies:
   - name: clickstack

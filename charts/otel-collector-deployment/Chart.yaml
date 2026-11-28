@@ -115,7 +115,19 @@ type: application
 # 0.3.24: image 1.0.10: a failed list no longer ends event collection (otel-collector#42). On a test
 # cluster one refused list during an API server restart cost 20 minutes of events, until the pod was
 # replaced; reproduced with images 1.0.6 and 1.0.9. No config change; the pod rolls for the image.
-version: 0.3.24
+# 0.3.25: CompositionDefinitions are read by pull, every 5 minutes, one row each in otel_logs with
+# telemetry.source = 'k8s-objects' (receiver k8sobjects/definitions, its own pipeline
+# logs/definitions: memory_limiter, resource/definitions, transform/definitions, batch). A failed
+# Ready on a definition is a successful reconcile that only writes status.conditions[type=Ready], so
+# core-provider emits no Event for it or for its clearing, and the condition itself is the source for
+# the two alerts in krateo-observability 0.1.61. The transform keeps metadata.name, namespace and
+# generation and status.observedGeneration and conditions (1.2 KB of 4.3 KB an object on krateo-057,
+# 79 definitions, before managedFields), then sweeps JWTs as the events pipeline does. The
+# ClusterRole gains list and watch on compositiondefinitions.core.krateo.io. The events pipeline and
+# its 'k8s-events' tag are unchanged. No image change (1.0.10 has the k8sobjects pull mode, resource
+# and transform). NOTE: the receiver refuses to start when the resource is not in API discovery, so a
+# cluster without core-provider's CRD crash-loops this collector until the CRD is served.
+version: 0.3.25
 appVersion: "1.0.10"
 dependencies:
   - name: opentelemetry-collector

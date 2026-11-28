@@ -1,0 +1,75 @@
+# The CompositionDefinition alerts (sre-krateo-definition-not-ready, -stuck-converging):
+#
+#  1. the reason list of the first is held to core-provider's reason table, docs/cd-ready-reasons.json
+#     at the tag pinned in hack/core-provider-pin.yaml (hack/check-cd-ready-reasons.py). The table is
+#     fetched, so this job needs the network, and fails closed when it cannot get it;
+#  2. that gate is shown refusing a table with an extra healthy reason, and the other cases
+#     (tests/check-cd-ready-reasons.py, offline);
+#  3. both rendered `where` clauses are run in ClickHouse over synthetic definition rows, and every
+#     other default log Alert is shown to count none of them (tests/definition-alerts-docker.py).
+#
+# It is a separate workflow on purpose. lint.yaml is the org-wide canonical chart-repo lint,
+# identical across every krateo-* chart repo.
+
+name: check-definition-alerts
+
+on:
+  pull_request:
+    paths:
+      - "charts/krateo-observability/**"
+      - "charts/otel-collector-deployment/values.yaml"
+      - "hack/check-cd-ready-reasons.py"
+      - "hack/core-provider-pin.yaml"
+      - "tests/check-cd-ready-reasons.py"
+      - "tests/definition-alerts-docker.py"
+      - "tests/fixtures/cd-ready-reasons-2.13.136-ready-rows.json"
+      - "tests/fixtures/otel_logs.sql"
+      - ".github/workflows/check-definition-alerts.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "charts/krateo-observability/**"
+      - "charts/otel-collector-deployment/values.yaml"
+      - "hack/check-cd-ready-reasons.py"
+      - "hack/core-provider-pin.yaml"
+      - "tests/check-cd-ready-reasons.py"
+      - "tests/definition-alerts-docker.py"
+      - "tests/fixtures/cd-ready-reasons-2.13.136-ready-rows.json"
+      - "tests/fixtures/otel_logs.sql"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reasons:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: The gate refuses what it must
+        run: python3 tests/check-cd-ready-reasons.py
+      - name: The alert's reason list equals core-provider's table at the pinned tag
+        run: python3 hack/check-cd-ready-reasons.py
+
+  where:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v3.19.0
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Add the dependency repository
+        run: helm repo add clickstack https://clickhouse.github.io/ClickStack-helm-charts
+      - name: Run both where clauses in ClickHouse
+        run: python3 tests/definition-alerts-docker.py .

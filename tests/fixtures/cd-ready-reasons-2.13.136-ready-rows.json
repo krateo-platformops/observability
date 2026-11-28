@@ -1,0 +1,107 @@
+{
+ "note": "Ready (and one Synced) rows of docs/cd-ready-reasons.json at core-provider 2.13.136, four fields each, for tests/check-cd-ready-reasons.py. Not the table: the gate reads the real one at the pinned tag.",
+ "reasons": [
+  {
+   "condition": "Ready",
+   "status": "True",
+   "reason": "Available",
+   "verdict": "healthy"
+  },
+  {
+   "condition": "Ready",
+   "status": "True",
+   "reason": "ScaledToZero",
+   "verdict": "healthy"
+  },
+  {
+   "condition": "Ready",
+   "status": "False",
+   "reason": "Creating",
+   "verdict": "converging"
+  },
+  {
+   "condition": "Ready",
+   "status": "False",
+   "reason": "Unavailable",
+   "verdict": "failed"
+  },
+  {
+   "condition": "Ready",
+   "status": "False",
+   "reason": "RemoteChartUnreachable",
+   "verdict": "failed"
+  },
+  {
+   "condition": "Ready",
+   "status": "False",
+   "reason": "SchemaDefaultContradiction",
+   "verdict": "failed"
+  },
+  {
+   "condition": "Ready",
+   "status": "False",
+   "reason": "ValuesSchemaMissing",
+   "verdict": "failed"
+  },
+  {
+   "condition": "Ready",
+   "status": "False",
+   "reason": "DerivedNameTooLong",
+   "verdict": "failed"
+  },
+  {
+   "condition": "Ready",
+   "status": "False",
+   "reason": "Deleting",
+   "verdict": "converging"
+  },
+  {
+   "condition": "Ready",
+   "status": "Unknown",
+   "reason": "NotObserved",
+   "verdict": "unevaluated"
+  },
+  {
+   "condition": "Ready",
+   "status": "False",
+   "reason": "CreateWithheldByPolicy",
+   "verdict": "failed"
+  },
+  {
+   "condition": "Ready",
+   "status": "True",
+   "reason": "UpdateWithheldByPolicy",
+   "verdict": "healthy"
+  },
+  {
+   "condition": "Synced",
+   "status": "True",
+   "reason": "ReconcileSuccess",
+   "verdict": null
+  },
+  {
+   "condition": "Synced",
+   "status": "False",
+   "reason": "ReconcileError",
+   "verdict": null
+  },
+  {
+   "condition": "Synced",
+   "status": "False",
+   "reason": "ReconcilePaused",
+   "verdict": null
+  },
+  {
+   "condition": "Synced",
+   "status": "False",
+   "reason": "ManagementPolicyInvalid",
+   "verdict": null
+  },
+  {
+   "condition": "Synced",
+   "status": "False",
+   "reason": "DeletionPolicyInvalid",
+   "verdict": null
+  }
+ ]
+}

@@ -267,7 +267,8 @@ All under `opentelemetry-collector:` (the upstream dep):
   `config` as Helm merged it, upstream's defaults included, leaves out upstream's default
   receivers and pipelines it does not run, and builds the result with upstream's own config
   template; `checksum/config` hashes it. Override `config.*` as before.
-- `config.receivers`: `k8sobjects` (watch Events) + `k8s_cluster` (30s);
+- `config.receivers`: `k8sobjects` (watch Events), `k8sobjects/definitions` (0.3.25: pull
+  CompositionDefinitions, `core.krateo.io`, every 5 minutes, all namespaces) and `k8s_cluster` (30s);
   upstream's default `jaeger`/`otlp`/`zipkin`/`prometheus` receivers and its `traces`
   pipeline are **left out** while they hold upstream's default value (no `null`: Helm 4 no
   longer applies a parent chart's nulls to a subchart, upstream Helm change 31979). Leaving
@@ -295,8 +296,21 @@ All under `opentelemetry-collector:` (the upstream dep):
   `default`, tables `otel_logs`/`otel_traces`/`otel_metrics`, `create_schema: true`,
   **`ttl: 168h`** (7-day TTL stamped into table creation — retention incident, do not
   remove), retry-on-failure enabled.
-- Pipelines: `logs` (k8sobjects → … → clickhouse), `metrics` (k8s_cluster → memory_limiter,
-  batch → clickhouse), `traces: null`.
+- Pipelines: `logs` (k8sobjects → … → clickhouse), `logs/definitions` (0.3.25: k8sobjects/definitions
+  → memory_limiter, `resource/definitions`, `transform/definitions`, batch → clickhouse), `metrics`
+  (k8s_cluster → memory_limiter, batch → clickhouse), `traces: null`.
+- **CompositionDefinition rows** (0.3.25): one `otel_logs` row per definition per pull, with
+  `ResourceAttributes['telemetry.source'] = 'k8s-objects'` and `LogAttributes['k8s.resource.name'] =
+  'compositiondefinitions'`. A failed Ready on a definition emits no Kubernetes Event, so the two
+  `sre-krateo-definition-*` alerts read the condition from these rows. `transform/definitions` trims
+  the Body to `metadata.name`, `namespace`, `generation` and `status.observedGeneration`,
+  `conditions` (`keep_keys`), then redacts JWTs. They sit in their own pipeline so the `k8s-events` tag
+  stays on events alone: `sre-kubernetes-events-missing` would otherwise read them as events. Volume
+  on krateo-057 (79 definitions, 2026-11-28): 22,752 rows a day, about 1.2 KB each trimmed (4.3 KB
+  untrimmed, before `managedFields`), about 27 MB a day uncompressed. **The receiver needs the resource
+  at startup**: it is checked against API discovery, and a cluster without core-provider's CRD
+  (`compositiondefinitions.core.krateo.io`) crash-loops the collector, the events pipeline with it,
+  until the CRD is served. The ClusterRole gains `list` and `watch` on it.
 - `config.processors.transform` (0.3.13): redacts JWTs on `logs`. It targets `body.string` because
   `k8sobjects` bodies are nested maps, which `replace_pattern(body, ...)` leaves untouched. A record
   is converted to a string only when the pattern matches, so clean records stay maps.
