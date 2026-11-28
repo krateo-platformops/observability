@@ -22,8 +22,14 @@ The id-shaped patterns also match real technical tokens. Two exemptions, both ex
 Only the id-shaped patterns can be exempted; the private-repository and team patterns never can,
 and nothing in --text input or a file path can be allowlisted.
 
+Planted control: before anything is read, the same matcher runs over a string that is known to
+leak (a decision id, a plan step id and the private repository name). The string is built at
+run time, so this repository never contains it. If the matcher finds nothing in it, the
+matcher is broken and a clean result on the real files would mean nothing: exit 2.
+tests/public-text-check.py proves the control fires when the matcher is stubbed out.
+
 Usage: public-text-check.py [ROOT] [--text FILE ...]
-Exit 1 on any finding.
+Exit 1 on any finding, 2 if the planted control was not caught.
 """
 import pathlib
 import re
@@ -108,7 +114,23 @@ def scan(name, text, allow, used, findings, listed=frozenset()):
                 findings.append(f"{name}:{lineno}: {what} {tok!r}: {line.strip()[:160]}")
 
 
+def planted_leak():
+    """A string that must produce findings, assembled here so no file in the repository holds it."""
+    return "decided in " + "D" + "3" + " for " + "X" + "5" + ", see " + "krateo-a" + "cmp" + "\n"
+
+
+def control_findings():
+    findings = []
+    scan("(planted control)", planted_leak(), {}, set(), findings)
+    return findings
+
+
 def main(argv):
+    found = control_findings()
+    if not found:
+        print("public-text-check: the check found nothing in a planted leak: the matcher is broken")
+        return 2
+    print(f"public-text-check: planted control caught ({len(found)} findings in a known leak)")
     texts, args = [], []
     it = iter(argv)
     for a in it:

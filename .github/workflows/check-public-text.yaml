@@ -29,6 +29,9 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      # The gate's own test: its planted control must fire when the matcher is stubbed out.
+      - name: Self-test the planted control
+        run: python3 tests/public-text-check.py
       - name: Collect the pull request's title, body and commit messages
         if: github.event_name == 'pull_request'
         env:
