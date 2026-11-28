@@ -1,7 +1,7 @@
 ---
 type: Configuration
 title: observability — the default alert set
-description: The 37 Alert CRs (31 core, 6 extended) and 4 Metric CRs the chart seeds, among them the SLO objects adopted from krateo-057 (0.1.52), the measured evidence behind every filter and threshold, and the three rules that decide whether an Alert can fire at all — `where` is ClickHouse SQL and not the Lucene the CRD advertises, severity needs `otel-collector-daemonset` ≥ 0.1.17 and JSON logs, and log alerts must exclude the observability stack or they diagnose themselves. Event alerts skip the DELETED copy of an expired Event.
+description: The 38 Alert CRs (32 core, 6 extended) and 4 Metric CRs the chart seeds, among them the SLO objects adopted from krateo-057 (0.1.52), the measured evidence behind every filter and threshold, and the three rules that decide whether an Alert can fire at all — `where` is ClickHouse SQL and not the Lucene the CRD advertises, severity needs `otel-collector-daemonset` ≥ 0.1.17 and JSON logs, and log alerts must exclude the observability stack or they diagnose themselves. Event alerts skip the DELETED copy of an expired Event.
 resource: oci://ghcr.io/krateo-platformops/charts/krateo-observability
 tags: [alerting, alerts, observability, clickhouse, hyperdx, sre, runbook]
 timestamp: 2026-09-18T00:00:00Z
@@ -120,6 +120,7 @@ about whether your cluster has that problem.
 | `sre-node-preempted` | core | events | above 0 | 5m | 0 |
 | `sre-loadbalancer-failure` | core | events | above 0 | 15m | 2,008 |
 | `sre-telemetry-pipeline-stalled` | core | all rows | below 100 | 15m | 58,302,075 |
+| `sre-alert-provider-stalled` | core | logs, krateo-alert-provider's "External resource is up to date" | below 5 | 15m | 331,491; per 15m window 462 to 495 (see below) |
 | `sre-krateo-composition-reconcile-error` | core | logs | above 2 | 15m | 59,811 |
 | `sre-krateo-provider-connection-failure` | core | events | above 10 | 15m | 1,706 |
 | `sre-rest-controller-vendor-5xx` | core | logs, generated REST controllers' failed observes with a vendor 5xx | above 19 for 2 consecutive windows | 15m | 328 (1 firing run, the 2026-11-12 outage) |
@@ -201,20 +202,46 @@ questions, and two of them are easy to confuse:
 |---|---|---|
 | `state` | HyperDX's raw state: `OK`, `ALERT` or `PENDING`. Empty means not evaluated yet | every read |
 | `stateSince` | when `state` last **changed** to its current value (a `lastTransitionTime`) | only when a read finds a different `state`, never on a re-read |
-| `stateObservedAt` | when the provider last **read** the state | every read |
+| `stateObservedAt` | when the provider last **observed a change** of the state (or first set the field). Until alert-provider#140 shipped (after 0.2.88) it was stamped on every read, as a heartbeat | only when a read finds a different `state` or the field is empty |
 | `okSince` | when the alert last turned `OK`; unset while it is anything else | on the transition to `OK` |
 
 - **"Firing since"** is `stateSince` on an `ALERT` alert. `stateObservedAt` is not a firing time:
-  an alert ALERTing for three days has a `stateObservedAt` from the last minute.
+  with the current alert-provider it moves with `stateSince`, apart from an alert that was `ALERT` or
+  `PENDING` before `stateSince` existed.
 - For an `OK` alert, `stateSince` equals `okSince`.
 - **Empty `stateSince` means unknown, never now.** An alert that was already `ALERT` or `PENDING`
   when its cluster upgraded to an alert-provider with the field (0.2.83, PR #119) has an empty
   `stateSince` until its next transition, because the provider never saw when that state began.
-- A stale `stateObservedAt` means the provider stopped reading, not that the alert stopped firing.
-  `Ready` stays as it was.
+- **A stale `stateObservedAt` no longer means the provider stopped.** Since alert-provider#140 a
+  quiet pass writes nothing, so an alert that has been `OK` for a month has a month-old stamp.
+  `Ready` stays as the last pass left it, too. The provider's liveness is the alert
+  `sre-alert-provider-stalled` (below). An older alert-provider still stamps every pass, so there
+  both readings of the field hold.
 
 The field exists from alert-provider 0.2.83 (charts `alert-provider` and `alert-provider-crds`). A
 cluster on an older release has no `stateSince` at all.
+
+### `sre-alert-provider-stalled`: liveness from the logs
+
+alert-provider has no status field, metric or span that exists on every pass and nothing else.
+`status.stateObservedAt` was one until it stopped being a heartbeat. Its `reconcile` spans are kept
+by tail sampling only when the pass acted (104 an hour on krateo-057, against 1,980 passes), and its
+metrics are the container's (`container.cpu.time`, `k8s.pod.uptime`), which say the process lives,
+not that it evaluates. What every pass does leave, written before and regardless of any status write,
+is provider-runtime's INFO line `External resource is up to date`, one per Alert per pass.
+
+The `where` pins `ServiceName = 'krateo-alert-provider'` because 81 services log the same sentence
+(every generated REST controller; alert-provider is 1,980 of the 17,221 rows an hour on krateo-057).
+Measured on krateo-057 over 7 days: 331,491 rows, 671 complete 15-minute windows, **lowest window
+462, highest 495** (33 Alerts at one pass a minute is 495), none empty. `below 5`: one Alert alone
+is 15 a window, so the alert fires on a stall, a restart loop, or HyperDX refusing every pass, and
+stays quiet on any real count.
+
+Limits: it reads a provider-runtime log message, so a provider-runtime release that renames or
+silences that line makes it fire; `tests/alert-provider-stalled-docker.py` pins the sentence in a
+replay, and the runbook names the line. A `below` alert also fires when the rows cannot arrive, the
+log pipeline included, so it fires together with `sre-telemetry-pipeline-stalled` then. The
+runbook says to start there.
 
 ## Threshold calibration
 

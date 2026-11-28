@@ -299,7 +299,13 @@ type: application
 # source for it. A `below` alert also fires when the metric stops, which now includes ClickHouse not
 # answering. NEEDS otel-collector-daemonset 0.1.39, ROLLED FIRST: on an older collector the new
 # metric does not exist and the alert fires on the empty window.
-version: 0.1.60
+# 0.1.61: core alert sre-alert-provider-stalled: fewer than 5 "External resource is up to date" rows from
+# krateo-alert-provider in 15 minutes. alert-provider stopped stamping status.stateObservedAt on every pass
+# (the stamp woke every watcher of Alerts once a minute), and that stamp was the only thing showing a
+# provider that had stopped, so liveness is read from the logs instead. Measured on krateo-057 over 7 days:
+# 495 rows per 15m healthy (33 Alerts), lowest window 462, no empty window. Default render: one more Alert CR
+# (32 core, 38 with defaultAlerts.extended).
+version: 0.1.61
 appVersion: "3.5.0"
 dependencies:
   - name: clickstack

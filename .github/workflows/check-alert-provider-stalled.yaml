@@ -1,0 +1,46 @@
+# sre-alert-provider-stalled: renders the Alert and checks its where, threshold and window, then replays
+# alert-provider's logs (33 Alerts a minute, a stall, a roll's 2-minute gap, a throttled provider, and
+# other services logging the same sentence) in the ClickHouse version krateo-057 runs, against otel_logs
+# from 057's own DDL, through the rendered where. No cluster needed.
+#
+# It is a separate workflow on purpose. lint.yaml is the org-wide canonical chart-repo lint,
+# identical across every krateo-* chart repo.
+
+name: check-alert-provider-stalled
+
+on:
+  pull_request:
+    paths:
+      - "charts/krateo-observability/**"
+      - "tests/alert-provider-stalled-docker.py"
+      - "tests/fixtures/otel_logs.sql"
+      - ".github/workflows/check-alert-provider-stalled.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "charts/krateo-observability/**"
+      - "tests/alert-provider-stalled-docker.py"
+      - "tests/fixtures/otel_logs.sql"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v3.19.0
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Add the dependency repository
+        run: helm repo add clickstack https://clickhouse.github.io/ClickStack-helm-charts
+      - name: Render the Alert and replay alert-provider's logs through its where
+        run: python3 tests/alert-provider-stalled-docker.py .
