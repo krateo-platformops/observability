@@ -15,7 +15,7 @@
 {{- $sub := index .Subcharts "opentelemetry-collector" }}
 {{- $full := include "otel-collector-daemonset.collectorConfig" $sub | fromYaml }}
 {{- if hasKey $full "Error" }}{{ fail (printf "auditCollector: the agents' config does not parse: %s" $full.Error) }}{{ end }}
-{{- $names := list "logs/audit" "logs/gateway" "logs/gateway-audit" "logs/gateway-audit-excluded" "metrics/gateway-audit-excluded" }}
+{{- $names := list "logs/audit" "logs/gateway" "logs/gateway-audit" "logs/gateway-audit-excluded" "metrics/gateway-audit-excluded" "logs/gateway-refused-hop" "metrics/gateway-refused-hop" }}
 {{- $pipelines := dict }}
 {{- $used := dict "receivers" dict "processors" dict "exporters" dict "connectors" dict }}
 {{- range $n := $names }}

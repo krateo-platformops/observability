@@ -167,7 +167,8 @@ def render(root):
     cm = {d["metadata"]["name"]: yaml.safe_load(d["data"]["relay"]) for d in on if d["kind"] == "ConfigMap" and "relay" in d["data"]}
     audit = cm.pop(f"{REL}-audit")
     agent = next(iter(cm.values()))
-    check(set(audit["service"]["pipelines"]) == {"logs/audit", "logs/gateway", "logs/gateway-audit", "logs/gateway-audit-excluded", "metrics/gateway-audit-excluded"}
+    check(set(audit["service"]["pipelines"]) == {"logs/audit", "logs/gateway", "logs/gateway-audit", "logs/gateway-audit-excluded", "metrics/gateway-audit-excluded",
+                                                      "logs/gateway-refused-hop", "metrics/gateway-refused-hop"}
           and all(audit["service"]["pipelines"][n] == agent["service"]["pipelines"][n] for n in audit["service"]["pipelines"]), "its pipelines are the agents' own")
     diff = [(kind, n) for kind in ("receivers", "processors", "exporters", "connectors") for n in audit[kind] if audit[kind][n] != agent[kind][n]]
     check(diff == [("processors", "k8sattributes")] and "filter" not in audit["processors"]["k8sattributes"]
