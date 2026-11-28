@@ -124,10 +124,10 @@ tests:
             thresholdType: above
             description: "The spanmetrics connector folded SLI span combinations into its overflow row: more label combinations than its cap (2,000 per service per agent per flush), most likely from new http.route values. Those calls no longer carry service.name, http.route or krateo.sli.error, so the latency and error SLIs under-count without going NO DATA. Find the new routes in otel_traces and raise the cap or narrow the dimensions."
 
-  - it: ships the five in the core tier (31 Alerts, 4 Metrics by default)
+  - it: ships the five in the core tier (32 Alerts, 4 Metrics by default)
     asserts:
       - hasDocuments:
-          count: 31
+          count: 32
         template: default-alerts.yaml
       - hasDocuments:
           count: 4
