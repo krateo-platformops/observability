@@ -64,7 +64,10 @@ def registry_get(host, repo, ref):
         tok = ghcr_token(repo)
         auth = {"Authorization": "Bearer " + tok} if tok else {}
         base = "https://ghcr.io/v2"
-    elif host in ("docker.io", "registry-1.docker.io"):
+    elif host in ("docker.io", "registry-1.docker.io", "docker.hyperdx.io"):
+        # docker.hyperdx.io is a vanity name for Docker Hub: its /v2/ answers 307 to
+        # registry-1.docker.io and its 401 challenge points at auth.docker.io. Without this
+        # branch it is queried without a token and every hyperdx image reads as unresolvable.
         # Docker Hub official images ("rabbitmq", "nginx") live under library/. Querying
         # the bare name returns 401, which would flag every official image as broken —
         # the exact cry-wolf failure that gets a check disabled.
@@ -111,7 +114,7 @@ def registry_get(host, repo, ref):
         return 0
 
 
-NAME_NEAR = re.compile(r'^\s*(?:chart|name):\s*"?([a-z0-9][a-z0-9._-]*)"?\s*$')
+NAME_NEAR = re.compile(r'^\s*(?:-\s+)?(?:chart|name):\s*"?([a-z0-9][a-z0-9._-]*)"?\s*$')
 
 
 def pair_name(lines, idx):
@@ -195,18 +198,58 @@ def split_image(lines, idx):
     return host, path, tag
 
 
-def scan(root):
+# The denominator. A run that examines almost nothing must not print "all references
+# resolve": this script once did exactly that, pruning charts/ and seeing 3 chart refs and 0
+# image refs while the real image pins live in charts/*/values.yaml.
+# Measured 2026-11-28 (python3 hack/preflight-refs.py --list .): 4 chart refs, 4 image refs.
+# Floor = measured minus ~20%, rounded down. Raise it when the count grows; lower it only
+# with a reason.
+MIN_CHARTS = 3
+MIN_IMAGES = 3
+
+# Directories the scan skips, each with the reason. Everything else is scanned, charts/ included.
+#   .git, node_modules      not ours: VCS metadata and installed JS dependencies.
+#   charts/<name>/charts/   vendored subcharts (`helm dependency build`): upstream's refs, which
+#                           we do not pin and which are not ours to fix. Detected by path shape,
+#                           not by the name "charts", so charts/ itself is scanned.
+#   testdata/, test/, tests/  fixtures: refs there are deliberately fake or illustrative.
+#                           Checked 2026-11-28: skipping them changes no count.
+# (ops/ and docs/design/ were skipped before; no justification survives -- docs/design/ does
+# not exist, and the refs under ops/ are deployable harness refs. Scanning them changed no
+# count on 2026-11-28, so they are no longer skipped.) Packaged *.tgz are never read: only
+# .yaml/.yml/.tpl/.json files are opened.
+PRUNE_NAMES = (".git", "node_modules")
+FIXTURE_SEGS = ("testdata/", "test/", "tests/")
+
+
+def is_vendored_chart_dir(root, dirpath, name):
+    """True for charts/<chart>/charts, the helm dependency directory."""
+    rel = os.path.relpath(os.path.join(dirpath, name), root).replace(os.sep, "/").split("/")
+    return len(rel) >= 3 and rel[-1] == "charts" and rel[-3] == "charts"
+
+
+def is_fixture_dir(rel_dir):
+    return any(("/" + rel_dir).find("/" + seg) != -1 for seg in FIXTURE_SEGS)
+
+
+def scan(root, skipped=None):
     charts, images = set(), set()
+    skipped = skipped if skipped is not None else set()
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in (".git", "node_modules", "charts")]
+        keep = []
+        for d in dirnames:
+            full = os.path.relpath(os.path.join(dirpath, d), root).replace(os.sep, "/")
+            if d in PRUNE_NAMES or is_vendored_chart_dir(root, dirpath, d):
+                skipped.add(full + "/")
+            else:
+                keep.append(d)
+        dirnames[:] = keep
         for fn in filenames:
             if not fn.endswith((".yaml", ".yml", ".tpl", ".json")):
                 continue
-            # Non-deployment files: unit-test inputs, design docs, dev-ops scratch. Their
-            # refs are fixtures/illustrations, not things a cluster pulls. A real chart
-            # value or compositiondefinition is never under these.
             rel_dir = os.path.relpath(dirpath, root).replace(os.sep, "/") + "/"
-            if any(seg in rel_dir for seg in ("testdata/", "/test/", "/tests/", "docs/design/", "ops/")):
+            if is_fixture_dir(rel_dir):
+                skipped.add(rel_dir)
                 continue
             p = os.path.join(dirpath, fn)
             try:
@@ -228,6 +271,14 @@ def scan(root):
                             path = path + "/" + nm
                         else:
                             continue  # repo root with no resolvable chart name — not a ref
+                    elif "/" not in path:
+                        # `repository: oci://ghcr.io/clickhouse` in a Chart.yaml dependency: the
+                        # path is an org, the chart is the neighbouring `name:`. Querying the org
+                        # as if it were a chart is a false 401 (seen 2026-11-28).
+                        nm = pair_name(lines, i)
+                        if not nm:
+                            continue
+                        path = path + "/" + nm
                     if ver and not is_placeholder_ref(host, path):
                         charts.add((host, path, ver, rel, i + 1))
                 sp = split_image(lines, i)
@@ -253,9 +304,36 @@ def scan(root):
     return charts, images
 
 
+def floor_errors(charts, images):
+    errs = []
+    if len(charts) < MIN_CHARTS:
+        errs.append("examined %d chart refs, expected at least %d" % (len(charts), MIN_CHARTS))
+    if len(images) < MIN_IMAGES:
+        errs.append("examined %d image refs, expected at least %d" % (len(images), MIN_IMAGES))
+    return errs
+
+
 def main():
-    root = sys.argv[1] if len(sys.argv) > 1 else "."
-    charts, images = scan(root)
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    list_only = "--list" in sys.argv[1:]   # no network; used by tests/preflight-refs.py only
+    root = args[0] if args else "."
+    skipped = set()
+    charts, images = scan(root, skipped)
+    print("skipped directories (%d): %s" % (len(skipped), ", ".join(sorted(skipped)) or "none"))
+    errs = floor_errors(charts, images)
+    if errs:
+        for e in errs:
+            print("FAIL: " + e)
+        print("The scan examined too little to say anything: a green result here would mean nothing.")
+        return 1
+    if list_only:
+        print("chart references (%d)" % len(charts))
+        for host, path, ver, rel, ln in sorted(charts):
+            print("  %s/%s:%s   (%s:%d)" % (host, path, ver, rel, ln))
+        print("image references (%d)" % len(images))
+        for host, path, tag, rel, ln in sorted(images):
+            print("  %s/%s:%s   (%s:%d)" % (host, path, tag, rel, ln))
+        return 0
     bad = []
 
     print("chart references (%d)" % len(charts))
