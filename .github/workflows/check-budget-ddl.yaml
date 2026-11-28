@@ -1,0 +1,33 @@
+# The budget alert's DDL (ops/budget-alert/ddl): ops/budget-alert/tests/smoke-budget-ddl.sh runs
+# 001_budgets.sql and 002_budget_status.sql in a throwaway ClickHouse (clickhouse-local from the
+# pinned-by-tag server image, in docker) against stub showback rollups, and checks the statuses
+# budget_status materializes: FINAL, tag scope, period windows, the enabled flag. Docker only, no
+# cluster; about 5 s once the image is pulled.
+#
+# It is a separate workflow on purpose. lint.yaml is the org-wide canonical chart-repo lint,
+# identical across every krateo-* chart repo.
+
+name: check-budget-ddl
+
+on:
+  pull_request:
+    paths:
+      - "ops/budget-alert/**"
+      - ".github/workflows/check-budget-ddl.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "ops/budget-alert/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run the DDL against clickhouse-local
+        # Exit 2 means no ClickHouse runtime was found (the script skips); that must fail here.
+        run: bash ops/budget-alert/tests/smoke-budget-ddl.sh

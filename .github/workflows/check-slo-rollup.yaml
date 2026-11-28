@@ -1,0 +1,53 @@
+# krateo-slo-rollup's helm-unittest suite (charts/krateo-slo-rollup/tests/rollup_test.yaml): the
+# rollup DDL and the apply script as the chart renders them. No cluster needed. Until this
+# workflow existed only krateo-observability's suite was run (check-slo-defaults).
+#
+# The end-to-end run of the same chart on kind is in kind-suites.yaml (weekly).
+#
+# It is a separate workflow on purpose. lint.yaml is the org-wide canonical chart-repo lint,
+# identical across every krateo-* chart repo.
+
+name: check-slo-rollup
+
+on:
+  pull_request:
+    paths:
+      - "charts/krateo-slo-rollup/**"
+      - ".github/workflows/check-slo-rollup.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "charts/krateo-slo-rollup/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unittest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v3.19.0
+      - name: Install helm-unittest
+        # Required: the step fails rather than skips without it.
+        run: helm plugin install https://github.com/helm-unittest/helm-unittest --version 1.2.1
+      - name: helm unittest
+        run: |
+          set -euo pipefail
+          helm unittest charts/krateo-slo-rollup | tee "$RUNNER_TEMP/unittest.out"
+          # Floor on the number of cases, so a suite that quietly loses its tests (a renamed file,
+          # a glob that matches nothing) cannot pass. Measured 2026-11-28: 7 cases; raise it when
+          # cases are added, lower it only when one is deliberately removed.
+          MIN_CASES=7
+          line="$(grep -E '^Tests:' "$RUNNER_TEMP/unittest.out" || true)"
+          [ -n "$line" ] || { echo "no 'Tests:' summary line in helm unittest's output"; exit 1; }
+          passed="$(sed -E 's/^Tests:[[:space:]]+([0-9]+) passed.*/\1/' <<<"$line")"
+          total="$(sed -E 's/.* ([0-9]+) total.*/\1/' <<<"$line")"
+          echo "helm unittest: $passed passed of $total (floor $MIN_CASES)"
+          [[ "$passed" =~ ^[0-9]+$ && "$total" =~ ^[0-9]+$ ]] || { echo "could not parse: $line"; exit 1; }
+          [ "$passed" -eq "$total" ] || { echo "$passed of $total cases passed"; exit 1; }
+          [ "$total" -ge "$MIN_CASES" ] || { echo "only $total cases ran, expected at least $MIN_CASES"; exit 1; }
