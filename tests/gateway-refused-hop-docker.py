@@ -47,9 +47,9 @@ PIPES = ["logs/gateway-audit", "logs/gateway-audit-excluded", "metrics/gateway-a
          "logs/gateway-refused-hop", "metrics/gateway-refused-hop"]
 CONNECTORS = ["count/gateway-audit-excluded", "count/gateway-refused-hop"]
 METRIC = "krateo.gateway.refused_hops"
-# The denominator: records sent per shape. Examined 2026-11-28 with the cases below: 26. The test
+# The denominator: records sent per shape. Examined 2026-11-28 with the cases below: 31 (29, plus the two pinned cases). The test
 # fails if fewer were sent or read back, so a case list emptied by mistake cannot print "passed".
-MIN_CASES = 24
+MIN_CASES = 29
 FAILS = []
 LABEL = ""
 ROUTE = {"mcp": "krateo-system/agentgateway-policies-mcp-repo-mcp-server",
@@ -161,12 +161,22 @@ def build_cases():
     add("verified denial, plain http", rec(ROUTE["a2a"], reason="Authorization", user="alice@example.com"), "excluded")
     add("empty-string user is unverified", rec(ROUTE["mcp"], reason="Authorization", user=""), "refused", ("mcp", "authorization_failed", "403"))
     # Not a refusal at all.
+    cases.extend(pinned_cases())
     add("200", rec(ROUTE["mcp"], status=200), "excluded")
     add("200 with user", rec(ROUTE["a2a"], status=200, user="alice@example.com"), "excluded")
     add("backend 403, reason Upstream", rec(ROUTE["a2a"], reason="Upstream", status=403), "excluded")
     add("backend 403, no reason", rec(ROUTE["a2a"], status=403), "excluded")
     add("mcp protocol error, no user (projected, a failure row)", rec(ROUTE["mcp"], protocol="mcp", reason="MCP", status=405, method="PUT"), "audit")
     return cases
+
+
+def pinned_cases():
+    """The two cases snowplow asked to see pinned by name (2026-11-28)."""
+    up = rec(ROUTE["a2a"], reason="Upstream", status=403)  # no user: an upstream's own 403 on a public route
+    after = rec(ROUTE["a2a"], protocol="a2a", reason="Authorization", status=403, user="alice@example.com",
+                extra={"a2a.method": "message/send", "principal": "human"})
+    return [("PINNED 1: empty user, reason Upstream, 403", up, "excluded", None),
+            ("PINNED 2: refused AFTER verification (user present, Authorization, 403)", after, "audit", None)]
 
 
 def wrap_shape(req, shape16):
@@ -292,6 +302,22 @@ def main():
             verify(cases, logs, pts, audit, work)
         finally:
             shutil.rmtree(work, ignore_errors=True)
+
+    # PINNED cases, on their own so the counts are unambiguous (both shapes).
+    for label, shape16 in (("agentgateway < 1.6", False), ("agentgateway >= 1.6", True)):
+        LABEL = label
+        up_case, after_case = pinned_cases()
+        work, logs, pts, audit = run(image, cfg, [up_case], shape16)
+        shutil.rmtree(work, ignore_errors=True)
+        check(sum(p[4] for p in pts if p[0] == METRIC) == 0 and sum(p[4] for p in pts if p[0] == "krateo.gateway_audit.excluded") == 1
+              and not audit, f"{up_case[0]}: NOT counted as refused (counted as excluded, no audit row)")
+        work, logs, pts, audit = run(image, cfg, [after_case], shape16)
+        shutil.rmtree(work, ignore_errors=True)
+        attrs = [{a["key"]: next(iter(a["value"].values())) for a in lr["attributes"]}
+                 for line in audit for rl in line.get("resourceLogs", []) for sl in rl["scopeLogs"] for lr in sl["logRecords"]]
+        check(sum(p[4] for p in pts if p[0] == METRIC) == 0, f"{after_case[0]}: NOT counted as refused")
+        check(len(attrs) == 1 and attrs[0].get("krateo.audit.outcome") == "denied" and attrs[0].get("user.name") == "alice@example.com",
+              f"{after_case[0]}: lands as ONE denied krateo_audit row with its actor ({[(a.get('krateo.audit.outcome'), a.get('user.name')) for a in attrs]})")
 
     # CONTROL: the same records with the refusal markers (reason) removed count zero; a test that
     # counted everything it was sent would pass the checks above and fail here.
