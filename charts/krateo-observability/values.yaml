@@ -53,12 +53,17 @@ hyperdxLoadBalancer:
 # present (installer applies clickstack-agent first). Standalone-without-CRD → enabled:false.
 # Metric resources that metric alerts in defaultAlerts refer to by name (metricRef).
 defaultMetrics:
-  - name: k8s-volume-available
-    metricName: k8s.volume.available
+  # The ClickHouse data filesystem's free bytes, as ClickHouse itself reports them on its Prometheus
+  # port, scraped by otel-collector-daemonset >= 0.1.39 (prometheus/clickhouse). It replaces
+  # k8s-volume-available (kubeletstats' k8s.volume.available), which needs the node's kubelet and so
+  # has no source in a child cluster. One series, no labels to pin. The Disk* rows are not used: in
+  # system.asynchronous_metrics they read nan.
+  - name: clickhouse-disk-available
+    metricName: ClickHouseAsyncMetrics_FilesystemMainPathAvailableBytes
     type: gauge
     unit: By
-    collectedBy: kubeletstatsreceiver
-    description: Bytes free on a pod volume. otel-collector-daemonset reports PersistentVolumeClaims only.
+    collectedBy: prometheusreceiver
+    description: Bytes free on the filesystem holding ClickHouse's data, as ClickHouse reports it. otel-collector-daemonset scrapes it from ClickHouse's own Prometheus port.
   - name: k8s-container-ready
     metricName: k8s.container.ready
     type: gauge
@@ -492,19 +497,25 @@ defaultAlerts:
     # The ClickHouse data volume. A full disk is how this stack has failed before (installer#393):
     # inserts fail, collectors buffer and crash, and telemetry stops. The threshold is 20% of the
     # 15Gi claimed in clickhouse.cluster.spec.dataVolumeClaimSpec below. Change both together.
-    # `below` also fires if the metric stops: the volume stopped reporting, which is worth knowing.
-    # Needs otel-collector-daemonset 0.1.19 or later for k8s.volume.*, and alert-provider 0.2.61.
+    # The source is ClickHouse's own free-bytes figure for its data filesystem (metric
+    # clickhouse-disk-available), scraped by otel-collector-daemonset 0.1.39 or later from ClickHouse's
+    # Prometheus port. Until 0.1.60 it was kubeletstats' k8s.volume.available on the claim, which
+    # needs the node's kubelet and so did not exist in a child cluster. Same bytes (statfs of the
+    # same filesystem), so the threshold did not move.
+    # `below` also fires if the metric stops, and now that includes ClickHouse itself not
+    # answering: the kubelet reported the volume with ClickHouse down, the scrape does not. The
+    # description says "less than 3 GiB free", which is then not the cause; step 1 of the runbook
+    # is to find out. Needs alert-provider 0.2.61, and the collector rolled FIRST: on an older
+    # collector the metric does not exist and this fires on the empty window.
     - name: sre-clickhouse-disk-headroom
       tier: core
       displayName: ClickHouse disk below 20% free
-      metricRef: k8s-volume-available
+      metricRef: clickhouse-disk-available
       aggregation: min
-      labels:
-        k8s.persistentvolumeclaim.name: clickhouse-storage-volume-krateo-clickstack-clickhouse-clickhouse-0-0-0
       threshold: 3221225472
       thresholdType: below
       interval: 15m
-      description: "The telemetry database's disk has less than 3 GiB free, and audit partitions must never be dropped to free it."
+      description: "The telemetry database's disk has less than 3 GiB free, or ClickHouse has stopped reporting it; audit partitions must never be dropped to free space."
       runbook: "1. Confirm the disk is the problem. A Ready ClickHouse pod is not evidence of a healthy disk. The definitive symptom is Code: 243 or 'Not enough space' in the ClickHouse log (kubectl logs -n krateo-system -l clickhouse.altinity.com/chi=krateo-clickstack-clickhouse --tail=200). 2. Find and stop the source first, or the disk fills again within the hour: SELECT ServiceName, count() FROM default.otel_logs WHERE Timestamp > now() - INTERVAL 1 HOUR GROUP BY ServiceName ORDER BY 2 DESC LIMIT 10 (works with the shipped otelcollector credentials). Rule out your own diagnostic Jobs, whose output the collectors scrape back into otel_logs. 3. Make room. Expand the volume through the Installer CR, componentValues krateo-observability clickstack.clickhouse.cluster.spec.dataVolumeClaimSpec.resources.requests.storage, never by editing the PVC (the reconciler reverts it). Expansion is one-way; FileSystemResizePending clears when the pod restarts. Or, with an ops principal, drop the oldest partition of otel_logs or otel_traces. 4. NEVER drop a partition of krateo_audit, krateo_audit_seal or krateo_audit_worm: the audit trail is sealed, and removing rows is indistinguishable from tampering. If the audit tables filled the disk, escalate instead. Full runbook: docs/clickhouse-disk-full.md in krateo-platformops/observability."
     # THE SLO ALERTS (0.1.52), the CMP API objectives over the span metrics above, each judged on
     # the last hour. Their specs are the CMP team's SLO generator output, the objects proven on

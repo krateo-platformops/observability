@@ -358,6 +358,40 @@ Wraps the same upstream chart in `daemonset` mode, stock
   `k8s.volume.available` and `k8s.volume.capacity` and turning the inode metrics off.
   `filter/pvc-volumes` keeps only PersistentVolumeClaims, because most pod volumes are
   configmaps, tokens and emptyDirs. Each point carries `k8s.persistentvolumeclaim.name`.
+- **ClickHouse disk metrics** (0.1.39): receiver `prometheus/clickhouse` scrapes ClickHouse's own
+  Prometheus port (`prometheus`, 9363) and keeps `ClickHouseAsyncMetrics_FilesystemMainPathAvailableBytes`
+  and `...TotalBytes`, through pipeline `metrics/clickhouse` to `otel_metrics_gauge`. The alert
+  `sre-clickhouse-disk-headroom` (krateo-observability 0.1.60) reads the first. It needs no kubelet, so
+  a child has it too. Only the agent on ClickHouse's node scrapes (a `spec.nodeName` selector); the
+  `Disk*` rows are not used, they read `nan` in `system.asynchronous_metrics`.
+- **Child mode** (0.1.39): `opentelemetry-collector.mode: deployment`, for a cluster whose baseline Pod
+  Security Standard refuses the daemonset's hostPath volumes and hostPorts (a vcluster child). One
+  Deployment takes OTLP and writes it to that cluster's ClickHouse; it reads no node. No new value:
+  the mode is the switch. The values the installer in the child sets, also in
+  `tests/fixtures/collector-child-values.yaml`:
+
+  ```yaml
+  opentelemetry-collector:
+    mode: deployment
+    presets:
+      logsCollection: {enabled: false}
+      hostMetrics: {enabled: false}
+      kubeletMetrics: {enabled: false}
+    clusterRole:
+      rules: []      # drops nodes/proxy; the pods, namespaces and replicasets k8sattributes reads stay
+  ```
+
+  With `mode: deployment` and any of the three presets on, the render **fails**, naming the preset:
+  they add hostPath volumes and the receivers that read the node. The template then removes
+  `filelog`, `hostmetrics` and `kubeletstats`, the `logs` pipeline only filelog fed, and the
+  `${env:K8S_NODE_NAME}` node selector of the two scrape jobs (a Deployment has no such variable).
+  Everything the OTLP receiver feeds stays, `logs/audit` and its `clickhouse/audit` exporter
+  included, which is what creates `krateo_audit`. New in this mode only: pipeline `logs/otlp-pods`,
+  which writes an app's other OTLP logs to `otel_logs` (the daemonset reads them from the node's log
+  files instead), with `filter/otlp-pods` dropping what `logs/audit` and `logs/gateway` already take.
+  `<release>-local` selects the Deployment's pods (`component: standalone-collector`) with
+  `internalTrafficPolicy: Cluster`, one replica being on one node. Container logs of a child's pods
+  are not collected: only what apps send over OTLP. Not tested here: vcluster itself.
 - **Credential headers** (0.1.24): `transform` drops every span, span-event and log attribute
   whose **key** names a credential header (`delete_matching_keys(attributes, "(?i)(authorization|cookie)")`:
   `http.header.Authorization`, `http.request.header.authorization`, `…cookie`, `set-cookie`,

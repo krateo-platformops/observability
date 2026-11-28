@@ -31,6 +31,9 @@ For each chart, with its default values and again with .github/ci/injected-globa
      under `receivers:` is named by a pipeline and every extension under `extensions:` is in
      `service.extensions`, and the other way round. A declared receiver no pipeline names is never
      started, so it only reads as if it were.
+otel-collector-daemonset is rendered a second time in child mode (tests/fixtures/collector-child-values.yaml,
+mode deployment), where checks 1 to 7 hold too and the host receivers must be absent, since the
+child's receivers are pruned in the template for the same Helm 4 reason.
 Then, for each wrapper, with one of upstream's default receivers named by a pipeline and its config
 left alone (NAMED_DEFAULTS below), under both binaries:
   8. the receiver is in the config with upstream's default value, and check 7 holds: a wrapper leaves
@@ -51,6 +54,8 @@ import sys
 import yaml
 
 INJECTED = ".github/ci/injected-global.yaml"
+# The values of a child cluster's collector (otel-collector-daemonset 0.1.39, mode deployment).
+CHILD_VALUES = "tests/fixtures/collector-child-values.yaml"
 NAMESPACE = "krateo-system"
 EMPTY_SHA = hashlib.sha256(b"").hexdigest()
 # Override used to prove the pods roll: one config value every chart has.
@@ -78,6 +83,15 @@ CHARTS = {
         ("receivers", "zipkin"): "upstream default receiver; no pipeline runs it, its port is closed",
         ("receivers", "prometheus"): "upstream default self-scrape; no pipeline runs it",
     }),
+}
+
+# What the child render of otel-collector-daemonset must not carry, besides what its daemonset
+# render must not: the host receivers and the node variable only the daemonset sets.
+CHILD_FORBIDDEN = {
+    ("receivers", "filelog"): "reads the node's files; a child has none to read",
+    ("receivers", "hostmetrics"): "reads the node; a child has none",
+    ("receivers", "kubeletstats"): "reads the node's kubelet; a child has none",
+    ("service", "pipelines", "logs"): "the pipeline only filelog fed",
 }
 
 # Upstream 0.170.0's default config of the receivers the wrappers leave out (upstream values.yaml,
@@ -314,9 +328,14 @@ def main():
     v3, v4 = version(h3), version(h4)
     check(v3.startswith("v3."), f"first binary is Helm 3 ({v3})")
     check(v4.startswith("v4."), f"second binary is Helm 4 ({v4})")
-    for chart, (kind, forbidden) in CHARTS.items():
-        for label, args in (("defaults", []), ("injected global", ["-f", str(root / INJECTED)])):
-            tag = f"{chart}, {label}"
+    # (name, chart, workload kind, forbidden paths, values arguments before each case's own).
+    cases = [(chart, chart, kind, forbidden, []) for chart, (kind, forbidden) in CHARTS.items()]
+    daemonset_forbidden = CHARTS["otel-collector-daemonset"][1]
+    cases.append(("otel-collector-daemonset (child mode)", "otel-collector-daemonset", "Deployment",
+                  {**daemonset_forbidden, **CHILD_FORBIDDEN}, ["-f", str(root / CHILD_VALUES)]))
+    for name, chart, kind, forbidden, base in cases:
+        for label, args in (("defaults", base), ("injected global", [*base, "-f", str(root / INJECTED)])):
+            tag = f"{name}, {label}"
             renders = {}
             for v, helm in ((v3, h3), (v4, h4)):
                 docs, err = render(helm, root, chart, args)

@@ -1,0 +1,12 @@
+# The values a child cluster's collector instance sets (otel-collector-daemonset 0.1.39): the block
+# the installer in the child writes into componentValues. One place, read by
+# tests/collector-child-render.py, tests/collector-helm4-render.py, tests/clickhouse-disk-scrape-docker.py
+# and tests/collector-child-pss-kind.py, so the docs, the tests and what ships cannot drift apart.
+opentelemetry-collector:
+  mode: deployment
+  presets:
+    logsCollection: {enabled: false}
+    hostMetrics: {enabled: false}
+    kubeletMetrics: {enabled: false}
+  clusterRole:
+    rules: []

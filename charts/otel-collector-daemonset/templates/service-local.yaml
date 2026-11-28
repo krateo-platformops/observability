@@ -1,4 +1,11 @@
 {{- if .Values.localService.enabled }}
+{{- /* CHILD MODE (opentelemetry-collector.mode: deployment): the pods are the Deployment's, labelled
+       component standalone-collector, not the agents' agent-collector, so the selector follows the
+       mode or this Service would have no endpoints. And Local would be wrong: there is one replica,
+       on one node, so every other node's senders would be refused. A child has no node-local
+       agent to prefer; the policy is Cluster. The daemonset keeps agent-collector and Local. */}}
+{{- $child := eq (index .Values "opentelemetry-collector" "mode") "deployment" }}
+{{- $component := ternary "standalone-collector" "agent-collector" $child }}
 {{- /* A NODE-LOCAL Service for OTLP senders that can only be given a Service name, not their node's IP
        (the composition-dynamic-controllers read their endpoint from a ConfigMap via envFrom, which
        can't carry a downward-API value).
@@ -26,14 +33,14 @@ metadata:
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     app.kubernetes.io/part-of: krateo
-    component: agent-collector
+    component: {{ $component }}
 spec:
   type: ClusterIP
-  internalTrafficPolicy: Local
+  internalTrafficPolicy: {{ ternary "Cluster" "Local" $child }}
   selector:
     app.kubernetes.io/name: opentelemetry-collector
     app.kubernetes.io/instance: {{ .Release.Name }}
-    component: agent-collector
+    component: {{ $component }}
   ports:
     - name: otlp
       port: 4317

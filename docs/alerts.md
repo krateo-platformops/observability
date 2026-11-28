@@ -130,7 +130,7 @@ about whether your cluster has that problem.
 | `sre-jwt-in-telemetry` | core | logs | above 1 | 15m | 0 (see below) |
 | `sre-jwt-in-traces` | core | traces | above 1 | 15m | 0 of 45,180 spans |
 | `sre-credential-header-in-traces` | core | traces | above 1 | 15m | 0 in 7 days (0.1.38) |
-| `sre-clickhouse-disk-headroom` | core | metric `k8s.volume.available`, min | below 3 GiB | 15m | n/a (0.1.30) |
+| `sre-clickhouse-disk-headroom` | core | metric `ClickHouseAsyncMetrics_FilesystemMainPathAvailableBytes`, min | below 3 GiB | 15m | n/a (0.1.30; source changed in 0.1.60) |
 | `cmp-slo-api-p95` | core | metric `traces.span.metrics.duration` (snowplow), p95 | above 500 ms | 1h | n/a (0.1.52, see below) |
 | `cmp-slo-api-error-ratio` | core | metric `traces.span.metrics.calls` (snowplow), share with `krateo.sli.error` = "true" | above 0.001 | 1h | n/a (0.1.52) |
 | `cmp-slo-metrics-overflow` | core | metric `traces.span.metrics.calls`, overflow rows | above 1 | 1h | n/a (0.1.52) |
@@ -254,6 +254,15 @@ alert: the minimum of `k8s.volume.available` on the ClickHouse claim, below 3 Gi
 `otel-collector-daemonset` 0.1.19 for `k8s.volume.*`, and `alert-provider` 0.2.61, whose `labels`
 match resource attributes. With an older `alert-provider` the claim filter matches no points, and a
 `below` alert fires on the empty window. See installer#393.
+
+**Source since 0.1.60.** It reads `ClickHouseAsyncMetrics_FilesystemMainPathAvailableBytes` instead,
+ClickHouse's own figure for the filesystem its data is on (Metric `clickhouse-disk-available`),
+scraped from its Prometheus port by `otel-collector-daemonset` 0.1.39 or later. The kubelet is no longer
+needed, so a cluster without kubelet access (a child) has the alert too. The threshold, interval and
+runbook are unchanged, and there is no claim label to pin. Two consequences: the collector must be
+rolled to 0.1.39 **before** this chart, or the metric does not exist yet and the alert fires on the
+empty window; and `below` also fires when ClickHouse stops answering its metrics port, which the
+kubelet's figure did not (the description says so, and step 1 of the runbook is to find out which).
 
 `sre-jwt-in-telemetry` carries `observability.krateo.io/analysis: human` from 0.1.30: its incident
 goes to a person with no RCA, so no agent reads the leaked row.

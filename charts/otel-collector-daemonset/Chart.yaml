@@ -219,7 +219,27 @@ type: application
 # roll, a drain or a pod deletion no longer drops records from senders that do not retry a refused
 # connection. A crash still can. Nothing uses it until a sender's OTLP logs endpoint points at it.
 # Also corrects service-local.yaml's comment: senders do not all retry while an agent restarts.
-version: 0.1.38
+# 0.1.39: CHILD MODE, for a cluster that cannot run the daemonset (a vcluster child enforces the
+# baseline Pod Security Standard, which refuses hostPath and hostPort, and a node's files and kubelet
+# belong to other tenants). opentelemetry-collector.mode: deployment selects it; no new value, so no
+# schema default reaches an existing instance. The chart then renders a one-replica Deployment with no
+# hostPath, hostPort or hostNetwork, and prunes filelog, hostmetrics, kubeletstats, the pipelines they
+# alone fed, and the ${env:K8S_NODE_NAME} node selector from the agentgateway scrape. A deployment
+# with logsCollection, hostMetrics or kubeletMetrics still on FAILS to render and names the fix. The
+# OTLP receivers and every OTLP pipeline stay, logs/audit and its clickhouse/audit exporter (which
+# creates krateo_audit) included. New in child mode only: pipeline logs/otlp-pods, so an app's OTLP
+# logs reach otel_logs, with filter/otlp-pods dropping what logs/audit and logs/gateway already take.
+# The Service <release>-local selects the Deployment's pods (component standalone-collector, not
+# agent-collector) with internalTrafficPolicy Cluster. The block to set: docs/configuration.md.
+# ALSO in the daemonset, and in every mode: receiver prometheus/clickhouse and pipeline
+# metrics/clickhouse scrape ClickHouse's own Prometheus port (:9363) for
+# ClickHouseAsyncMetrics_FilesystemMainPath(Available|Total)Bytes, so the disk-headroom alert has a
+# source that needs no kubelet (krateo-observability 0.1.60 switches the alert to it). The daemonset
+# agent that runs on ClickHouse's node scrapes it (a spec.nodeName selector), one sample set per
+# minute. The ONLY change to a daemonset render is those two entries and the config checksum, so
+# every agent rolls once. Added value paths: opentelemetry-collector.config.receivers.prometheus/clickhouse
+# and config.service.pipelines.metrics/clickhouse; none renamed or removed.
+version: 0.1.39
 appVersion: "0.158.0"
 dependencies:
   - name: opentelemetry-collector
