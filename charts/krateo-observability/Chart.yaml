@@ -308,8 +308,12 @@ type: application
 # metadata.generation has differed from status.observedGeneration at every pull for 30 minutes.
 # hack/check-cd-ready-reasons.py holds the first alert's list to the table at the tag pinned in
 # hack/core-provider-pin.yaml. tests/definition-alerts-docker.py runs both where clauses in
-# ClickHouse. On krateo-057 on 2026-11-28 all 79 definitions are Ready=True with the two generations
-# equal, so neither alert has a row to fire on.
+# ClickHouse. sre-krateo-definition-converging-too-long covers what neither does: a definition that
+# sits in Ready=False Creating or Deleting, or Ready=Unknown NotObserved, for longer than a bound
+# (defaultAlerts.definitionConvergenceBounds, by reason: 30, 120 and 15 minutes), by the condition's
+# own lastTransitionTime. The bounds are one map the alert's where is built from, and the gate fails
+# on a converging or next-pass reason in the table with no bound. On krateo-057 on 2026-11-28 all 79 definitions are Ready=True with the two generations
+# equal, so no alert has a row to fire on.
 version: 0.1.61
 appVersion: "3.5.0"
 dependencies:

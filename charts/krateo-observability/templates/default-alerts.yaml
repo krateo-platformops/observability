@@ -42,7 +42,22 @@ spec:
   {{- with .source }}
   source: {{ . }}
   {{- end }}
-  {{- with .where }}
+  {{- /* withConvergenceBounds: the where gains the clause built from defaultAlerts.definitionConvergenceBounds,
+         one term per reason (map order is by key): that reason, that status, a lastTransitionTime
+         older than its minutes. The reason and status are matched to a plain word before they are
+         put in SQL. */}}
+  {{- $where := .where }}
+  {{- if .withConvergenceBounds }}
+  {{- $terms := list }}
+  {{- range $reason, $b := $.Values.defaultAlerts.definitionConvergenceBounds }}
+  {{- if not (regexMatch "^[A-Za-z]+$" $reason) }}{{ fail (printf "definitionConvergenceBounds: reason %q is not a plain word" $reason) }}{{ end }}
+  {{- if not (has $b.status (list "True" "False" "Unknown")) }}{{ fail (printf "definitionConvergenceBounds %s: status %q is not True, False or Unknown" $reason $b.status) }}{{ end }}
+  {{- $terms = append $terms (printf "(JSONExtractString(c, 'reason') = '%s' AND JSONExtractString(c, 'status') = '%s' AND parseDateTimeBestEffortOrNull(JSONExtractString(c, 'lastTransitionTime')) < now() - INTERVAL %d MINUTE)" $reason $b.status (int $b.minutes)) }}
+  {{- end }}
+  {{- if not $terms }}{{ fail (printf "defaultAlerts %s: withConvergenceBounds with no definitionConvergenceBounds" $a.name) }}{{ end }}
+  {{- $where = printf "%s AND arrayExists(c -> JSONExtractString(c, 'type') = 'Ready' AND (%s), JSONExtractArrayRaw(Body, 'status', 'conditions'))" $where (join " OR " $terms) }}
+  {{- end }}
+  {{- with $where }}
   where: {{ . | quote }}
   {{- end }}
   {{- with .metricRef }}

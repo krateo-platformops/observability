@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The two CompositionDefinition alerts: the rendered Alerts, and their where run in ClickHouse.
+"""The three CompositionDefinition alerts: the rendered Alerts, and their where run in ClickHouse.
 
   sre-krateo-definition-not-ready          a Ready=False whose reason is not a not-failing one: >= 2 rows
                                            in a 15m window (a window holds 3 pulls of one definition)
@@ -33,6 +33,15 @@ metadata.name, namespace, generation and status.observedGeneration, conditions.
          missed pull fires; equal at the latest pull does not; a rolling set of definitions each
          unequal for one pull does not; no observedGeneration does not; one definition's stuck rows
          do not carry another's
+   converging too long (sre-krateo-definition-converging-too-long; bounds from
+         defaultAlerts.definitionConvergenceBounds: Creating 30m, Deleting 120m, NotObserved 15m)
+     (f) Creating since 31 minutes fires, since 29 and 10 do not; Deleting since 121 fires, since 119
+         and 10 do not; NotObserved (Unknown) since 16 fires, since 5 does not
+         a wrong status for the reason, a healthy reason, a failed reason and another source do not
+         never both: Creating for 40 minutes with generation = observedGeneration is this alert's and
+         not the stuck alert's; with generation lagging for 30 minutes it is the stuck alert's and not
+         this one's
+         one place: raising Creating's bound in the values changes that term of the where and no other
    leak  every other Alert's where (both tiers), over the rows of 79 definitions (some failed), counts 0
          (but the ones that count every row, `where: ''`)
    runbooks  both runbooks' first query runs and names the definition
@@ -58,9 +67,10 @@ DDL = "tests/fixtures/otel_logs.sql"
 CHART = "charts/krateo-observability"
 NOT_READY = "sre-krateo-definition-not-ready"
 STUCK = "sre-krateo-definition-stuck-converging"
+TOO_LONG = "sre-krateo-definition-converging-too-long"
 NS = "krateo-system"
 WINDOW = "INTERVAL 15 MINUTE"
-# 2026-11-28: the render with the extended tier has 29 log Alerts other than these two;
+# 2026-11-28: the render with the extended tier has 29 log Alerts other than these three;
 # fewer means the render lost its alerts and the leak case examined nothing.
 MIN_LEAK_ALERTS = 24
 FAILED_AT_2_13_136 = ("Unavailable", "RemoteChartUnreachable", "SchemaDefaultContradiction",
@@ -123,6 +133,13 @@ def ready(status, reason):
     return [cond("Ready", status, reason), cond("Synced", "True", "ReconcileSuccess")]
 
 
+def ready_since(status, reason, now, minutes):
+    """Ready in `reason` since `minutes` before now, by the condition's own lastTransitionTime."""
+    c = cond("Ready", status, reason)
+    c["lastTransitionTime"] = (now - dt.timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return [c, cond("Synced", "True", "ReconcileSuccess")]
+
+
 def pulls(now, minutes, every=5, skip=()):
     """Pull instants over the last `minutes`, 5 minutes apart, the latest 2.5 minutes ago."""
     out, k = [], 0
@@ -170,9 +187,10 @@ def main():
     root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
     alerts = render(root)
     everything = render(root, "--set", "defaultAlerts.extended=true")   # the leak case reads both tiers
-    specs = {n: alerts.get(n) for n in (NOT_READY, STUCK)}
+    specs = {n: alerts.get(n) for n in (NOT_READY, STUCK, TOO_LONG)}
     for n, want in ((NOT_READY, {"threshold": 2, "thresholdType": "above", "interval": "15m"}),
-                    (STUCK, {"threshold": 1, "thresholdType": "above", "interval": "15m"})):
+                    (STUCK, {"threshold": 1, "thresholdType": "above", "interval": "15m"}),
+                    (TOO_LONG, {"threshold": 1, "thresholdType": "above", "interval": "15m"})):
         spec = specs[n]
         check(spec is not None, f"{n} renders with the default values")
         if spec is None:
@@ -189,7 +207,13 @@ def main():
     if not all(specs.values()):
         print(f"\n{FAILS} failure(s)")
         sys.exit(1)
-    nr, st = specs[NOT_READY]["where"], specs[STUCK]["where"]
+    nr, st, tl = specs[NOT_READY]["where"], specs[STUCK]["where"], specs[TOO_LONG]["where"]
+    # One place: the bound is a value, and the where follows it, one term only.
+    moved = render(root, "--set", "defaultAlerts.definitionConvergenceBounds.Creating.minutes=45")[TOO_LONG]["where"]
+    check(tl.count("INTERVAL 30 MINUTE") == 1 and moved == tl.replace("INTERVAL 30 MINUTE", "INTERVAL 45 MINUTE"),
+          "(f) the Creating bound is a value: 30 to 45 changes that term of the where and no other")
+    check(all(f"= '{r}' AND" in tl for r in ("Creating", "Deleting", "NotObserved")) and "INTERVAL 120 MINUTE" in tl
+          and "INTERVAL 15 MINUTE" in tl, "(f) the where has a term for Creating, Deleting and NotObserved at 30, 120 and 15 minutes")
     thr = specs[NOT_READY]["threshold"]
     with DB(root) as db:
         now = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
@@ -262,14 +286,53 @@ def main():
         stuck_case([row(t, "alpha", ready("False", "Creating"), generation=2, observed=1) for t in pulls(now, 30)], "(e) stuck while Creating", True)
         stuck_case([row(t, "alpha", ready("False", "Creating"), generation=2, observed=1, source="k8s-events") for t in pulls(now, 30)], "control: stuck rows under 'k8s-events'", False)
 
+        # (f) converging too long
+        def tl_case(rows, label, want, window_where=tl):
+            db.load(rows)
+            n = db.count(window_where)
+            check((n >= 1) == want, f"{label}: {n} rows, {'fires' if n else 'does not fire'}"
+                  + ("" if (n >= 1) == want else f", want {'fires' if want else 'silent'}"))
+
+        def held(status, reason, minutes, **kw):
+            return [row(t, "alpha", ready_since(status, reason, now, minutes), **kw) for t in pulls(now, 10)]
+
+        for status, reason, over, under in (("False", "Creating", 31, 10), ("False", "Deleting", 121, 10),
+                                            ("Unknown", "NotObserved", 16, 5)):
+            tl_case(held(status, reason, over), f"(f) Ready={status} {reason} since {over} minutes", True)
+            tl_case(held(status, reason, under), f"(f) Ready={status} {reason} since {under} minutes", False)
+        tl_case(held("False", "Creating", 29), "(f) Creating since 29 minutes (bound 30)", False)
+        tl_case(held("False", "Deleting", 119), "(f) Deleting since 119 minutes (bound 120)", False)
+        tl_case(held("Unknown", "NotObserved", 14), "(f) NotObserved since 14 minutes (bound 15)", False)
+        tl_case(held("True", "Creating", 300), "(f) Creating with status True, long", False)
+        tl_case(held("Unknown", "Creating", 300), "(f) Creating with status Unknown, long", False)
+        tl_case(held("False", "NotObserved", 300), "(f) NotObserved with status False, long", False)
+        tl_case(held("True", "Available", 5000), "(f) Ready=True Available since 5000 minutes", False)
+        tl_case(held("False", "ValuesSchemaMissing", 5000), "(f) a failed reason since 5000 minutes (the not-Ready alert's)", False)
+        tl_case(held("False", "Creating", 300, source="k8s-events"), "(f) control: Creating since 300 minutes under 'k8s-events'", False)
+        tl_case([row(t, "alpha", [dict(cond("Ready", "False", "Creating"), lastTransitionTime="not a time")]) for t in pulls(now, 10)],
+                "(f) an unparseable lastTransitionTime", False)
+        # Never both: the same definition, Creating 40 minutes.
+        agree = [row(t, "alpha", ready_since("False", "Creating", now, 40), generation=2, observed=2) for t in pulls(now, 30)]
+        db.load(agree)
+        a, b = db.count(tl), db.count(st)
+        check(a >= 1 and b == 0, f"(f) Creating 40 minutes, generation = observedGeneration: converging-too-long {a} rows, stuck {b}")
+        lag = [row(t, "alpha", ready_since("False", "Creating", now, 40), generation=3, observed=2) for t in pulls(now, 30)]
+        db.load(lag)
+        a, b = db.count(tl), db.count(st)
+        check(a == 0 and b >= 1, f"(f) Creating 40 minutes, generation lagging for 30: converging-too-long {a} rows, stuck {b}")
+        # Neither pair fires on one definition's rows twice over: every case above, and the other
+        # alerts, count a definition's row in one alert only.
+        db.load(agree)
+        check(db.count(nr) == 0, "(f) the not-Ready alert does not count a Creating definition either")
+
         # leak: the rows of 79 definitions, some failed and some stuck, against every other log Alert
         rows = []
         for t in pulls(now, 30):
             for i in range(79):
-                kind = ready("False", "ValuesSchemaMissing") if i < 3 else ok
+                kind = ready("False", "ValuesSchemaMissing") if i < 3 else ready_since("False", "Creating", now, 180) if i == 7 else ok
                 rows.append(row(t, f"def-{i:02d}", kind, generation=2 if i == 5 else 1, observed=1))
         db.load(rows)
-        check(db.count(nr) > 0 and db.count(st) > 0, f"79 definitions x 7 pulls: both alerts count rows ({db.count(nr)}, {db.count(st)})")
+        check(db.count(nr) > 0 and db.count(st) > 0 and db.count(tl) > 0, f"79 definitions x 7 pulls: all three alerts count rows ({db.count(nr)}, {db.count(st)}, {db.count(tl)})")
         others = {n: s for n, s in everything.items() if n not in specs and s.get("where") and "metricRef" not in s and not s.get("source")}
         check(len(others) >= MIN_LEAK_ALERTS, f"{len(others)} other log Alerts examined, at least {MIN_LEAK_ALERTS}")
         leaks = {}

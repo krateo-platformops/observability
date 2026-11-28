@@ -638,7 +638,7 @@ relative to the window boundaries.
 When both alerts fire, they open two incidents for one outage. The persistent alert's runbook says to
 work the outage under the fast alert.
 
-## `sre-krateo-definition-not-ready` and `sre-krateo-definition-stuck-converging` (0.1.61)
+## `sre-krateo-definition-not-ready`, `-stuck-converging` and `-converging-too-long` (0.1.61)
 
 A CompositionDefinition that cannot become Ready is not an error in core-provider: the reconcile
 succeeds and writes `status.conditions[type=Ready]` False. No Kubernetes Event says so and none says
@@ -691,3 +691,33 @@ Creating, Deleting, NotObserved and the three healthy reasons do not; a failed R
 `''`, no source or another resource does not; unequal generations for 30 minutes fire, for 10 and 20
 do not, one missed pull still fires, two do not, recovery at the latest pull does not. On krateo-057 on
 2026-11-28 all 79 definitions are Ready=True with equal generations: no row would count.
+
+**`sre-krateo-definition-converging-too-long`** (above 0, 15m). A controller that never rolls out sits
+at `Ready=False` `Creating` with `generation` equal to `observedGeneration`, and a deletion held by a
+finalizer sits at `Deleting`: neither is a failed reason and neither moves a generation, so the two
+alerts above are silent on them. This one fires on a Ready condition in a converging reason (or
+`Unknown` `NotObserved`, clearance `next pass`) whose own `lastTransitionTime` is older than a bound.
+The bounds are one map, `defaultAlerts.definitionConvergenceBounds` in values, by reason with the
+condition's status, and the `where` is built from it (`withConvergenceBounds`), so changing one is a
+values change and nothing else:
+
+| reason | status | bound | why |
+|---|---|---|---|
+| `Creating` | False | 30 min | twice core-provider's 15-minute helm wait (`COMPOSITION_CONTROLLER_HELM_TIMEOUT`), above an image pull and a rollout |
+| `Deleting` | False | 120 min | the definition waits for its compositions to delete, each up to a 15-minute helm wait plus the 5-minute child teardown grace (core-provider's `composition.go`): about six in a row |
+| `NotObserved` | Unknown | 15 min | clears on the next reconcile; 15 minutes is three pulls of the same condition |
+
+No file in this repository bounds a definition's deletion (there is no helm uninstall hook timeout
+here), so 120 minutes is derived from core-provider's figures above, not measured. Move it with the
+values when a real deletion takes longer. `hack/check-cd-ready-reasons.py` fails when the table has a
+converging reason, or one whose clearance is `next pass`, with no bound, a bound for a reason that is
+neither, or a bound whose status is not the table's.
+
+**Never both with the stuck alert.** This `where` leaves out a row whose `generation` differs from its
+`observedGeneration`, and the stuck alert counts only such rows, so no row is in both. A definition in
+`Creating` for hours that is then edited belongs to the stuck alert once its generation has lagged for 25
+minutes; for the few pulls between, neither counts it. Run in `tests/definition-alerts-docker.py`:
+`Creating` since 31 minutes fires and since 29 and 10 does not, `Deleting` since 121 fires and since
+119 and 10 does not, `NotObserved` since 16 fires and since 14 and 5 does not; the wrong status for a
+reason, a healthy or a failed reason, another source and an unparseable time do not; and `Creating`
+for 40 minutes is this alert's with equal generations and the stuck alert's with a lagging one.

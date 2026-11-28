@@ -6,6 +6,8 @@ rows of core-provider 2.13.136's reason table (tests/fixtures/cd-ready-reasons-2
 and against variants of it, offline:
 
   the saved table, as is                              -> exit 0
+  a converging or next-pass reason with no bound, a
+  bound removed, stale or with the wrong status       -> exit 1, naming it
   an extra HEALTHY Ready reason                       -> exit 1, naming it (the alert would fire on it)
   an extra CONVERGING reason, an extra UNEVALUATED    -> exit 1 each
   a healthy reason the table dropped                  -> exit 1 (the alert lists one that is gone)
@@ -33,6 +35,18 @@ BASE = json.loads((ROOT / "tests/fixtures/cd-ready-reasons-2.13.136-ready-rows.j
 FAILS = 0
 
 
+def with_values(mutate, table=None):
+    """The gate against the repo's values.yaml after mutate(values), and the saved table or `table`."""
+    import yaml
+    values = yaml.safe_load((ROOT / "charts/krateo-observability/values.yaml").read_text())
+    mutate(values)
+    with tempfile.TemporaryDirectory() as d:
+        v, t = pathlib.Path(d) / "v.yaml", pathlib.Path(d) / "t.json"
+        v.write_text(yaml.safe_dump(values))
+        t.write_text(json.dumps(table or BASE))
+        return run("--table", str(t), "--values", str(v))
+
+
 def run(*args):
     r = subprocess.run([sys.executable, str(GATE), "--root", str(ROOT), *args], capture_output=True, text=True)
     return r.returncode, r.stdout + r.stderr
@@ -58,7 +72,8 @@ def variant(fn):
 
 
 def add(verdict, reason, status="True"):
-    return lambda rows: rows.append({"condition": "Ready", "status": status, "reason": reason, "verdict": verdict})
+    return lambda rows: rows.append({"condition": "Ready", "status": status, "reason": reason, "verdict": verdict,
+                                      "clearance": {"kind": "indefinite" if verdict == "failed" else "steady"}})
 
 
 assert sum(r["condition"] == "Ready" for r in BASE["reasons"]) == 12, "the fixture is the 12 Ready rows"
@@ -92,6 +107,20 @@ rc, out = with_table(variant(add("failed", "SomethingNewBroke", status="False"))
 check("an extra failed reason passes (the alert fires on it already)", rc == 0, out)
 rc, out = with_table(variant(lambda rows: rows.remove(next(r for r in rows if r["reason"] == "Deleting"))))
 check("one Ready row fewer than the floor is refused", rc == 1 and "fewer than" in out, out)
+# The bounds of sre-krateo-definition-converging-too-long.
+rc, out = with_table(variant(add("converging", "Upgrading", status="False")))
+check("a new converging reason with no bound is refused and named (by the bound check as well)", rc == 1 and "Upgrading" in out, out)
+rc, out = with_table(variant(lambda rows: rows.append({"condition": "Ready", "status": "Unknown", "reason": "Waiting",
+                                                       "verdict": "unevaluated", "clearance": {"kind": "next pass"}})))
+check("a new next-pass reason with no bound is refused and named", rc == 1 and "Waiting" in out and "no bound" in out, out)
+rc, out = with_values(lambda v: v["defaultAlerts"]["definitionConvergenceBounds"].pop("Deleting"))
+check("a bound removed is refused and named", rc == 1 and "Deleting" in out and "no bound" in out, out)
+rc, out = with_values(lambda v: v["defaultAlerts"]["definitionConvergenceBounds"].update({"Available": {"status": "True", "minutes": 5}}))
+check("a bound for a healthy reason is refused", rc == 1 and "Available" in out, out)
+rc, out = with_values(lambda v: v["defaultAlerts"]["definitionConvergenceBounds"]["Creating"].update({"status": "True"}))
+check("a bound with the wrong status is refused", rc == 1 and "status" in out, out)
+rc, out = with_values(lambda v: v["defaultAlerts"].pop("definitionConvergenceBounds"))
+check("no bounds at all is refused", rc == 1, out)
 rc, out = with_table({"reasons": []})
 check("an empty table is refused", rc == 1 and "0 Ready rows" in out, out)
 rc, out = with_table(variant(add("mystery", "Odd", status="False")))

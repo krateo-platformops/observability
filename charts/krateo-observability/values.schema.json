@@ -438,6 +438,10 @@
                 "minimum": 1,
                 "maximum": 60,
                 "description": "Fire only once the condition has held for this many consecutive intervals; counted per series with groupBy. An empty interval restarts the count. Needs alert-provider 0.2.64."
+              },
+              "withConvergenceBounds": {
+                "type": "boolean",
+                "description": "Append, to where, the clause that reads defaultAlerts.definitionConvergenceBounds: a Ready condition in one of those reasons and statuses, older than its bound."
               }
             }
           }
@@ -445,6 +449,34 @@
         "extended": {
           "type": "boolean",
           "description": "Also ship the extended tier: catch-all and baseline-relative alerts whose thresholds mean 'far above normal' rather than 'anything at all', and which need retuning per cluster."
+        },
+        "definitionConvergenceBounds": {
+          "type": "object",
+          "description": "How long a CompositionDefinition's Ready may stay in a converging (or next-pass) reason before sre-krateo-definition-converging-too-long fires, by reason. status is the condition's status for that reason; minutes counts from the condition's own lastTransitionTime. hack/check-cd-ready-reasons.py fails when core-provider's table has a converging or next-pass Ready reason with no entry here.",
+          "propertyNames": {
+            "pattern": "^[A-Za-z]+$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "minutes"
+            ],
+            "properties": {
+              "status": {
+                "enum": [
+                  "True",
+                  "False",
+                  "Unknown"
+                ]
+              },
+              "minutes": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
         }
       }
     },

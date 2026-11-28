@@ -1,107 +1,158 @@
 {
- "note": "Ready (and one Synced) rows of docs/cd-ready-reasons.json at core-provider 2.13.136, four fields each, for tests/check-cd-ready-reasons.py. Not the table: the gate reads the real one at the pinned tag.",
+ "note": "Ready (and one Synced) rows of docs/cd-ready-reasons.json at core-provider 2.13.136, five fields each, for tests/check-cd-ready-reasons.py. Not the table: the gate reads the real one at the pinned tag.",
  "reasons": [
   {
    "condition": "Ready",
    "status": "True",
    "reason": "Available",
-   "verdict": "healthy"
+   "verdict": "healthy",
+   "clearance": {
+    "kind": "steady"
+   }
   },
   {
    "condition": "Ready",
    "status": "True",
    "reason": "ScaledToZero",
-   "verdict": "healthy"
+   "verdict": "healthy",
+   "clearance": {
+    "kind": "steady"
+   }
   },
   {
    "condition": "Ready",
    "status": "False",
    "reason": "Creating",
-   "verdict": "converging"
+   "verdict": "converging",
+   "clearance": {
+    "kind": "indefinite"
+   }
   },
   {
    "condition": "Ready",
    "status": "False",
    "reason": "Unavailable",
-   "verdict": "failed"
+   "verdict": "failed",
+   "clearance": {
+    "kind": "indefinite"
+   }
   },
   {
    "condition": "Ready",
    "status": "False",
    "reason": "RemoteChartUnreachable",
-   "verdict": "failed"
+   "verdict": "failed",
+   "clearance": {
+    "kind": "indefinite"
+   }
   },
   {
    "condition": "Ready",
    "status": "False",
    "reason": "SchemaDefaultContradiction",
-   "verdict": "failed"
+   "verdict": "failed",
+   "clearance": {
+    "kind": "indefinite"
+   }
   },
   {
    "condition": "Ready",
    "status": "False",
    "reason": "ValuesSchemaMissing",
-   "verdict": "failed"
+   "verdict": "failed",
+   "clearance": {
+    "kind": "indefinite"
+   }
   },
   {
    "condition": "Ready",
    "status": "False",
    "reason": "DerivedNameTooLong",
-   "verdict": "failed"
+   "verdict": "failed",
+   "clearance": {
+    "kind": "indefinite"
+   }
   },
   {
    "condition": "Ready",
    "status": "False",
    "reason": "Deleting",
-   "verdict": "converging"
+   "verdict": "converging",
+   "clearance": {
+    "kind": "indefinite"
+   }
   },
   {
    "condition": "Ready",
    "status": "Unknown",
    "reason": "NotObserved",
-   "verdict": "unevaluated"
+   "verdict": "unevaluated",
+   "clearance": {
+    "kind": "next pass"
+   }
   },
   {
    "condition": "Ready",
    "status": "False",
    "reason": "CreateWithheldByPolicy",
-   "verdict": "failed"
+   "verdict": "failed",
+   "clearance": {
+    "kind": "indefinite"
+   }
   },
   {
    "condition": "Ready",
    "status": "True",
    "reason": "UpdateWithheldByPolicy",
-   "verdict": "healthy"
+   "verdict": "healthy",
+   "clearance": {
+    "kind": "indefinite"
+   }
   },
   {
    "condition": "Synced",
    "status": "True",
    "reason": "ReconcileSuccess",
-   "verdict": null
+   "verdict": null,
+   "clearance": {
+    "kind": "steady"
+   }
   },
   {
    "condition": "Synced",
    "status": "False",
    "reason": "ReconcileError",
-   "verdict": null
+   "verdict": null,
+   "clearance": {
+    "kind": "next pass"
+   }
   },
   {
    "condition": "Synced",
    "status": "False",
    "reason": "ReconcilePaused",
-   "verdict": null
+   "verdict": null,
+   "clearance": {
+    "kind": "steady"
+   }
   },
   {
    "condition": "Synced",
    "status": "False",
    "reason": "ManagementPolicyInvalid",
-   "verdict": null
+   "verdict": null,
+   "clearance": {
+    "kind": "indefinite"
+   }
   },
   {
    "condition": "Synced",
    "status": "False",
    "reason": "DeletionPolicyInvalid",
-   "verdict": null
+   "verdict": null,
+   "clearance": {
+    "kind": "indefinite"
+   }
   }
  ]
 }
