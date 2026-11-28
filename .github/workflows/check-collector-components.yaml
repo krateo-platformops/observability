@@ -34,5 +34,9 @@ jobs:
         run: pip install --quiet pyyaml
       - name: Add the dependency repository
         run: helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+      # The gate's own test: an unknown component must exit 1, an empty config must fail the
+      # per-chart floor, an unlisted otel-collector-* chart must fail.
+      - name: Self-test the gate
+        run: python3 tests/check-collector-components.py
       - name: Assert every configured component exists in the pinned image
         run: python3 hack/check-collector-components.py .
