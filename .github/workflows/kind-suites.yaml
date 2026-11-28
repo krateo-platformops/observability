@@ -1,0 +1,83 @@
+# The suites that need a kind cluster, run weekly and by hand (workflow_dispatch), not on pull
+# requests: each pulls ClickHouse (and for the upgrade suite MongoDB and HyperDX) images and takes
+# minutes. One job per suite. Nothing here holds a credential: kind clusters are created on the
+# runner and deleted with it, and the workflow has read-only contents permission.
+#
+#   audit-worm-e2e    charts/krateo-audit-worm/tests/e2e-kind.sh
+#   slo-rollup-e2e    charts/krateo-slo-rollup/tests/e2e-kind.sh
+#   clickstack-upgrade tests/clickstack-upgrade-kind.py (creates its own kind cluster)
+#
+# The kind suites that run on pull requests (audit-collector-kind.py, mongodb-skip-guard-kind.py)
+# stay in their own check-* workflows.
+
+name: kind-suites
+
+on:
+  schedule:
+    - cron: "17 4 * * 1" # Mondays 04:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-worm-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v3.19.0
+      - name: Create a kind cluster
+        uses: helm/kind-action@v1
+      - name: Seal and verify against a real ClickHouse (clickhouse-server 24.8.14.39-alpine)
+        env:
+          KUBECONFIG: /home/runner/.kube/config
+        run: bash charts/krateo-audit-worm/tests/e2e-kind.sh
+
+  slo-rollup-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v3.19.0
+      - name: Create a kind cluster
+        uses: helm/kind-action@v1
+      - name: Apply the rollup against a real ClickHouse (clickhouse-server 26.10.3.7)
+        env:
+          KUBECONFIG: /home/runner/.kube/config
+        run: bash charts/krateo-slo-rollup/tests/e2e-kind.sh
+
+  clickstack-upgrade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the old chart is read from history
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v3.19.0
+      - name: Install kind
+        uses: helm/kind-action@v1
+        with:
+          install_only: true
+      - name: Add the dependency repositories
+        run: |
+          helm repo add clickstack https://clickhouse.github.io/ClickStack-helm-charts
+          helm repo add mongodb https://mongodb.github.io/helm-charts
+      - name: Extract the old chart (krateo-observability 0.1.48, the version the suite was written from)
+        run: |
+          mkdir -p "$RUNNER_TEMP/old"
+          git archive 0516cd2ef10fba2c97ccbf9e192922b4aaf7297b charts/krateo-observability | tar -x -C "$RUNNER_TEMP/old"
+      - name: Upgrade the old chart to this checkout's on kind, with data in place
+        run: python3 tests/clickstack-upgrade-kind.py --from "$RUNNER_TEMP/old/charts/krateo-observability"
