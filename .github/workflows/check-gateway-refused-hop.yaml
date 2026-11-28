@@ -1,0 +1,50 @@
+# Where otel-collector-daemonset sends each OTLP log record, run in the pinned collector image.
+#
+# The gateway refused-hop count (krateo.gateway.refused_hops): the rendered gateway pipelines run on
+# synthetic access-log records in both agentgateway shapes, and the test checks which hops are counted
+# (refused before the caller was verified), by which route class and reason, that no identity, path or
+# address reaches a metric point, that the audit rows, the excluded count and this count are disjoint,
+# and that the child's config validates.
+#
+# A separate workflow on purpose: lint.yaml is the org-wide canonical chart-repo lint.
+
+name: check-gateway-refused-hop
+
+on:
+  pull_request:
+    paths:
+      - "charts/otel-collector-daemonset/**"
+      - "tests/gateway-refused-hop-docker.py"
+      - "tests/agentgateway_access_log_v16.py"
+      - "tests/fixtures/collector-child-values.yaml"
+      - ".github/workflows/check-gateway-refused-hop.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "charts/otel-collector-daemonset/**"
+      - "tests/gateway-refused-hop-docker.py"
+      - "tests/agentgateway_access_log_v16.py"
+      - "tests/fixtures/collector-child-values.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  refused-hop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v3.19.0
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+      - name: Add the dependency repository
+        run: helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+      - name: Count the refused hops and check what is counted
+        run: python3 tests/gateway-refused-hop-docker.py .
