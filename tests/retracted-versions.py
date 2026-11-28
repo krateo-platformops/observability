@@ -7,7 +7,8 @@ speak for another publisher; version and use are semver; use != version; and, un
 both `version` and `use` resolve in the OCI registry (a retraction of an unpublished version, or a
 replacement that doesn't exist, is a broken entry).
 
-Run: python3 tests/retracted-versions.py [--offline]
+Run: python3 tests/retracted-versions.py [--offline] [--file PATH]
+(--file checks another list than the repo's; tests/retracted-versions-refusal.py uses it to show refusals.)
 """
 import pathlib
 import re
@@ -43,7 +44,8 @@ def resolves(chart, version):
 
 def main():
     offline = "--offline" in sys.argv
-    doc = yaml.safe_load((ROOT / "retracted-versions.yaml").read_text())
+    path = pathlib.Path(sys.argv[sys.argv.index("--file") + 1]) if "--file" in sys.argv else ROOT / "retracted-versions.yaml"
+    doc = yaml.safe_load(path.read_text())
     check(isinstance(doc, dict) and isinstance(doc.get("retracted"), list), "`retracted` is a list")
     names = published_names()
     check(len(names) > 0, f"this repo publishes charts: {sorted(names)}")
@@ -61,8 +63,8 @@ def main():
             for c in e.get("charts") or []:
                 check(resolves(c, v), f"{tag}: {c} {v} is published (a retraction needs a real release)")
                 check(resolves(c, u), f"{tag}: {c} {u} (the replacement) is published")
-    # Negative control: a chart this repo does not publish must be refused.
-    check("frontend" not in names, "negative control: `frontend` is not one of this repo's charts")
+    # The refusal cases (an entry naming a chart this repo does not publish) are exercised by
+    # tests/retracted-versions-refusal.py, which runs this file against a temp list.
     print(f"\n{len(FAILS)} failed")
     sys.exit(1 if FAILS else 0)
 

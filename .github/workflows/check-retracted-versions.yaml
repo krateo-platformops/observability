@@ -8,6 +8,7 @@ on:
     paths:
       - retracted-versions.yaml
       - tests/retracted-versions.py
+      - tests/retracted-versions-refusal.py
       - .github/workflows/check-retracted-versions.yaml
       - charts/*/Chart.yaml
   push:
@@ -15,6 +16,9 @@ on:
     paths:
       - retracted-versions.yaml
       - tests/retracted-versions.py
+      - tests/retracted-versions-refusal.py
+      - .github/workflows/check-retracted-versions.yaml
+      - charts/*/Chart.yaml
   workflow_dispatch:
 
 permissions:
@@ -30,5 +34,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install pyyaml
+      # The refusal cases first: a list naming a chart this repo does not publish must FAIL the check.
+      - name: the check refuses a bad list
+        run: python3 tests/retracted-versions-refusal.py
       - name: retracted-versions.yaml
         run: python3 tests/retracted-versions.py
