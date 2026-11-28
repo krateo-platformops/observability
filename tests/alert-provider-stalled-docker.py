@@ -162,22 +162,22 @@ def build():
     # healthy: 33 Alerts, all day
     rows += passes(d, d + dt.timedelta(days=1), 33)
     # one alert, all day
-    d1 = t("2026-11-21T00:00:00Z")
-    rows += passes(d1, d1 + dt.timedelta(days=1), 1)
+    day_one = t("2026-11-21T00:00:00Z")
+    rows += passes(day_one, day_one + dt.timedelta(days=1), 1)
     # stall 10:07-10:47, with the controls arriving throughout the day
-    d2 = t("2026-11-22T00:00:00Z")
-    rows += passes(d2, d2 + dt.timedelta(hours=10, minutes=7), 33)
-    rows += passes(d2 + dt.timedelta(hours=10, minutes=47), d2 + dt.timedelta(days=1), 33)
+    day_stall = t("2026-11-22T00:00:00Z")
+    rows += passes(day_stall, day_stall + dt.timedelta(hours=10, minutes=7), 33)
+    rows += passes(day_stall + dt.timedelta(hours=10, minutes=47), day_stall + dt.timedelta(days=1), 33)
     # restart: a 2-minute gap
-    d3 = t("2026-11-23T00:00:00Z")
-    rows += passes(d3, d3 + dt.timedelta(hours=10), 33)
-    rows += passes(d3 + dt.timedelta(hours=10, minutes=2), d3 + dt.timedelta(days=1), 33)
+    day_roll = t("2026-11-23T00:00:00Z")
+    rows += passes(day_roll, day_roll + dt.timedelta(hours=10), 33)
+    rows += passes(day_roll + dt.timedelta(hours=10, minutes=2), day_roll + dt.timedelta(days=1), 33)
     # throttled: one pass in ten reaches the line (3 rows a window)
-    d4 = t("2026-11-24T00:00:00Z")
-    rows += passes(d4, d4 + dt.timedelta(days=1), 1, only=lambda k: k % 10 == 0)
+    day_throttled = t("2026-11-24T00:00:00Z")
+    rows += passes(day_throttled, day_throttled + dt.timedelta(days=1), 1, only=lambda k: k % 10 == 0)
     # controls, on the stall day and all day on the throttled one: the same sentence from other
     # services, the query text echoed by HyperDX, alert-provider's other lines, a container-less source
-    for day in (d2, d4):
+    for day in (day_stall, day_throttled):
         m = day
         while m < day + dt.timedelta(days=1):
             for i in range(17):
