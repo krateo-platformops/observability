@@ -325,6 +325,26 @@ defaultAlerts:
       thresholdType: below
       interval: 15m
       description: Almost no logs are arriving, so the other alerts may be blind.
+    # alert-provider's own liveness. Its status no longer says it is still evaluating (status.stateObservedAt
+    # moves only when a state changes), so this reads what a quiet pass leaves in the logs: provider-runtime's
+    # "External resource is up to date", one line per Alert per pass, written whether or not anything changed
+    # and whether or not a status write follows. The ServiceName pin matters: 81 services log the same
+    # sentence (every generated REST controller), alert-provider is 1,980 of 17,221 rows an hour on
+    # krateo-057. 33 Alerts x one pass a minute = 495 rows per 15m; the lowest of the 671 complete 15m
+    # windows in 7 days was 462, none were empty. below 5 is not the quiet cluster's count: one Alert
+    # alone is 15 per window, so a stall, a restart loop or HyperDX refusing every pass all fall under it.
+    # Rule 3 (self-echo) holds by the exact msg equality: HyperDX's query text is another service's row.
+    # A below alert also fires when these rows stop arriving for any reason, the log pipeline included;
+    # sre-telemetry-pipeline-stalled fires with it then, and the runbook says how to tell them apart.
+    - name: sre-alert-provider-stalled
+      tier: core
+      displayName: Alert provider stopped evaluating
+      where: ResourceAttributes['telemetry.source'] = '' AND ServiceName = 'krateo-alert-provider' AND JSONExtractString(Body, 'msg') = 'External resource is up to date'
+      threshold: 5
+      thresholdType: below
+      interval: 15m
+      description: alert-provider has logged fewer than 5 up-to-date passes in 15 minutes (a healthy one logs one per Alert per minute), so no Alert is being evaluated and every other alert may be blind.
+      runbook: "If sre-telemetry-pipeline-stalled is firing too, start there: these rows come through the same pipeline. Otherwise look at the krateo-alert-provider Deployment in krateo-system (pod Ready, restarts, OOMKilled) and its log: 'rate-limiting the provider' lines mean HyperDX is refusing every pass, a missing log means the process is stuck."
     # The last two clauses drop two errors controller-runtime retries on its own: a reconcile cut short
     # by shutdown ("context canceled") and an optimistic-lock conflict ("the object has been
     # modified"). Both appear whenever core-provider restarts in a roll. On krateo-057 they were every

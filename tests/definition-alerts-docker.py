@@ -70,7 +70,7 @@ STUCK = "sre-krateo-definition-stuck-converging"
 TOO_LONG = "sre-krateo-definition-converging-too-long"
 NS = "krateo-system"
 WINDOW = "INTERVAL 15 MINUTE"
-# 2026-11-28: the render with the extended tier has 29 log Alerts other than these three;
+# 2026-11-28: the render with the extended tier has 30 log Alerts other than these three;
 # fewer means the render lost its alerts and the leak case examined nothing.
 MIN_LEAK_ALERTS = 24
 FAILED_AT_2_13_136 = ("Unavailable", "RemoteChartUnreachable", "SchemaDefaultContradiction",

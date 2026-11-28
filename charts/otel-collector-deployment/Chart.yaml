@@ -120,7 +120,7 @@ type: application
 # logs/definitions: memory_limiter, resource/definitions, transform/definitions, batch). A failed
 # Ready on a definition is a successful reconcile that only writes status.conditions[type=Ready], so
 # core-provider emits no Event for it or for its clearing, and the condition itself is the source for
-# the two alerts in krateo-observability 0.1.61. The transform keeps metadata.name, namespace and
+# the three alerts in krateo-observability 0.1.62. The transform keeps metadata.name, namespace and
 # generation and status.observedGeneration and conditions (1.2 KB of 4.3 KB an object on krateo-057,
 # 79 definitions, before managedFields), then sweeps JWTs as the events pipeline does. The
 # ClusterRole gains list and watch on compositiondefinitions.core.krateo.io. The events pipeline and

@@ -299,8 +299,14 @@ type: application
 # source for it. A `below` alert also fires when the metric stops, which now includes ClickHouse not
 # answering. NEEDS otel-collector-daemonset 0.1.39, ROLLED FIRST: on an older collector the new
 # metric does not exist and the alert fires on the empty window.
-# 0.1.61: two alerts on the CompositionDefinition's own status, read by pull (otel-collector-deployment
-# 0.3.25, ROLLED FIRST: on an older collector no row has telemetry.source = 'k8s-objects', both
+# 0.1.61: core alert sre-alert-provider-stalled: fewer than 5 "External resource is up to date" rows from
+# krateo-alert-provider in 15 minutes. alert-provider stopped stamping status.stateObservedAt on every pass
+# (the stamp woke every watcher of Alerts once a minute), and that stamp was the only thing showing a
+# provider that had stopped, so liveness is read from the logs instead. Measured on krateo-057 over 7 days:
+# 495 rows per 15m healthy (33 Alerts), lowest window 462, no empty window. Default render: one more Alert CR
+# (32 core, 38 with defaultAlerts.extended).
+# 0.1.62: three alerts on the CompositionDefinition's own status, read by pull (otel-collector-deployment
+# 0.3.25, ROLLED FIRST: on an older collector no row has telemetry.source = 'k8s-objects', the
 # alerts count 0 and stay quiet, and nothing says they are blind).
 # sre-krateo-definition-not-ready fires on a Ready=False whose reason is not healthy, converging or
 # unevaluated in core-provider's reason table, so the six failed reasons of 2.13.136 and any reason a
@@ -314,7 +320,7 @@ type: application
 # own lastTransitionTime. The bounds are one map the alert's where is built from, and the gate fails
 # on a converging or next-pass reason in the table with no bound. On krateo-057 on 2026-11-28 all 79 definitions are Ready=True with the two generations
 # equal, so no alert has a row to fire on.
-version: 0.1.61
+version: 0.1.62
 appVersion: "3.5.0"
 dependencies:
   - name: clickstack
