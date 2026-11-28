@@ -69,6 +69,7 @@ SA = "krateo-clickstack"
 USERS = ["default", "app", "otelcollector", "sse_proxy", "snowplow_reader", "analyst", "mcp_reader",
          "nightly_reader", "audit_sealer", "audit_verifier", "otel_writer", "hyperdx", "slo_rollup",
          "usage_collector"]
+OPERATOR_USERS = {"operator"}  # created by the ClickHouse operator, not by this chart
 OTEL_LOGS_DDL = """CREATE TABLE IF NOT EXISTS default.otel_logs (
     Timestamp DateTime64(9) CODEC(Delta(8), ZSTD(1)),
     TimestampTime DateTime DEFAULT toDateTime(Timestamp),
@@ -525,7 +526,9 @@ def main():
         # The users and grants are the checkout's, not the old release's: the chart added users
         # (portal login 0.1.57, exec_reader 0.1.58, chops 0.1.59) and narrowed grants (the lockdown
         # releases) since 0.1.48. Say what moved, then hold the cluster to what the checkout declares.
-        want_users = expected.declared_users(root)
+        # `operator` is the ClickHouse operator's own management user: not the chart's, present before
+        # and after (run 46135794572), so it is named here and held to "unchanged", not left unexplained.
+        want_users = sorted(set(expected.declared_users(root)) | OPERATOR_USERS)
         added, removed = sorted(set(after["users"]) - set(before["users"])), sorted(set(before["users"]) - set(after["users"]))
         print(f"     drift since the old release: users added {added or 'none'}, removed {removed or 'none'}")
         for u in sorted(set(before["grants"]) & set(after["grants"])):
@@ -546,9 +549,10 @@ def main():
                 ok = sorted(got) == sorted(want_grants[u])
                 check(ok, f"SHOW GRANTS FOR {u}: equals the checkout's fixture ({len(want_grants[u])} lines)"
                       + ("" if ok else f" (got {got}, want {want_grants[u]})"))
-            elif u == "default":
-                # Not declared by the chart (no users.default entry yet): the built-in, so it must not have moved.
-                check(after["grants"][u] == before["grants"][u], "SHOW GRANTS FOR default: unchanged (the chart declares no grants for it)")
+            elif u == "default" or u in OPERATOR_USERS:
+                # Not declared by the chart (the built-in, and the operator's own): they must not have moved.
+                check(u in before["grants"] and after["grants"][u] == before["grants"][u],
+                      f"SHOW GRANTS FOR {u}: unchanged (the chart declares no grants for it)")
             else:
                 # exec_reader: passwordless, so the fixture has no SHOW GRANTS for it; its rendered statement decides.
                 want_p, got_p = expected.declared_privileges(root, u), expected.lines_to_privileges(got)
