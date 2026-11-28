@@ -4,7 +4,8 @@
 # chart and sends a real gateway access-log record, audit records shaped as
 # krateo-platformops/audit emits them, and plain controller slog records (what core-provider and
 # every composition controller export once core-provider.otel.logs is on), then checks each one
-# lands in exactly the table it belongs in, or in neither.
+# lands in exactly the table it belongs in, or in neither. Child mode (a Deployment, no filelog) is
+# run too: there the controllers' plain records land in otel_logs, once.
 #
 # A separate workflow on purpose: lint.yaml is the org-wide canonical chart-repo lint.
 
@@ -17,6 +18,7 @@ on:
       - "tests/otlp-log-routing-docker.py"
       - "tests/fixtures/gateway-access-log.otlp.jsonl"
       - "tests/agentgateway_access_log_v16.py"
+      - "tests/fixtures/collector-child-values.yaml"
       - ".github/workflows/check-otlp-log-routing.yaml"
   push:
     branches: [main]
@@ -25,6 +27,7 @@ on:
       - "tests/otlp-log-routing-docker.py"
       - "tests/fixtures/gateway-access-log.otlp.jsonl"
       - "tests/agentgateway_access_log_v16.py"
+      - "tests/fixtures/collector-child-values.yaml"
   workflow_dispatch:
 
 permissions:

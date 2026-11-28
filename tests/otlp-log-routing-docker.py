@@ -21,6 +21,12 @@ checks run on what the collector writes:
   * plain slog records from core-provider and from a composition controller, and a `request`-scope
     record without a `gateway` field -> neither table.
 
+Child mode (opentelemetry-collector.mode: deployment, tests/fixtures/collector-child-values.yaml) is
+run too. It has no filelog, so a log an app sends over OTLP is in no other table: pipeline
+logs/otlp-pods takes what logs/audit and logs/gateway do not, and the plain slog records, which the
+daemonset sends nowhere, must each land in otel_logs exactly once, while the audit and gateway
+records land only where they did.
+
 Run: python3 tests/otlp-log-routing-docker.py [repo-root]
 Needs docker and helm. Exit 0 = all passed.
 """
@@ -45,6 +51,7 @@ from agentgateway_access_log_v16 import SCOPE_V16, convert_request  # noqa: E402
 
 CHART = "charts/otel-collector-daemonset"
 PIPES = ["logs/audit", "logs/gateway"]
+CHILD_VALUES = "tests/fixtures/collector-child-values.yaml"
 FAILS = []
 
 
@@ -58,21 +65,23 @@ def sh(*args, check=True, **kw):
     return subprocess.run(list(args), check=check, capture_output=True, text=True, **kw)
 
 
-def render(root):
-    sh("helm", "dependency", "build", str(root / CHART))
-    out = sh("helm", "template", "route", str(root / CHART), "-n", "krateo-system").stdout
+def render(root, child):
+    if not list((root / CHART / "charts").glob("opentelemetry-collector-*.tgz")):  # CI has none yet
+        sh("helm", "dependency", "build", str(root / CHART))
+    values = ["-f", str(root / CHILD_VALUES)] if child else []
+    out = sh("helm", "template", "route", str(root / CHART), "-n", "krateo-system", *values).stdout
     docs = [d for d in yaml.safe_load_all(out) if d]
     cm = next(d for d in docs if d["kind"] == "ConfigMap" and "relay" in d.get("data", {}))
-    ds = next(d for d in docs if d["kind"] == "DaemonSet")
+    ds = next(d for d in docs if d["kind"] == ("Deployment" if child else "DaemonSet"))
     return yaml.safe_load(cm["data"]["relay"]), ds["spec"]["template"]["spec"]["containers"][0]["image"]
 
 
-def test_config(relay):
+def test_config(relay, pipe_names):
     svc = relay["service"]["pipelines"]
-    for p in PIPES:
+    for p in pipe_names:
         if p not in svc:
             raise SystemExit(f"rendered config has no pipeline {p}")
-    pipes = {p: copy.deepcopy(svc[p]) for p in PIPES}
+    pipes = {p: copy.deepcopy(svc[p]) for p in pipe_names}
     for p in pipes.values():
         if p["receivers"] != ["otlp"]:
             raise SystemExit(f"expected an otlp-only logs pipeline, got receivers {p['receivers']}")
@@ -186,11 +195,13 @@ def read_full(path, tid):
     return None
 
 
-def main():
-    root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
-    relay, image = render(root)
-    cfg = test_config(relay)
-    cases = build_cases(root)
+def run(root, child):
+    print("--- " + ("child (deployment)" if child else "parent (daemonset)"))
+    relay, image = render(root, child)
+    cfg = test_config(relay, PIPES + (["logs/otlp-pods"] if child else []))
+    # In a child the records the daemonset sends nowhere (pods' own logs come by filelog there) land
+    # in otel_logs, once. Audit and gateway records are unchanged.
+    cases = [(t, r, want or ("logs" if child else None)) for t, r, want in build_cases(root)]
     work = pathlib.Path(tempfile.mkdtemp(prefix="otlproute-"))
     os.chmod(work, 0o755)
     (work / "out").mkdir(); os.chmod(work / "out", 0o777)
@@ -223,7 +234,8 @@ def main():
             got = [d for d, out in (("audit", audit), ("logs", logs)) if tid in out]
             check(got == ([want] if want else []), f"{tid}: lands in {got or 'neither table'}, want {want or 'neither table'}")
         check(len(audit) == sum(1 for c in cases if c[2] == "audit"), f"krateo_audit got exactly the audit records ({len(audit)})")
-        check(len(logs) == sum(1 for c in cases if c[2] == "logs"), f"otel_logs got exactly the gateway records ({len(logs)})")
+        check(len(logs) == sum(1 for c in cases if c[2] == "logs"),
+              f"otel_logs got exactly the records meant for it ({len(logs)}: " + ("gateway and app logs, each once" if child else "gateway") + ")")
         new = read_full(work / "out" / "logs.jsonl", "gateway-access-log-1.6")
         check(new is not None and new[0] == SCOPE_V16 and "client.address" in new[1] and "http.request.method" in new[1]
               and "src.addr" not in new[1] and "http.method" not in new[1],
@@ -234,6 +246,12 @@ def main():
             print(sh("docker", "logs", "--tail", "80", name, check=False).stderr[-6000:])
         sh("docker", "rm", "-f", name, check=False)
         shutil.rmtree(work, ignore_errors=True)
+
+
+def main():
+    root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+    for child in (False, True):
+        run(root, child)
     print(f"\n{len(FAILS)} failed")
     sys.exit(1 if FAILS else 0)
 

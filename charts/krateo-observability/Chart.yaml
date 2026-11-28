@@ -290,7 +290,16 @@ type: application
 # supersedes 0.1.58 before that rolls (one restart, not two). The render now fails if componentValues
 # puts any chart user's hash inline, so the installer must drop users.chops.password_sha256_hex in the
 # same change that pins 0.1.59.
-version: 0.1.59
+# 0.1.60: sre-clickhouse-disk-headroom reads ClickHouse's own figure for the free bytes of its data
+# filesystem (Metric clickhouse-disk-available, ClickHouseAsyncMetrics_FilesystemMainPathAvailableBytes)
+# instead of kubeletstats' k8s.volume.available on the claim, so a cluster with no kubelet access (a
+# child) has the alert too. Same bytes, so the 3 GiB threshold, the 15m interval and the runbook are
+# unchanged. The label pinning the claim is gone (one ClickHouse, one series). Metric
+# k8s-volume-available is no longer shipped: nothing else in this chart named it, and a child has no
+# source for it. A `below` alert also fires when the metric stops, which now includes ClickHouse not
+# answering. NEEDS otel-collector-daemonset 0.1.39, ROLLED FIRST: on an older collector the new
+# metric does not exist and the alert fires on the empty window.
+version: 0.1.60
 appVersion: "3.5.0"
 dependencies:
   - name: clickstack

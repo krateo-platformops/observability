@@ -300,6 +300,45 @@ opentelemetry-collector:
                 - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
                   target_label: job
 
+      # THE DISK-HEADROOM SOURCE (0.1.39), the same in a parent and in a child. ClickHouse serves its
+      # own metrics on :9363 (the operator's `prometheus` port, enabled already), and this reads two
+      # of them: the free and total bytes of the filesystem the data lives on. The alert
+      # sre-clickhouse-disk-headroom (krateo-observability 0.1.60) reads the free one. It replaces
+      # kubeletstats' k8s.volume.available, which needs the node's kubelet: a child has none. Same
+      # bytes (statfs of the same filesystem), so the 3 GiB threshold did not move. NOT the Disk*
+      # rows (DiskAvailable, DiskUsed, ...): in system.asynchronous_metrics they read nan, and on
+      # :9363 they carry a disk label this alert would have to pin; the Filesystem* ones are plain.
+      # Only those two are kept (metric_relabel_configs), so this does not write thousands of
+      # ClickHouse series into the ClickHouse it watches. The receiver adds its own up and scrape_*
+      # series on top (metric_relabel_configs does not apply to those).
+      # Discovery: pods of this namespace with the operator's server role label, and only the
+      # container port named `prometheus`. A daemonset agent runs on every node, so the selector
+      # also pins the node (the agentgateway job does the same): only the agent on ClickHouse's own
+      # node scrapes it, once, instead of every agent writing the same sample. A child's single
+      # collector has no node variable, so the template drops that field (templates/_collector-config.tpl).
+      # If ClickHouse stops answering the metric stops, and the alert fires on that too.
+      prometheus/clickhouse:
+        config:
+          scrape_configs:
+            - job_name: clickhouse
+              scrape_interval: 60s
+              kubernetes_sd_configs:
+                - role: pod
+                  namespaces:
+                    own_namespace: true
+                  selectors:
+                    - role: pod
+                      field: spec.nodeName=${env:K8S_NODE_NAME}
+                      label: clickhouse.com/role=clickhouse-server
+              relabel_configs:
+                - source_labels: [__meta_kubernetes_pod_container_port_name]
+                  regex: prometheus
+                  action: keep
+              metric_relabel_configs:
+                - source_labels: [__name__]
+                  regex: ClickHouseAsyncMetrics_FilesystemMainPath(Available|Total)Bytes
+                  action: keep
+
     processors:
       transform:
         # error_mode:ignore so a redaction statement on an absent attribute key never fails the
@@ -1104,6 +1143,13 @@ opentelemetry-collector:
         # collector itself, and the receiver already names the namespace and pod from discovery.
         metrics/agentgateway:
           receivers: [prometheus/agentgateway]
+          processors: [memory_limiter, batch]
+          exporters: [clickhouse]
+        # The ClickHouse disk-headroom metrics (0.1.39), see prometheus/clickhouse above. Its own
+        # pipeline, like the gateways', so it cannot change the `metrics` pipeline, and no
+        # k8sattributes: the receiver names the namespace and pod from discovery.
+        metrics/clickhouse:
+          receivers: [prometheus/clickhouse]
           processors: [memory_limiter, batch]
           exporters: [clickhouse]
 

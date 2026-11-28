@@ -102,9 +102,89 @@ upstream rendered the ConfigMap.
 {{- end }}
 {{- if eq $ctx.Values.mode "daemonset" }}
 {{- include "opentelemetry-collector.daemonsetConfig" $ctx }}
+{{- else if eq $ctx.Values.mode "deployment" }}
+{{- include "otel-collector-daemonset.childConfig" $ctx }}
 {{- else }}
 {{- include "opentelemetry-collector.deploymentConfig" $ctx }}
 {{- end }}
+{{- end }}
+
+{{/*
+CHILD MODE: opentelemetry-collector.mode: deployment. For a cluster that cannot run the daemonset: a
+vcluster child enforces the baseline Pod Security Standard, which refuses hostPath volumes and
+hostPorts, and the node's /var/log/pods and kubelet would show it other tenants' data anyway. One
+Deployment takes OTLP and writes it to the child's own ClickHouse; nothing reads a node. Selected by
+the mode alone, so no new value exists for a schema default to stamp into an existing instance. The
+daemonset render does not pass through here.
+
+It is built from upstream's own deploymentConfig, then pruned HERE rather than in values.yaml:
+removing a key needs a null, and Helm 4.2 and later drop a parent chart's own nulls (see the top of
+this file). Lists replace wholesale, so a pipeline's receivers could not be trimmed from values
+either.
+
+1. The host presets must be off, or this fails the render: upstream adds their hostPath volumes in
+   whatever the mode, and filelog, hostmetrics and kubeletstats read the node.
+2. Receivers filelog, hostmetrics and kubeletstats are removed, and so is every pipeline left with
+   no receiver (`logs`, which only filelog fed). `metrics` keeps otlp.
+3. ${env:K8S_NODE_NAME} is set only by the daemonset's presets, so a Deployment has none: a
+   kubernetes_sd_configs selector `field: spec.nodeName=${env:K8S_NODE_NAME}` is removed from every
+   prometheus receiver (it scoped each agent to the pods on its own node; one collector serves the
+   whole child), and the render fails if a reference to it is still left. upstream's k8sattributes
+   preset adds its own node filter only in daemonset mode, so none is pruned here.
+4. A pipeline `logs/otlp-pods` is added. In the daemonset, filelog already collects every pod's
+   stdout, which is why logs/gateway keeps only the gateway's access log and a producer's other
+   OTLP logs land nowhere (0.1.30). A child has no filelog, so the same rule would drop them, and a
+   process that logs over OTLP (core-provider with otel.logs on) would reach no table. This
+   pipeline keeps what logs/audit and logs/gateway do not take: filter/otlp-pods drops the audit
+   records (event.name audit) and the gateway's access log, so nothing is written twice.
+   `transform` stays, for the JWT redaction every log pipeline here carries.
+What stays: the otlp receiver and every pipeline it feeds, including logs/audit and its
+clickhouse/audit exporter, which is what creates krateo_audit in the child.
+*/}}
+{{- define "otel-collector-daemonset.childConfig" -}}
+{{- $presets := .Values.presets | default dict }}
+{{- $on := list }}
+{{- range $p := list "logsCollection" "hostMetrics" "kubeletMetrics" }}
+  {{- if (index $presets $p | default dict).enabled }}{{ $on = append $on $p }}{{ end }}
+{{- end }}
+{{- if $on }}
+{{- fail (printf "opentelemetry-collector.mode is deployment (a child cluster), and presets %s are enabled. They read the node: hostPath volumes, hostmetrics, kubeletstats, which a child's baseline Pod Security Standard refuses. Set opentelemetry-collector.presets.<name>.enabled to false for logsCollection, hostMetrics and kubeletMetrics (and opentelemetry-collector.clusterRole.rules to [] to drop nodes/proxy)." (join ", " $on)) }}
+{{- end }}
+{{- $cfg := include "opentelemetry-collector.deploymentConfig" . | fromYaml }}
+{{- if hasKey $cfg "Error" }}{{ fail (printf "child mode: the collector config does not parse: %s" $cfg.Error) }}{{ end }}
+{{- $hostReceivers := list "filelog" "hostmetrics" "kubeletstats" }}
+{{- $receivers := $cfg.receivers | default dict }}
+{{- range $r := $hostReceivers }}{{ $_ := unset $receivers $r }}{{ end }}
+{{- $pipelines := $cfg.service.pipelines | default dict }}
+{{- range $name, $pipeline := $pipelines }}
+  {{- $left := list }}
+  {{- range $r := ($pipeline.receivers | default list) }}
+    {{- if not (has (first (splitList "/" $r)) $hostReceivers) }}{{ $left = append $left $r }}{{ end }}
+  {{- end }}
+  {{- if $left }}{{ $_ := set $pipeline "receivers" $left }}{{ else }}{{ $_ := unset $pipelines $name }}{{ end }}
+{{- end }}
+{{- range $id, $receiver := $receivers }}
+  {{- if and (hasPrefix "prometheus" $id) (kindIs "map" $receiver) }}
+  {{- range $job := (($receiver.config | default dict).scrape_configs | default list) }}
+    {{- range $sd := ($job.kubernetes_sd_configs | default list) }}
+      {{- range $sel := ($sd.selectors | default list) }}
+        {{- if contains "${env:K8S_NODE_NAME}" ($sel.field | default "") }}{{ $_ := unset $sel "field" }}{{ end }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+  {{- end }}
+{{- end }}
+{{- $processors := $cfg.processors | default dict }}
+{{- $_ := set $processors "filter/otlp-pods" (dict "error_mode" "ignore" "logs" (dict "log_record" (list
+      "attributes[\"event.name\"] == \"audit\""
+      "(instrumentation_scope.name == \"request\" or instrumentation_scope.name == \"agentgateway.access\") and attributes[\"gateway\"] != nil"))) }}
+{{- $_ := set $cfg "processors" $processors }}
+{{- $_ := set $pipelines "logs/otlp-pods" (dict "receivers" (list "otlp") "processors" (list "memory_limiter" "filter/otlp-pods" "k8sattributes" "transform" "batch") "exporters" (list "clickhouse")) }}
+{{- $out := toYaml $cfg }}
+{{- if regexMatch "\\$\\{env:K8S_NODE_NAME\\}" $out }}
+{{- fail "child mode: the collector config still references ${env:K8S_NODE_NAME}, which only the daemonset sets. Remove the reference (a node-scoped selector or endpoint) from the values." }}
+{{- end }}
+{{- $out }}
 {{- end }}
 
 {{/*
