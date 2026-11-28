@@ -67,7 +67,11 @@ type: application
 # whole. A degraded pass ends OK, so no other rule keeps it. must_not_connect errors (kept by
 # error-status); conflict and ok stay sampled. Matches nothing until a provider enables credential-use.
 # tests/tailsampling-docker.py.
-version: 0.1.18
+# 0.1.19: comment-only: the credentialuse-degraded comment listed unheld reasons (Missing,
+# NotConsented, ConsentWithdrawn, ConsentUnreadable) as degraded; they are outcome ok. It now names
+# the four cases that degrade (Deleting, a refused finalizer patch, Announce, Disown), checked
+# against provider-runtime v1.22.0. The policy and the render are unchanged.
+version: 0.1.19
 # The collector this chart renders: the upstream chart's own appVersion picks the image tag.
 # Keep equal to otel-collector-daemonset's appVersion, so both tiers run the same build.
 appVersion: "0.158.0"
