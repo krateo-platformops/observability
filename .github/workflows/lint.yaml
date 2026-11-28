@@ -33,9 +33,13 @@ jobs:
       - name: Lint, validate schema, render
         run: |
           set -euo pipefail
+          # measured 2026-11-28: 9 chart(s) (clickhouse-operator, krateo-audit-worm, krateo-observability, krateo-slo-rollup, krateo-sse-proxy, mongodb-operator, otel-collector-daemonset, otel-collector-deployment, otel-collector-tailsampling); lower only when a chart is deliberately removed
+          MIN_CHARTS=9
           # All first-class charts (chart/, crd-chart/, charts/*). Vendored dependency
           # charts live at depth >=4 (e.g. charts/x/charts/dep), so -maxdepth 3 excludes them.
           mapfile -t dirs < <(find . -maxdepth 3 -name Chart.yaml -printf '%h\n' | sort -u)
+          if [ "${#dirs[@]}" -lt "${MIN_CHARTS}" ]; then echo "::error::examined ${#dirs[@]} chart(s), expected at least ${MIN_CHARTS}"; exit 1; fi
+          echo "examined ${#dirs[@]} chart(s): ${dirs[*]}"
           fail=0
           for dir in "${dirs[@]}"; do
             echo "::group::${dir}"
@@ -46,7 +50,8 @@ jobs:
                 && echo "values.schema.json: valid JSON" || { echo "values.schema.json: INVALID"; fail=1; }
             fi
             if grep -q '^dependencies:' "${dir}/Chart.yaml"; then
-              helm dependency build "${dir}" >/dev/null 2>&1 || helm dependency update "${dir}" >/dev/null 2>&1 || true
+              helm dependency build "${dir}" >/dev/null 2>&1 || helm dependency update "${dir}" >/dev/null 2>&1 \
+                || { echo "${dir}: chart dependencies could not be fetched"; fail=1; }
             fi
             helm lint "${dir}" || fail=1
             helm template smoke "${dir}" >/dev/null || fail=1
